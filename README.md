@@ -4,13 +4,14 @@
 
 ---
 
-CardGoblin is a powerful, browser-based tool for board game designers to create professional-quality cards for print-and-play games. It combines an intuitive scripting language with a built-in spreadsheet-like cell manager to streamline card generation and customization. Key features include:
+CardGoblin is a powerful, browser-based tool for board game designers to create professional-quality cards for games. It combines an intuitive scripting language with a built-in spreadsheet-like cell manager to streamline card generation and customization. Key features include:
 
 - A simple, human-readable scripting language with support for attributes, conditional logic, and loops.
 - A built-in cell manager for organizing and referencing data rows, enabling dynamic card creation.
 - Enum-based validation for consistent data references and error prevention.
 - Real-time previews and PDF export for high-quality print-ready outputs.
-  Whether you're a seasoned designer or new to game creation, our tool simplifies the process so you can focus on bringing your ideas to life.
+
+Whether you're a seasoned designer or new to game creation, our tool simplifies the process so you can focus on bringing your ideas to life.
 
 ---
 
