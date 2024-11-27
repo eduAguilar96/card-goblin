@@ -1,36 +1,64 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# CardGoblin
 
-## Getting Started
+![logo](https://i.imgur.com/p2Fph5X.png)
 
-First, run the development server:
+---
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+CardGoblin is a powerful, browser-based tool for board game designers to create professional-quality cards for print-and-play games. It combines an intuitive scripting language with a built-in spreadsheet-like cell manager to streamline card generation and customization. Key features include:
+
+- A simple, human-readable scripting language with support for attributes, conditional logic, and loops.
+- A built-in cell manager for organizing and referencing data rows, enabling dynamic card creation.
+- Enum-based validation for consistent data references and error prevention.
+- Real-time previews and PDF export for high-quality print-ready outputs.
+  Whether you're a seasoned designer or new to game creation, our tool simplifies the process so you can focus on bringing your ideas to life.
+
+---
+
+![ui-image](https://i.imgur.com/yB7G85e.png)
+
+---
+
 ```
+Enum: "Suit"
+  case Rock
+  case Paper
+  case Scissors
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Template: "UserDefinedCardFront
+  Rectangle: "Banner"
+    x: 0
+    y: 0
+    width: full
+    height: 10
+    color: if [current_suit] == Rock then grey
+            else if [current_suit] == Paper then yellow
+            else purple
+  Text:
+    x: middle
+    y: 5
+    text: [name]
+  Text:
+    x: 16
+    y: 5
+    text: [cost]
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Template: "UserDefinedCardBack
+  Rectangle: "Back"
+    x: 0
+    y: 0
+    width: full
+    height: full
+    color: white
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Card:
+  size: square
+  loop: Suit as current_suit
+  cardCount: [card_count]
+  x_units: 20
+  y_units: auto
+  Front:
+    UserDefinedCardFront
+  Back:
+    UserDefinedCardBack
 
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+```
