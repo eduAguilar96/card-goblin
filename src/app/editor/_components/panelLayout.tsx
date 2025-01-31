@@ -14,7 +14,7 @@ export default function PanelLayout() {
           <PanelGroup direction="horizontal">
             {/* Code Editor */}
             <Panel
-              className="p-4 bg-gray-800 border-r border-gray-700"
+              className="bg-gray-800 border-r border-gray-700"
               defaultSize={50}
             >
               <WindowCode />
