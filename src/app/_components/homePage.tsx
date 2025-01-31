@@ -24,7 +24,7 @@ export default function HomePage() {
             Documentation
           </a>
           <a
-            href="#editor"
+            href="editor"
             className="hidden lg:block bg-white text-teal-600 px-4 py-2 rounded-xl font-semibold hover:bg-gray-200"
           >
             Try the Editor
@@ -49,7 +49,7 @@ export default function HomePage() {
           cards with ease.
         </p>
         <a
-          href="#editor"
+          href="editor"
           className="mt-6 bg-white text-teal-600 px-6 py-3 rounded-xl text-lg font-semibold shadow-lg hover:bg-gray-200"
         >
           Start Editing
@@ -65,7 +65,7 @@ export default function HomePage() {
           real-time editing and automation features.
         </p>
         <a
-          href="#editor"
+          href="editor"
           className="mt-6 bg-teal-600 text-white px-6 py-3 rounded-xl text-lg font-semibold shadow-lg hover:bg-teal-800"
         >
           Try it Now
