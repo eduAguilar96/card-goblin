@@ -3,7 +3,7 @@
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import WindowCode from "@/app/editor/_components/windowCode";
 import WindowPreview from "@/app/editor/_components/windowPreview";
-import WindowSpredsheet from "@/app/editor/_components/windowSpredsheet";
+import WindowSpreadsheet from "@/app/editor/_components/windowSpreadsheet";
 
 export default function PanelLayout() {
   return (
@@ -35,7 +35,7 @@ export default function PanelLayout() {
           className="p-4 bg-gray-800 border-t border-gray-700"
           defaultSize={30}
         >
-          <WindowSpredsheet />
+          <WindowSpreadsheet />
         </Panel>
       </PanelGroup>
     </div>

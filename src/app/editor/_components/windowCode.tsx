@@ -16,6 +16,7 @@ export default function WindowCode() {
           fontSize: 14,
           minimap: { enabled: false },
           automaticLayout: true,
+          scrollBeyondLastLine: false, // Prevents unnecessary scrolling
         }}
       />
     </div>
