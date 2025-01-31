@@ -2,15 +2,20 @@ import Image from "next/image";
 
 export default function HomePage() {
   return (
-    <div className="min-h-screen flex flex-col bg-gradient-to-b from-gray-800 to-teal-300 text-white">
+    <div className="min-h-screen flex flex-col bg-gradient-to-b from-gray-900 to-teal-400 text-white">
       {/* Navbar */}
       <nav className="w-full flex justify-between items-center px-6 max-w-7xl mx-auto h-20">
-        <Image
-          src="/card_goblin_logo_simple_2.svg"
-          alt="CardGoblin logomark"
-          width={64}
-          height={64}
-        />
+        <div className="flex flex-row items-center gap-4">
+          <Image
+            src="/card_goblin_logo_simple_2.svg"
+            alt="CardGoblin logomark"
+            width={64}
+            height={64}
+          />
+          <h1 className="hidden lg:block text-3xl font-extrabold tracking-tight">
+            Card Goblin
+          </h1>
+        </div>
         <div className="flex space-x-6 items-center">
           <a href="#features" className="hover:underline">
             Blog
@@ -20,7 +25,7 @@ export default function HomePage() {
           </a>
           <a
             href="#editor"
-            className="bg-white text-teal-600 px-4 py-2 rounded-xl font-semibold hover:bg-gray-200"
+            className="hidden lg:block bg-white text-teal-600 px-4 py-2 rounded-xl font-semibold hover:bg-gray-200"
           >
             Try the Editor
           </a>
@@ -54,7 +59,7 @@ export default function HomePage() {
       {/* Info & Call to Action */}
       <section className="bg-white text-gray-900 p-12 flex flex-col items-center text-center">
         <h2 className="text-3xl font-bold">Why Use Our Editor?</h2>
-        <p className="max-w-3xl mt-4 text-lg">It’s and always will be FREE</p>
+        <p className="max-w-3xl mt-4 text-lg">It’s FREE</p>
         <p className="max-w-3xl mt-4 text-lg">
           but also, simplify your board game design process with our intuitive,
           real-time editing and automation features.
