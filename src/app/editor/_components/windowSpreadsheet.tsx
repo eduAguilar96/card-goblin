@@ -1,35 +1,58 @@
 import { useState } from "react";
-import DataGrid from "react-data-grid";
+import Spreadsheet from "react-spreadsheet";
 
 export default function WindowSpreadsheet() {
-  const [rows, setRows] = useState(
-    new Array(100).fill(null).map((_, index) => ({
-      id: index + 1,
-      name: "",
-      cost: "",
-      type: "",
-    }))
-  );
+  const [numRows, setNumRows] = useState(2);
+  const [rowLabels, setRowLabels] = useState(["Card 1", "Card 2"]);
+  const [numCols, setNumCols] = useState(2);
+  const [columnLabels, setColumnLabels] = useState(["Name", "Suit"]);
+  const [data, setData] = useState([
+    [{ value: "Vanilla" }, { value: "Chocolate" }],
+    [{ value: "Strawberry" }, { value: "Cookies" }],
+  ]);
 
-  const columns = [
-    { key: "id", name: "ID", width: 50 },
-    { key: "name", name: "Name", editable: true },
-    { key: "cost", name: "Cost", editable: true },
-    { key: "type", name: "Type", editable: true },
-  ];
+  const addColumn = () => {
+    const newNumCols = numCols + 1;
+    setNumCols(newNumCols);
+    const newData = data.map((row) => {
+      const newRow = [...row];
+      newRow.push({ value: "" });
+      return newRow;
+    });
+    const newColLabel = `Column ${newNumCols}`;
+    setColumnLabels([...columnLabels, newColLabel]);
+    setData(newData);
+  };
 
+  const addRow = () => {
+    // Logic to add a row
+    const newNumRows = numRows + 1;
+    setNumRows(newNumRows);
+    const newRow = Array(numCols).fill({ value: "" });
+    const newData = [...data, newRow];
+    const newRowLabel = `Card ${newNumRows}`;
+    setRowLabels([...rowLabels, newRowLabel]);
+    setData(newData);
+  };
   return (
-    <div className="h-full w-full bg-gray-800 p-2 overflow-auto">
-      <div className="border border-gray-700 rounded-md shadow-lg">
-        <DataGrid
-          columns={columns}
-          rows={rows}
-          onRowsChange={setRows}
-          style={{ height: "100%", width: "100%" }}
-          rowHeight={30}
-          className="rdg-dark"
-        />
-      </div>
+    <div className="relative">
+      <Spreadsheet
+        data={data}
+        columnLabels={columnLabels}
+        rowLabels={rowLabels}
+      />
+      <button
+        className="absolute top-0 right-0 m-2 p-2 bg-blue-500 text-white rounded"
+        onClick={addColumn}
+      >
+        +
+      </button>
+      <button
+        className="absolute bottom-0 left-0 m-2 p-2 bg-green-500 text-white rounded"
+        onClick={addRow}
+      >
+        +
+      </button>
     </div>
   );
 }
