@@ -14,45 +14,50 @@ export default function WindowSpreadsheet() {
   const addColumn = () => {
     const newNumCols = numCols + 1;
     setNumCols(newNumCols);
-    const newData = data.map((row) => {
-      const newRow = [...row];
-      newRow.push({ value: "" });
-      return newRow;
-    });
-    const newColLabel = `Column ${newNumCols}`;
-    setColumnLabels([...columnLabels, newColLabel]);
+    const newData = data.map((row) => [...row, { value: "" }]);
     setData(newData);
+    setColumnLabels([...columnLabels, `Column ${newNumCols}`]);
   };
 
   const addRow = () => {
-    // Logic to add a row
     const newNumRows = numRows + 1;
     setNumRows(newNumRows);
     const newRow = Array(numCols).fill({ value: "" });
-    const newData = [...data, newRow];
-    const newRowLabel = `Card ${newNumRows}`;
-    setRowLabels([...rowLabels, newRowLabel]);
-    setData(newData);
+    setData([...data, newRow]);
+    setRowLabels([...rowLabels, `Card ${newNumRows}`]);
   };
+
   return (
-    <div className="relative">
-      <Spreadsheet
-        data={data}
-        columnLabels={columnLabels}
-        rowLabels={rowLabels}
-      />
-      <button
-        className="absolute top-0 right-0 m-2 p-2 bg-blue-500 text-white rounded"
-        onClick={addColumn}
-      >
-        +
-      </button>
-      <button
-        className="absolute bottom-0 left-0 m-2 p-2 bg-green-500 text-white rounded"
-        onClick={addRow}
-      >
-        +
-      </button>
+    // Full-screen container that scrolls when its inner content grows larger than the viewport.
+    <div className="w-screen h-screen overflow-auto p-4 bg-gray-900">
+      {/* The inline-block container will expand with its content (the spreadsheet and buttons) */}
+      <div className="inline-block">
+        {/* Row containing the spreadsheet (on the left) and the add‑column button (to its right) */}
+        <div className="flex items-start">
+          <div className="inline-block">
+            <Spreadsheet
+              data={data}
+              columnLabels={columnLabels}
+              rowLabels={rowLabels}
+            />
+          </div>
+          <button
+            onClick={addColumn}
+            className="w-10 h-10 ml-4 flex items-center justify-center bg-gray-700 text-white rounded-full hover:bg-gray-600"
+          >
+            +
+          </button>
+        </div>
+        {/* Add‑row button placed below the spreadsheet */}
+        <div className="mt-4">
+          <button
+            onClick={addRow}
+            className="w-10 h-10 flex items-center justify-center bg-gray-700 text-white rounded-full hover:bg-gray-600"
+          >
+            +
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

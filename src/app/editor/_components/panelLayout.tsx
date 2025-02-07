@@ -31,10 +31,7 @@ export default function PanelLayout() {
         </Panel>
         <PanelResizeHandle className="h-2 bg-gray-600 hover:bg-gray-500 cursor-row-resize" />
         {/* CSV Editor */}
-        <Panel
-          className="p-4 bg-gray-800 border-t border-gray-700"
-          defaultSize={30}
-        >
+        <Panel defaultSize={30}>
           <WindowSpreadsheet />
         </Panel>
       </PanelGroup>
