@@ -17,10 +17,13 @@ export default function HomePage() {
           </h1>
         </div>
         <div className="flex space-x-6 items-center">
-          <a href="#features" className="hover:underline">
-            Blog
-          </a>
-          <a href="#contact" className="hover:underline">
+          {/* Task 7: the dead "#features"/"#contact" anchors are gone — Blog
+              removed (none exists), Documentation points at the project
+              README until a docs site exists (M3). */}
+          <a
+            href="https://github.com/eduAguilar96/card-goblin#readme"
+            className="hover:underline"
+          >
             Documentation
           </a>
           <a
@@ -71,6 +74,25 @@ export default function HomePage() {
           Try it Now
         </a>
       </section>
+
+      {/* Footer */}
+      <footer className="bg-gray-900 text-gray-400 text-sm text-center p-4">
+        Icons by{" "}
+        <a
+          href="https://speakthesky.itch.io/typeface-dicier"
+          className="underline hover:text-white"
+        >
+          Dicier
+        </a>{" "}
+        by Speak the Sky, licensed under{" "}
+        <a
+          href="https://creativecommons.org/licenses/by/4.0/"
+          className="underline hover:text-white"
+        >
+          CC BY 4.0
+        </a>
+        .
+      </footer>
     </div>
   );
 }
