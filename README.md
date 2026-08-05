@@ -63,3 +63,13 @@ Card:
     UserDefinedCardBack
 
 ```
+
+> Note: the snippet above is the original vision sketch. The current, authoritative
+> language specification lives in [docs/DESIGN.md](docs/DESIGN.md).
+
+---
+
+## Credits
+
+Game icons: [Dicier](https://speakthesky.itch.io/typeface-dicier) by Speak the Sky,
+licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
