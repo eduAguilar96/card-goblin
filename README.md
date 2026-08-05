@@ -69,6 +69,17 @@ Card:
 
 ---
 
+## Documentation
+
+- **[User Guide](docs/user-guide.md)** — how to use the editor and write Goblin
+  script: shapes, expressions, card sizes, colors, icons, and what the errors mean.
+- **[Developer Guide](docs/development.md)** — setup, commands, code map, testing
+  approach, and the manual smoke-test walkthrough.
+- **[Design Document](docs/DESIGN.md)** — the full language spec, architecture, and
+  roadmap.
+
+---
+
 ## Credits
 
 Game icons: [Dicier](https://speakthesky.itch.io/typeface-dicier) by Speak the Sky,
