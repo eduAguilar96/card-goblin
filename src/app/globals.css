@@ -2,6 +2,22 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Dicier Flat-Dark (DESIGN.md ⚑10, ◆28) — the icon font for `Icon` elements,
+   referenced by family name from CardSVG's inline SVG <text> shapes. The
+   .woff2 ships from src/app/fonts/dicier/ with its LICENSE.txt adjacent
+   (CC BY 4.0 requires distributing the license with the font, §9).
+   `font-display: block`: while the font loads, a fallback face would show the
+   raw ligature code text for EVERY icon — raw text is D005's deliberate
+   unknown-code indicator (§3.8), so a global flash of it would read as a wall
+   of errors. Better to keep icons invisible for the brief load. */
+@font-face {
+  font-family: "Dicier";
+  src: url("./fonts/dicier/Dicier-Flat-Dark.woff2") format("woff2");
+  font-weight: normal;
+  font-style: normal;
+  font-display: block;
+}
+
 :root {
   --background: #ffffff;
   --foreground: #171717;
