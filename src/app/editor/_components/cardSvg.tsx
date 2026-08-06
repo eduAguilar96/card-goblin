@@ -17,7 +17,13 @@
  * deliberately ignored: equal hashes mean equal pixels. Never mutate a shape.
  */
 
-import { memo, type CSSProperties, type ReactElement } from "react";
+import {
+  memo,
+  type CSSProperties,
+  type ReactElement,
+  type ReactNode,
+  type SVGProps,
+} from "react";
 import type { DataDiagnostic, Shape, TextAnchor } from "@/lib/lang";
 
 // ---------------------------------------------------------------------------
@@ -231,6 +237,51 @@ function renderErrorFace(
 }
 
 // ---------------------------------------------------------------------------
+// Face markup (shared with the PDF rasterizer — M2 §6.1)
+// ---------------------------------------------------------------------------
+
+export interface CardFaceSvgProps {
+  xUnits: number;
+  yUnits: number;
+  face: readonly Shape[];
+  error?: CardSvgError;
+  /** Extra attributes on the `<svg>` element. The preview passes its CSS
+   * classes; the PDF rasterizer passes xmlns + pixel width/height so the
+   * serialized markup is a standalone SVG document. */
+  svgAttributes?: SVGProps<SVGSVGElement>;
+  /** Rendered before the shapes — the rasterizer injects a `<style>` block
+   * with embedded fonts here. The preview passes nothing. */
+  children?: ReactNode;
+}
+
+/**
+ * ONE card face as a bare `<svg>` — the single source of shape markup for
+ * both the on-screen preview (CardSVG below) and the PDF rasterizer
+ * (pdfRaster.tsx), which serializes exactly this element. §6.1's "fonts/
+ * ligatures match the preview exactly" hinges on the two paths sharing this
+ * function — never duplicate the shape rendering.
+ */
+export function CardFaceSvg({
+  xUnits,
+  yUnits,
+  face,
+  error,
+  svgAttributes,
+  children,
+}: CardFaceSvgProps): ReactElement {
+  return (
+    <svg
+      viewBox={`0 0 ${xUnits} ${yUnits}`}
+      preserveAspectRatio="none"
+      {...svgAttributes}
+    >
+      {children}
+      {error ? renderErrorFace(xUnits, yUnits, error) : face.map(renderShape)}
+    </svg>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
@@ -251,14 +302,13 @@ function CardSvgImpl({
       className="overflow-hidden rounded-md border border-gray-600 bg-white"
       style={{ aspectRatio: `${widthMm} / ${heightMm}` }}
     >
-      <svg
-        viewBox={`0 0 ${xUnits} ${yUnits}`}
-        preserveAspectRatio="none"
-        className="block h-full w-full"
-        role="img"
-      >
-        {error ? renderErrorFace(xUnits, yUnits, error) : face.map(renderShape)}
-      </svg>
+      <CardFaceSvg
+        xUnits={xUnits}
+        yUnits={yUnits}
+        face={face}
+        error={error}
+        svgAttributes={{ className: "block h-full w-full", role: "img" }}
+      />
     </div>
   );
 }

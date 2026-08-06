@@ -477,6 +477,35 @@ bleed), `Image` element (URL-sourced), Monaco autocomplete (columns, enum cases,
 icon codes), localStorage autosave, Dicier `style:` property + GSUB-derived
 exhaustive code list, custom card sizes, compile in a worker if needed.
 
+### 6.1 PDF export — agreed spec (2026-08-05)
+
+- **Trigger:** "Export PDF" button in the editor → modal with options; produces a
+  downloaded .pdf (pdf-lib, client-side — the one sanctioned new dependency).
+- **Modal options (defaults bold):** page size **Letter** (215.9×279.4 mm) / A4
+  (210×297 mm); outer margin mm (**10**); card spacing mm (**0**); cut lines
+  **dotted**/off/red/bold; cross marks **off**/dotted/red/bold; backs
+  **duplex**/none/separate.
+- **Engine:** each *distinct* card face (by contentHash) is rasterized at 300 DPI
+  through the browser's own SVG renderer (canvas → PNG) so fonts/ligatures match the
+  preview exactly; each distinct image is embedded once and reused. Page frame,
+  margins, and guides are native PDF vectors.
+- **Layout:** decks never share pages. cols = ⌊(pageW − 2·margin + spacing) /
+  (cardW + spacing)⌋, rows analog; row-major fill; a deck whose card can't fit 1×1
+  inside the margins is a modal-surfaced error. **Duplex:** after each front page,
+  a back page with columns mirrored (col′ = cols−1−col, rows unchanged — long-edge
+  double-sided alignment). **Separate:** all back pages appended after all front
+  pages, same mirroring. **None:** fronts only.
+- **Guides:** cut lines run edge-to-edge across the page at every card boundary
+  (spacing 0 → one shared line; spacing > 0 → a line along each edge of the gap).
+  Cross marks are ~3 mm crop crosses at card corners only. Styles: dotted = 0.2 mm
+  dotted black; red = 0.2 mm solid #cc0000; bold = 0.5 mm solid black. Guides render
+  on back pages too (mirrored grid keeps them aligned).
+- **Error/placeholder cards are skipped**; the modal warns "N cards with errors will
+  be skipped" before export. Copy counts are honored (a count-2 card prints twice).
+- Layout math and guide-segment computation live as pure, unit-tested functions;
+  the canvas/pdf-lib assembly is a thin injected layer (pdf assembly itself is
+  node-testable with stub images).
+
 ## 7. Milestone 3
 
 Projects & persistence (file export/import of `{code, sheets}`, then accounts/backend),

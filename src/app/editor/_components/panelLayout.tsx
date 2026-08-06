@@ -24,7 +24,7 @@ export default function PanelLayout() {
               <PanelResizeHandle className="w-2 bg-gray-600 hover:bg-gray-500 cursor-col-resize" />
               {/* Card Preview */}
               <Panel
-                className="p-4 flex justify-center items-center bg-gray-900"
+                className="flex justify-center items-center bg-gray-900"
                 defaultSize={50}
               >
                 <WindowPreview />

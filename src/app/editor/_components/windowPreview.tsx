@@ -29,6 +29,7 @@ import {
   type LastGoodModel,
 } from "@/app/editor/_store/editorStore";
 import DeckSection, { type CardSide } from "@/app/editor/_components/deckSection";
+import ExportPdfButton from "@/app/editor/_components/pdfExportModal";
 import { layoutDecks } from "@/app/editor/_components/previewVirtual";
 
 /** Zoom = card width in px (SVG scales freely via viewBox). */
@@ -124,6 +125,11 @@ export function PreviewContent({ lastGood, isStale }: PreviewContentProps): Reac
             className="w-32 accent-gray-400"
           />
         </label>
+        {/* M2 §6.1: export lives in the preview toolbar — it prints what the
+            preview shows (see pdfExportModal.tsx for the placement note). */}
+        <div className="ml-auto">
+          <ExportPdfButton />
+        </div>
       </div>
 
       {isStale && (
