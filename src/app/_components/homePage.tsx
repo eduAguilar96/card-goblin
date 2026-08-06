@@ -1,4 +1,5 @@
 import Image from "next/image";
+import Link from "next/link";
 
 export default function HomePage() {
   return (
@@ -17,15 +18,11 @@ export default function HomePage() {
           </h1>
         </div>
         <div className="flex space-x-6 items-center">
-          {/* Task 7: the dead "#features"/"#contact" anchors are gone — Blog
-              removed (none exists), Documentation points at the project
-              README until a docs site exists (M3). */}
-          <a
-            href="https://github.com/eduAguilar96/card-goblin#readme"
-            className="hover:underline"
-          >
+          {/* Documentation now points at the in-app wiki (/docs), which renders
+              the markdown under docs/wiki/ — same files GitHub readers see. */}
+          <Link href="/docs" className="hover:underline">
             Documentation
-          </a>
+          </Link>
           <a
             href="editor"
             className="hidden lg:block bg-white text-teal-600 px-4 py-2 rounded-xl font-semibold hover:bg-gray-200"
@@ -51,12 +48,20 @@ export default function HomePage() {
           A powerful tool for board game designers to create print-and-play
           cards with ease.
         </p>
-        <a
-          href="editor"
-          className="mt-6 bg-white text-teal-600 px-6 py-3 rounded-xl text-lg font-semibold shadow-lg hover:bg-gray-200"
-        >
-          Start Editing
-        </a>
+        <div className="mt-6 flex flex-wrap items-center justify-center gap-4">
+          <a
+            href="editor"
+            className="bg-white text-teal-600 px-6 py-3 rounded-xl text-lg font-semibold shadow-lg hover:bg-gray-200"
+          >
+            Start Editing
+          </a>
+          <Link
+            href="/docs"
+            className="border border-white/60 px-6 py-3 rounded-xl text-lg font-semibold hover:bg-white/10"
+          >
+            Read the Docs
+          </Link>
+        </div>
       </header>
 
       {/* Info & Call to Action */}

@@ -38,9 +38,36 @@ src/app/editor/
   _store/editorStore.ts  Zustand store: debounced compile, keep-last-good, rename migration
   _components/           Monaco window (windowCode), SVG preview (windowPreview,
                          cardSvg, deckSection, previewVirtual), bespoke grid
-                         (windowSpreadsheet, gridModel), statusBar, panelLayout
+                         (windowSpreadsheet, gridModel), statusBar, panelLayout,
+                         PDF export (pdfExportModal, pdfLayout, pdfRaster, pdfAssemble)
   _lib/goblinLanguage.ts Monaco language registration (Monarch)
+src/lib/docs/            the wiki content layer (pure + one fs module)
+  nav.ts                 sections, slug/order conventions, link resolution
+  frontmatter.ts         page frontmatter parse
+  pages.ts               reads docs/wiki/**.md (build time only)
+src/app/docs/            the /docs route: layout, index, [slug], sidebar, markdown
 ```
+
+## The wiki
+
+User-facing docs live as markdown in [`docs/wiki/`](wiki) and are rendered by the
+`/docs` route — one source, two homes (GitHub and the site).
+
+- **Add a page:** create `docs/wiki/<section>/<NN>-<slug>.md` with `title`, `status`
+  (`stable` | `evolving` | `planned`), and `summary` frontmatter. Nothing else to
+  edit — the sidebar, index, and prev/next all derive from the files.
+- **Reorder:** change the `NN-` filename prefix. **Rename:** the slug is the URL, so
+  renaming a file changes its link.
+- **Add a section:** one entry in `SECTIONS` (`src/lib/docs/nav.ts`) plus the
+  directory.
+- **Link between pages** with relative `.md` paths (`../reference/colors.md`) so the
+  files stay browsable on GitHub; the renderer rewrites them to `/docs/<slug>`. Links
+  that leave the wiki become GitHub URLs.
+- Pages are **statically generated** — the `fs` reads happen during `next build`.
+
+`src/lib/docs/__tests__/content.test.ts` validates the real content: frontmatter,
+unique slugs, and every internal link pointing at a page that exists. A broken
+cross-link fails `npm test`.
 
 The pipeline: `code + sheet rows → compileProject → {diagnostics, RenderModel}` — the
 renderer only ever sees fully resolved shapes.

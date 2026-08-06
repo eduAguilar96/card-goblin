@@ -71,12 +71,21 @@ Card:
 
 ## Documentation
 
-- **[User Guide](docs/user-guide.md)** — how to use the editor and write Goblin
-  script: shapes, expressions, card sizes, colors, icons, and what the errors mean.
+The user-facing docs are a wiki: markdown under [`docs/wiki/`](docs/wiki), rendered
+in the app at **`/docs`**. Same files, both places — edit the markdown and the site
+follows.
+
+- **[Wiki](docs/wiki)** — getting started, the Goblin script language, reference
+  tables (sizes, colors, icons), PDF export, current limits, and the roadmap.
+  Start at [What is CardGoblin](docs/wiki/getting-started/01-what-is-cardgoblin.md).
 - **[Developer Guide](docs/development.md)** — setup, commands, code map, testing
   approach, and the manual smoke-test walkthrough.
 - **[Design Document](docs/DESIGN.md)** — the full language spec, architecture, and
-  roadmap.
+  decision log.
+
+Adding a wiki page is one file: drop `docs/wiki/<section>/<NN>-<slug>.md` with
+`title`/`status`/`summary` frontmatter and it appears in the sidebar. Sections are
+declared in `src/lib/docs/nav.ts`.
 
 ---
 
