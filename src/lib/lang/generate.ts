@@ -89,8 +89,10 @@ export interface GenerateResult {
 }
 
 /** Per-Card generated-instance cap (◆27†): a bad `count:` cell must not
- * freeze the tab any more than a bad Repeat may. */
-const CARD_CAP = 2000;
+ * freeze the tab any more than a bad Repeat may. Exported so the wiki's
+ * stated limit can be tested against it
+ * (`src/lib/docs/__tests__/docFacts.test.ts`). */
+export const CARD_CAP = 2000;
 
 /**
  * Generate the RenderModel for a checked program (§3.7). Consumes the

@@ -28,7 +28,10 @@ export type Keyword =
   | "not"
   | "as";
 
-const KEYWORDS: ReadonlySet<string> = new Set([
+/** Declaration + expression-structure words (◆30†). Exported so the wiki's
+ * reserved-word list can be tested against it
+ * (`src/lib/docs/__tests__/docFacts.test.ts`). */
+export const KEYWORDS: ReadonlySet<string> = new Set([
   "case",
   "column",
   "if",

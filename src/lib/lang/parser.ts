@@ -51,8 +51,10 @@ export interface ParseResult {
   diagnostics: Diagnostic[];
 }
 
-/** Block-opener words — contextual: reserved only in header position (◆30†). */
-const BLOCK_OPENERS: ReadonlySet<string> = new Set([
+/** Block-opener words — contextual: reserved only in header position (◆30†).
+ * Exported so the wiki's reserved-word list can be tested against it
+ * (`src/lib/docs/__tests__/docFacts.test.ts`). */
+export const BLOCK_OPENERS: ReadonlySet<string> = new Set([
   "Enum",
   "Sheet",
   "Template",

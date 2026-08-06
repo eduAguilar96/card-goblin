@@ -65,9 +65,20 @@ User-facing docs live as markdown in [`docs/wiki/`](wiki) and are rendered by th
   that leave the wiki become GitHub URLs.
 - Pages are **statically generated** — the `fs` reads happen during `next build`.
 
-`src/lib/docs/__tests__/content.test.ts` validates the real content: frontmatter,
-unique slugs, and every internal link pointing at a page that exists. A broken
-cross-link fails `npm test`.
+Two test files keep the wiki honest, both run by `npm test`:
+
+- `__tests__/content.test.ts` — frontmatter, unique slugs, and every internal link
+  pointing at a page that exists. A broken cross-link fails the suite.
+- `__tests__/docFacts.test.ts` — the wiki's numbers and tables checked against the
+  constants they describe (`SIZE_PRESETS`, `CARD_CAP`, `REPEAT_CAP`, `DICIER_CODES`,
+  `CSS_COLOR_NAMES`, `KEYWORDS`, `BLOCK_OPENERS`, `DEFAULT_PDF_OPTIONS`,
+  `PAGE_SIZES`). The checks are **bidirectional**: nothing the wiki states may
+  disagree with the code, *and* nothing in the code may be missing from the wiki — so
+  adding a sixth card preset fails the suite until it's documented. When it fires,
+  fix the docs or fix the pattern; don't delete the check.
+
+The docs contract (which surface owns which fact) is in
+[CLAUDE.md](../CLAUDE.md#documentation-contract).
 
 The pipeline: `code + sheet rows → compileProject → {diagnostics, RenderModel}` — the
 renderer only ever sees fully resolved shapes.
