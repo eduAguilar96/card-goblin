@@ -47,6 +47,26 @@ function Hero(): ReactElement {
       />
       <div className="relative mx-auto max-w-7xl px-4 py-20 sm:px-6 lg:py-24">
         <div className="mx-auto max-w-3xl text-center">
+          {/* The logomark is decorative here — the <h1> right below already
+              says the name to a screen reader, so an alt text would just
+              repeat it. Tilted a few degrees so it reads as a card lying on a
+              table rather than a pasted graphic. */}
+          <div className="relative mx-auto mb-8 w-40 sm:w-48">
+            <div
+              aria-hidden
+              className="pointer-events-none absolute inset-0 -z-10 scale-125 rounded-full bg-teal-400/20 blur-3xl"
+            />
+            <Image
+              src="/card_goblin_logo.svg"
+              alt=""
+              width={300}
+              height={300}
+              priority
+              aria-hidden
+              className="w-full -rotate-6 drop-shadow-2xl transition-transform duration-300 hover:rotate-0"
+            />
+          </div>
+
           <p className="text-sm font-semibold uppercase tracking-wider text-teal-400">
             Free · Runs in your browser
           </p>

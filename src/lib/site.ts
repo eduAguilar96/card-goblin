@@ -11,7 +11,7 @@
 
 /** Absolute origin, no trailing slash. */
 export const SITE_URL = (
-  process.env.NEXT_PUBLIC_SITE_URL ?? "https://cardgoblin.app"
+  process.env.NEXT_PUBLIC_SITE_URL ?? "https://www.cardgoblin.com"
 ).replace(/\/$/, "");
 
 export const SITE_NAME = "Card Goblin";
