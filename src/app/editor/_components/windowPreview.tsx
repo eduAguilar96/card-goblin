@@ -35,7 +35,7 @@ import { layoutDecks } from "@/app/editor/_components/previewVirtual";
 /** Zoom = card width in px (SVG scales freely via viewBox). */
 const ZOOM_MIN_PX = 100;
 const ZOOM_MAX_PX = 400;
-const ZOOM_STEP_PX = 20;
+const ZOOM_STEP_PX = 1;
 const ZOOM_DEFAULT_PX = 220;
 
 /** Scroll container content padding (matches `p-4`). The windowing math
