@@ -488,6 +488,14 @@ exhaustive code list, custom card sizes, compile in a worker if needed.
 
 - **Trigger:** "Export PDF" button in the editor → modal with options; produces a
   downloaded .pdf (pdf-lib, client-side — the one sanctioned new dependency).
+- **Live page preview** († 2026-08-06): the modal draws the pages beside the
+  options, from the same `layoutPdf` result the exporter consumes and with the same
+  `CardFaceSvg` markup the rasterizer serializes — no second layout implementation
+  that could drift, and every option (margins, spacing, guides, duplex mirroring)
+  is inspectable before a PDF is rendered. Guides draw at true mm width; the one
+  thing the preview cannot show is the 300 DPI rasterization step. A page stepper
+  pages through the whole export; its index is clamped at render, since changing
+  options changes the page count underneath it.
 - **Modal options (defaults bold):** page size **Letter** (215.9×279.4 mm) / A4
   (210×297 mm); outer margin mm (**10**); card spacing mm (**0**); cut lines
   **dotted**/off/red/bold; cross marks **off**/dotted/red/bold; backs

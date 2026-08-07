@@ -4,6 +4,10 @@
  * The grid view (previewVirtual.ts) windows many cards; this view shows ONE,
  * as large as the panel allows. Two jobs, both pure and unit-tested here:
  *
+ * (The index CLAMP that keeps a remembered position addressable lives with
+ * the nav control itself — pager.ts's `clampIndex`, shared with the PDF
+ * modal's page stepper.)
+ *
  * - **Addressing.** The nav counter is `n / X` over EVERY card in the model,
  *   flat across decks in declaration order — so prev/next walks from the last
  *   card of one deck into the first of the next without a second control.
@@ -75,20 +79,6 @@ export function locateCard(decks: readonly Deck[], index: number): LocatedCard |
     remaining -= deck.cards.length;
   }
   return null;
-}
-
-/**
- * Keep a remembered index addressable against the CURRENT card count.
- *
- * Callers clamp at RENDER time and keep their raw state untouched (the
- * pattern the grid's active-tab fallback uses, windowSpreadsheet.tsx): a
- * recompile that shrinks the deck shows the last card instead of nothing,
- * and growing it back restores the position the user was on — no state write,
- * no effect, no lost place.
- */
-export function clampIndex(index: number, total: number): number {
-  if (!Number.isFinite(index) || total <= 0) return 0;
-  return Math.min(Math.max(0, Math.floor(index)), total - 1);
 }
 
 /**

@@ -11,16 +11,22 @@
  *
  * `PdfExportModal` shows exactly the §6.1 options with the §6.1 defaults,
  * recomputes the pure layout live (fit errors and the skip warning update as
- * options change), and runs the export: rasterize distinct faces → assemble
- * with pdf-lib → download. The rasterizer is INJECTED (`rasterize` prop,
- * defaulting to the real browser one) so node tests can drive the modal and
- * the flow with stub images.
+ * options change), PREVIEWS the resulting pages beside the options
+ * (pdfPagePreview.tsx — same layout result, same card markup as the export),
+ * and runs the export: rasterize distinct faces → assemble with pdf-lib →
+ * download. The rasterizer is INJECTED (`rasterize` prop, defaulting to the
+ * real browser one) so node tests can drive the modal and the flow with stub
+ * images.
  *
  * Decisions beyond §6.1's literal text:
  * - Options persist for the SESSION in a module-level object (simplest
  *   correct scope: survives modal close/reopen and panel remounts, resets on
  *   reload; no store churn for print-only preferences). Invalid margin/
  *   spacing text is never persisted.
+ * - The previewed page index is NOT persisted and is clamped at render
+ *   (pager.clampIndex): options change the page count under it — switching
+ *   backs to "none" halves it — and the browsing position should survive
+ *   that rather than reset on every keystroke.
  * - Export is also disabled when nothing is printable (every card an error
  *   placeholder / zero cards after skipping) — a zero-page PDF helps nobody.
  * - Margin/spacing accept any finite value ≥ 0; validation failures disable
@@ -45,7 +51,9 @@ import {
   type PdfExportOptions,
 } from "@/app/editor/_components/pdfLayout";
 import { assemblePdf } from "@/app/editor/_components/pdfAssemble";
+import { PdfPagePreview } from "@/app/editor/_components/pdfPagePreview";
 import { rasterizeFaces, type RasterizeFaces } from "@/app/editor/_components/pdfRaster";
+import { Pager, clampIndex } from "@/app/editor/_components/pager";
 
 // ---------------------------------------------------------------------------
 // Pure helpers (exported for tests)
@@ -140,6 +148,8 @@ export function PdfExportModal({
   const [spacingText, setSpacingText] = useState(() => String(sessionOptions.spacingMm));
   const [working, setWorking] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
+  /** Previewed page. Clamped at render, never in state (module note). */
+  const [pageIndex, setPageIndex] = useState(0);
 
   const update = (patch: Partial<PdfExportOptions>): void => {
     setOptions((prev) => {
@@ -153,6 +163,8 @@ export function PdfExportModal({
   const spacingValid = parseNonNegativeMm(spacingText) !== null;
 
   const layout = useMemo(() => layoutPdf(model, options), [model, options]);
+  const previewIndex = clampIndex(pageIndex, layout.pages.length);
+  const previewPage = layout.pages[previewIndex];
 
   const exportBlocked =
     working ||
@@ -184,122 +196,175 @@ export function PdfExportModal({
         role="dialog"
         aria-modal="true"
         aria-labelledby="pdf-export-title"
-        className="w-full max-w-md rounded-lg border border-gray-700 bg-gray-800 p-4 text-sm text-gray-200 shadow-xl"
+        className="flex max-h-[90vh] w-full max-w-4xl flex-col overflow-y-auto rounded-lg border border-gray-700 bg-gray-800 p-4 text-sm text-gray-200 shadow-xl"
       >
         <h2 id="pdf-export-title" className="mb-3 text-base font-semibold text-white">
           Export PDF
         </h2>
 
-        <div className="grid grid-cols-2 gap-3">
-          <label className={LABEL_CLASS}>
-            Page size
-            <select
-              className={FIELD_CLASS}
-              value={options.pageSize}
-              disabled={working}
-              onChange={(e) => update({ pageSize: e.currentTarget.value as PageSizeId })}
-            >
-              {(Object.keys(PAGE_SIZES) as PageSizeId[]).map((id) => (
-                <option key={id} value={id}>
-                  {PAGE_SIZES[id].name} ({PAGE_SIZES[id].widthMm} × {PAGE_SIZES[id].heightMm}{" "}
-                  mm)
-                </option>
-              ))}
-            </select>
-          </label>
+        {/* Options and preview side by side on a wide screen, stacked below
+            it (the preview is the reason this modal is wide). */}
+        <div className="flex flex-col gap-4 md:flex-row md:items-start">
+          <div className="md:w-[26rem] md:shrink-0">
+            <div className="grid grid-cols-2 gap-3">
+              <label className={LABEL_CLASS}>
+                Page size
+                <select
+                  className={FIELD_CLASS}
+                  value={options.pageSize}
+                  disabled={working}
+                  onChange={(e) => update({ pageSize: e.currentTarget.value as PageSizeId })}
+                >
+                  {(Object.keys(PAGE_SIZES) as PageSizeId[]).map((id) => (
+                    <option key={id} value={id}>
+                      {PAGE_SIZES[id].name} ({PAGE_SIZES[id].widthMm} × {PAGE_SIZES[id].heightMm}{" "}
+                      mm)
+                    </option>
+                  ))}
+                </select>
+              </label>
 
-          <label className={LABEL_CLASS}>
-            Backs
-            <select
-              className={FIELD_CLASS}
-              value={options.backs}
-              disabled={working}
-              onChange={(e) => update({ backs: e.currentTarget.value as BacksMode })}
-            >
-              {BACKS_CHOICES.map((mode) => (
-                <option key={mode} value={mode}>
-                  {BACKS_LABELS[mode]}
-                </option>
-              ))}
-            </select>
-          </label>
+              <label className={LABEL_CLASS}>
+                Backs
+                <select
+                  className={FIELD_CLASS}
+                  value={options.backs}
+                  disabled={working}
+                  onChange={(e) => update({ backs: e.currentTarget.value as BacksMode })}
+                >
+                  {BACKS_CHOICES.map((mode) => (
+                    <option key={mode} value={mode}>
+                      {BACKS_LABELS[mode]}
+                    </option>
+                  ))}
+                </select>
+              </label>
 
-          <label className={LABEL_CLASS}>
-            Outer margin (mm)
-            <input
-              type="number"
-              min={0}
-              step={1}
-              className={FIELD_CLASS + (marginValid ? "" : " border-red-500")}
-              value={marginText}
-              disabled={working}
-              onChange={(e) => {
-                const text = e.currentTarget.value;
-                setMarginText(text);
-                const value = parseNonNegativeMm(text);
-                if (value !== null) update({ marginMm: value });
-              }}
-            />
-          </label>
+              <label className={LABEL_CLASS}>
+                Outer margin (mm)
+                <input
+                  type="number"
+                  min={0}
+                  step={1}
+                  className={FIELD_CLASS + (marginValid ? "" : " border-red-500")}
+                  value={marginText}
+                  disabled={working}
+                  onChange={(e) => {
+                    const text = e.currentTarget.value;
+                    setMarginText(text);
+                    const value = parseNonNegativeMm(text);
+                    if (value !== null) update({ marginMm: value });
+                  }}
+                />
+              </label>
 
-          <label className={LABEL_CLASS}>
-            Card spacing (mm)
-            <input
-              type="number"
-              min={0}
-              step={1}
-              className={FIELD_CLASS + (spacingValid ? "" : " border-red-500")}
-              value={spacingText}
-              disabled={working}
-              onChange={(e) => {
-                const text = e.currentTarget.value;
-                setSpacingText(text);
-                const value = parseNonNegativeMm(text);
-                if (value !== null) update({ spacingMm: value });
-              }}
-            />
-          </label>
+              <label className={LABEL_CLASS}>
+                Card spacing (mm)
+                <input
+                  type="number"
+                  min={0}
+                  step={1}
+                  className={FIELD_CLASS + (spacingValid ? "" : " border-red-500")}
+                  value={spacingText}
+                  disabled={working}
+                  onChange={(e) => {
+                    const text = e.currentTarget.value;
+                    setSpacingText(text);
+                    const value = parseNonNegativeMm(text);
+                    if (value !== null) update({ spacingMm: value });
+                  }}
+                />
+              </label>
 
-          <label className={LABEL_CLASS}>
-            Cut lines
-            <select
-              className={FIELD_CLASS}
-              value={options.cutLines}
-              disabled={working}
-              onChange={(e) => update({ cutLines: e.currentTarget.value as GuideStyle })}
-            >
-              {CUT_LINE_CHOICES.map((style) => (
-                <option key={style} value={style}>
-                  {GUIDE_LABELS[style]}
-                </option>
-              ))}
-            </select>
-          </label>
+              <label className={LABEL_CLASS}>
+                Cut lines
+                <select
+                  className={FIELD_CLASS}
+                  value={options.cutLines}
+                  disabled={working}
+                  onChange={(e) => update({ cutLines: e.currentTarget.value as GuideStyle })}
+                >
+                  {CUT_LINE_CHOICES.map((style) => (
+                    <option key={style} value={style}>
+                      {GUIDE_LABELS[style]}
+                    </option>
+                  ))}
+                </select>
+              </label>
 
-          <label className={LABEL_CLASS}>
-            Cross marks
-            <select
-              className={FIELD_CLASS}
-              value={options.crossMarks}
-              disabled={working}
-              onChange={(e) => update({ crossMarks: e.currentTarget.value as GuideStyle })}
-            >
-              {CROSS_MARK_CHOICES.map((style) => (
-                <option key={style} value={style}>
-                  {GUIDE_LABELS[style]}
-                </option>
-              ))}
-            </select>
-          </label>
+              <label className={LABEL_CLASS}>
+                Cross marks
+                <select
+                  className={FIELD_CLASS}
+                  value={options.crossMarks}
+                  disabled={working}
+                  onChange={(e) => update({ crossMarks: e.currentTarget.value as GuideStyle })}
+                >
+                  {CROSS_MARK_CHOICES.map((style) => (
+                    <option key={style} value={style}>
+                      {GUIDE_LABELS[style]}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+
+            <Notices layout={layout} marginValid={marginValid} spacingValid={spacingValid} />
+
+            {failure !== null && (
+              <p className="mt-3 rounded border border-red-900 bg-red-950 px-2 py-1 text-xs text-red-300">
+                Export failed: {failure}
+              </p>
+            )}
+          </div>
+
+          {/* Live page preview: the same layout result the export consumes, so
+              every option above is visible here before anyone spends a render
+              on a PDF (§6.1 †). */}
+          <div className="flex min-w-0 flex-1 flex-col gap-2">
+            <div className="flex items-center justify-between gap-2">
+              <span className="truncate text-xs text-gray-400">
+                {previewPage === undefined ? (
+                  "Nothing to preview"
+                ) : (
+                  <>
+                    <span className="font-semibold text-gray-200">
+                      {previewPage.deckName}
+                    </span>
+                    {" · "}
+                    {previewPage.side === "front" ? "Front" : "Back"}
+                    {" · "}
+                    {previewPage.cards.length} card
+                    {previewPage.cards.length === 1 ? "" : "s"}
+                  </>
+                )}
+              </span>
+              {layout.pages.length > 0 && (
+                <Pager
+                  index={previewIndex}
+                  count={layout.pages.length}
+                  onChange={setPageIndex}
+                  previousLabel="Previous page"
+                  nextLabel="Next page"
+                />
+              )}
+            </div>
+            <div className="flex h-96 items-center justify-center rounded border border-gray-700 bg-gray-900 p-3">
+              {previewPage === undefined ? (
+                <p className="text-xs text-gray-500">
+                  No pages to lay out — see the messages on the left.
+                </p>
+              ) : (
+                <PdfPagePreview
+                  page={previewPage}
+                  faceSpecs={layout.faceSpecs}
+                  cutLines={options.cutLines}
+                  crossMarks={options.crossMarks}
+                />
+              )}
+            </div>
+          </div>
         </div>
-
-        <Notices layout={layout} marginValid={marginValid} spacingValid={spacingValid} />
-
-        {failure !== null && (
-          <p className="mt-3 rounded border border-red-900 bg-red-950 px-2 py-1 text-xs text-red-300">
-            Export failed: {failure}
-          </p>
-        )}
 
         <div className="mt-4 flex items-center justify-end gap-2">
           {working && (

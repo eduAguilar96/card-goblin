@@ -40,7 +40,8 @@ src/app/editor/
                          cardSvg, deckSection, previewSingle, previewVirtual),
                          bespoke grid
                          (windowSpreadsheet, gridModel), statusBar, panelLayout,
-                         PDF export (pdfExportModal, pdfLayout, pdfRaster, pdfAssemble)
+                         PDF export (pdfExportModal, pdfLayout, pdfPagePreview,
+                         pdfRaster, pdfAssemble), shared prev/next control (pager)
   _lib/goblinLanguage.ts Monaco language registration (Monarch)
 src/lib/content/         frontmatter parsing shared by the wiki and the blog
 src/lib/docs/            the wiki content layer (pure + one fs module)
@@ -143,6 +144,10 @@ subsystem:
    slider replaces the nav. Front/back toggles in both (teal backs).
 10. **Icons** — change `"SWORDS"` to `"D6"`: glyph swaps; a bogus code warns and
     renders as raw text (by design).
+11. **Export preview** — open Export PDF: the page preview redraws as options
+    change (raise the margin → fewer cards per page; cut lines off → lines
+    vanish), and paging to 2 shows the duplex back with mirrored columns. Set the
+    margin to 100 → fit error, "No pages to lay out", Export disabled.
 
 Headless browser screenshot (no driver installed; one-shot only):
 

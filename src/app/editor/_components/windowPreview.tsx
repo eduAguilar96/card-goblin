@@ -49,8 +49,8 @@ import {
 import { CardSVG } from "@/app/editor/_components/cardSvg";
 import DeckSection, { type CardSide } from "@/app/editor/_components/deckSection";
 import ExportPdfButton from "@/app/editor/_components/pdfExportModal";
+import { Pager, clampIndex } from "@/app/editor/_components/pager";
 import {
-  clampIndex,
   locateCard,
   singleCardWidthPx,
   totalCardCount,
@@ -139,7 +139,6 @@ export function PreviewContent({
   const index = clampIndex(cardIndex, totalCards);
   const located = single ? locateCard(decks, index) : null;
 
-  const goTo = (next: number): void => setCardIndex(clampIndex(next, totalCards));
   const switchMode = (next: PreviewMode): void => {
     if (next === mode) return;
     // The container stops scrolling in single view, so the browser clamps its
@@ -192,27 +191,13 @@ export function PreviewContent({
         </div>
         {single ? (
           totalCards > 0 && (
-            <div className="flex items-center gap-1 text-xs text-gray-400">
-              <NavButton
-                label="Previous card"
-                disabled={index <= 0}
-                onClick={() => goTo(index - 1)}
-              >
-                <IconChevron direction="left" />
-              </NavButton>
-              {/* Polite: the counter is the only feedback that prev/next
-                  did anything for a screen-reader user. */}
-              <span aria-live="polite" className="min-w-16 text-center tabular-nums">
-                {index + 1} / {totalCards}
-              </span>
-              <NavButton
-                label="Next card"
-                disabled={index >= totalCards - 1}
-                onClick={() => goTo(index + 1)}
-              >
-                <IconChevron direction="right" />
-              </NavButton>
-            </div>
+            <Pager
+              index={index}
+              count={totalCards}
+              onChange={setCardIndex}
+              previousLabel="Previous card"
+              nextLabel="Next card"
+            />
           )
         ) : (
           <label className="flex items-center gap-2 text-xs text-gray-400">
@@ -370,32 +355,8 @@ function SegmentedIconButton({
   );
 }
 
-interface NavButtonProps {
-  label: string;
-  disabled: boolean;
-  onClick(): void;
-  children: ReactElement;
-}
-
-/** Prev/next. Disabled at the ends rather than wrapping: with `n / X` on
- * screen, a jump from 18/18 back to 1/18 reads as a glitch. */
-function NavButton({ label, disabled, onClick, children }: NavButtonProps): ReactElement {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      aria-label={label}
-      title={label}
-      className="flex items-center rounded border border-gray-600 bg-gray-800 px-1.5 py-1 text-gray-300 hover:bg-gray-700 disabled:cursor-default disabled:opacity-40 disabled:hover:bg-gray-800"
-    >
-      {children}
-    </button>
-  );
-}
-
 /** Icons are hand-drawn inline SVG — the project has no icon dependency, and
- * three 16-unit glyphs don't justify one. `currentColor` throughout, so they
+ * two 16-unit glyphs don't justify one. `currentColor` throughout, so they
  * inherit the pressed/hover text colors above. */
 function IconSingle(): ReactElement {
   return (
@@ -414,19 +375,6 @@ function IconGrid(): ReactElement {
           <rect key={`${x},${y}`} x={x} y={y} width="4.5" height="4.5" rx="1" />
         )),
       )}
-    </IconBox>
-  );
-}
-
-function IconChevron({ direction }: { direction: "left" | "right" }): ReactElement {
-  return (
-    <IconBox>
-      <path
-        d={direction === "left" ? "M10 3.5 L5.5 8 L10 12.5" : "M6 3.5 L10.5 8 L6 12.5"}
-        fill="none"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
     </IconBox>
   );
 }

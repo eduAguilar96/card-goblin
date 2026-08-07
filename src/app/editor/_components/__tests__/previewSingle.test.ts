@@ -7,7 +7,6 @@
 import { describe, expect, it } from "vitest";
 import type { CardInstance, Deck } from "@/lib/lang";
 import {
-  clampIndex,
   locateCard,
   singleCardWidthPx,
   totalCardCount,
@@ -72,28 +71,6 @@ describe("locateCard", () => {
     expect(locateCard(DECKS, 1.5)).toBeNull();
     expect(locateCard(DECKS, NaN)).toBeNull();
     expect(locateCard([], 0)).toBeNull();
-  });
-});
-
-describe("clampIndex", () => {
-  it("keeps an in-range index", () => {
-    expect(clampIndex(3, 5)).toBe(3);
-  });
-
-  it("pins a too-large index to the last card (a shrunk model shows the end)", () => {
-    expect(clampIndex(9, 5)).toBe(4);
-  });
-
-  it("floors negatives, fractions, and non-finite input to a usable index", () => {
-    expect(clampIndex(-2, 5)).toBe(0);
-    expect(clampIndex(2.7, 5)).toBe(2);
-    expect(clampIndex(NaN, 5)).toBe(0);
-    expect(clampIndex(Infinity, 5)).toBe(0);
-  });
-
-  it("is 0 when there is nothing to address", () => {
-    expect(clampIndex(3, 0)).toBe(0);
-    expect(clampIndex(3, -1)).toBe(0);
   });
 });
 

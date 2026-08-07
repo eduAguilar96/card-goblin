@@ -11,6 +11,18 @@ your code is mid-break the export uses the same last-good render you're looking 
 
 The button is disabled until there's at least one card to print.
 
+## The preview
+
+Next to the options is a picture of the actual page. It redraws as you change
+anything, so margins, spacing, cut lines and the mirrored back pages are all
+visible **before** you spend a render on a PDF. The arrows above it step through
+every page the export will contain — with duplex backs, page 2 is page 1's mirrored
+back.
+
+It's drawn from the same layout the exporter uses, with the same card artwork, so it
+can't drift from the file you get. The one thing it can't show you is the 300 DPI
+rasterization: on paper the cards are images, here they're live vector art.
+
 ## The options
 
 | Option | Default | What it does |
