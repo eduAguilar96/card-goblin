@@ -5,11 +5,12 @@ import {
   computeGrid,
   DEFAULT_PDF_OPTIONS,
   faceKey,
+  GUIDE_STROKES,
   layoutPdf,
   PAGE_SIZES,
   type PdfExportOptions,
 } from "../pdfLayout";
-import { assemblePdf } from "../pdfAssemble";
+import { assemblePdf, DOTTED_DASH_MM, MM_TO_PT } from "../pdfAssemble";
 
 function demoModel() {
   const result = compileProject(
@@ -167,5 +168,99 @@ describe("assemblePdf (node smoke with stub images)", () => {
 
   it("faceKey distinguishes sides of one card", () => {
     expect(faceKey("abc", "front")).not.toBe(faceKey("abc", "back"));
+  });
+});
+
+/**
+ * The assembler draws guides itself (pdf-lib `drawLine`) while the export
+ * modal's preview draws them as SVG (pdfPagePreview). The SEGMENTS and the
+ * STROKE SPEC are shared — but the two draw calls are not, so this is the one
+ * place the preview could quietly stop matching the file. These tests pin the
+ * PDF side to the same constants the preview imports.
+ *
+ * Reading the drawing back means inflating the page's content stream and
+ * counting operators; the numbers are matched loosely (pdf-lib prints full
+ * float precision), so only the VALUES are asserted, never their formatting.
+ */
+async function pageOperators(bytes: Uint8Array, pageIndex: number): Promise<string> {
+  const { inflateSync } = await import("node:zlib");
+  const { PDFDocument, PDFArray, PDFStream } = await import("pdf-lib");
+  const doc = await PDFDocument.load(bytes);
+  const contents = doc.getPage(pageIndex).node.Contents();
+  const parts =
+    contents instanceof PDFArray
+      ? contents.asArray().map((ref) => doc.context.lookup(ref))
+      : [contents];
+  return parts
+    .map((part) => (part instanceof PDFStream ? part.getContents() : new Uint8Array()))
+    .map((raw) => {
+      const buffer = Buffer.from(raw);
+      // Content streams are Flate-compressed on save; a future pdf-lib that
+      // stops compressing them should still read fine.
+      try {
+        return inflateSync(buffer).toString("latin1");
+      } catch {
+        return buffer.toString("latin1");
+      }
+    })
+    .join("\n");
+}
+
+const strokeCount = (ops: string): number => (ops.match(/^S$/gm) ?? []).length;
+const strokeWidthsPt = (ops: string): number[] =>
+  [...ops.matchAll(/^([\d.]+) w$/gm)].map((m) => Number(m[1]));
+const dashArraysPt = (ops: string): number[][] =>
+  [...ops.matchAll(/^\[([^\]]*)\] \d+ d$/gm)].map((m) =>
+    m[1].trim().split(/\s+/).filter(Boolean).map(Number),
+  );
+
+async function assembleDemo(overrides: Partial<PdfExportOptions>): Promise<Uint8Array> {
+  const options = opts(overrides);
+  const layout = layoutPdf(demoModel(), options);
+  const images = new Map<string, Uint8Array>();
+  for (const key of layout.faceSpecs.keys()) images.set(key, PNG_1PX);
+  return assemblePdf(layout, images, options);
+}
+
+describe("assemblePdf guides (shared spec with the modal's page preview)", () => {
+  it("strokes one dotted line per cut-line segment, at the shared width and dash", async () => {
+    const layout = layoutPdf(demoModel(), opts({}));
+    const ops = await pageOperators(await assembleDemo({}), 0);
+
+    // Every segment layoutPdf computed is drawn — the same array the preview
+    // renders as <line> elements.
+    expect(strokeCount(ops)).toBe(layout.pages[0].cutLines.length);
+    for (const width of strokeWidthsPt(ops)) {
+      expect(width).toBeCloseTo(GUIDE_STROKES.dotted.widthMm * MM_TO_PT, 6);
+    }
+    // The dash pattern the preview reads from DOTTED_DASH_MM, in points.
+    const expectedDash = DOTTED_DASH_MM.map((mm) => mm * MM_TO_PT);
+    expect(dashArraysPt(ops).length).toBeGreaterThan(0);
+    for (const dash of dashArraysPt(ops)) {
+      expect(dash).toHaveLength(expectedDash.length);
+      dash.forEach((value, i) => expect(value).toBeCloseTo(expectedDash[i], 6));
+    }
+  });
+
+  it("draws guides on BACK pages too (§6.1), from the mirrored grid", async () => {
+    const layout = layoutPdf(demoModel(), opts({}));
+    const back = layout.pages[1];
+    expect(back.side).toBe("back");
+    const ops = await pageOperators(await assembleDemo({}), 1);
+    expect(strokeCount(ops)).toBe(back.cutLines.length);
+  });
+
+  it("draws bold guides solid at 0.5 mm — style really reaches the page", async () => {
+    const ops = await pageOperators(await assembleDemo({ cutLines: "bold" }), 0);
+    // Solid: pdf-lib still writes a dash operator, with an EMPTY array.
+    expect(dashArraysPt(ops).flat()).toEqual([]);
+    for (const width of strokeWidthsPt(ops)) {
+      expect(width).toBeCloseTo(GUIDE_STROKES.bold.widthMm * MM_TO_PT, 6);
+    }
+  });
+
+  it("strokes nothing when both guide styles are off", async () => {
+    const ops = await pageOperators(await assembleDemo({ cutLines: "off", crossMarks: "off" }), 0);
+    expect(strokeCount(ops)).toBe(0);
   });
 });
