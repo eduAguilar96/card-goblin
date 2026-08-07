@@ -37,7 +37,8 @@ src/lib/lang/            the compiler (pure, no React)
 src/app/editor/
   _store/editorStore.ts  Zustand store: debounced compile, keep-last-good, rename migration
   _components/           Monaco window (windowCode), SVG preview (windowPreview,
-                         cardSvg, deckSection, previewVirtual), bespoke grid
+                         cardSvg, deckSection, previewSingle, previewVirtual),
+                         bespoke grid
                          (windowSpreadsheet, gridModel), statusBar, panelLayout,
                          PDF export (pdfExportModal, pdfLayout, pdfRaster, pdfAssemble)
   _lib/goblinLanguage.ts Monaco language registration (Monarch)
@@ -136,7 +137,10 @@ subsystem:
 7. **Schema from code** — add `column attack: Number`: column appears. Rename
    `health`→`hp` (column + refs): data migrates.
 8. **Enum columns** — add `column suit: Suit`: cells become dropdowns.
-9. **Front/back + zoom** — toolbar toggle (teal backs), zoom slider.
+9. **Views, front/back, zoom** — the preview opens on the single card; the
+   `‹ n/X ›` arrows walk every card of every deck (and across the boundary in a
+   multi-deck project). Switch to grid with the toolbar's icon pair: the zoom
+   slider replaces the nav. Front/back toggles in both (teal backs).
 10. **Icons** — change `"SWORDS"` to `"D6"`: glyph swaps; a bogus code warns and
     renders as raw text (by design).
 

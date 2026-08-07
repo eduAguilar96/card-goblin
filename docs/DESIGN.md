@@ -406,9 +406,16 @@ One Zustand store (introduced in slice task 4† — the panels currently share 
   index with the same type** is treated as a rename and migrates the data (◆26†).
   Library risk: `react-spreadsheet` may resist custom editors/tabs — fallback is a
   small bespoke grid; decision deferred until task 6 (§5).
-- **Preview window:** a **virtualized** grid (†) of `CardSVG` components (SVG
-  `viewBox` in card units — free scaling), grouped by Card block, front/back toggle,
-  zoom, error-placeholder card for D-errors. `CardSVG` is memoized on the
+- **Preview window:** two views over the same model, chosen by a segmented toggle
+  next to front/back. **Single card (default)** shows one card fitted to the panel
+  with `[<] n/X [>]` nav over every card of every deck, flat in declaration order
+  (M2, 2026-08-06: designing a card means looking at one card; the flat counter
+  keeps the nav to a single control, and a caption names the deck you are in).
+  **Grid** is the **virtualized** grid (†) of `CardSVG` components (SVG `viewBox`
+  in card units — free scaling), grouped by Card block, with the zoom slider —
+  which renders only in grid view, single view sizing the card to the panel
+  instead. Both views share the front/back toggle, the stale banner, and the
+  error-placeholder card for D-errors. `CardSVG` is memoized on the
   RenderModel's per-card content hash (†) so an edit re-renders only affected cards
   — this, not raw compute, is what makes 500-card decks interactive. Text `y` is
   realized via per-font ascent constants (§3.4). Dicier loaded as a webfont

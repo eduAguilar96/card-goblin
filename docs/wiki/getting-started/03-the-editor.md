@@ -11,8 +11,8 @@ The editor lives at [`/editor`](/editor). Three panels and a status bar:
 ```
 ┌────────────────────────┬────────────────────────┐
 │  CODE                  │  PREVIEW               │
-│  your Goblin script,   │  every generated card, │
-│  squiggles on errors   │  front/back + zoom     │
+│  your Goblin script,   │  one card, or all of   │
+│  squiggles on errors   │  them — front/back     │
 ├────────────────────────┴────────────────────────┤
 │  SPREADSHEET — one tab per Sheet:               │
 │  columns from your code, rows from you          │
@@ -28,9 +28,18 @@ appear as red squiggles where they happen, and in the problems strip.
 
 ## Preview (top right)
 
-Every generated card, live. Toggle **Front/Back**, zoom with the slider, and
-**Export PDF** from the toolbar. Cards are grouped by the `Card:` block that made
-them.
+Your generated cards, live. Toggle **Front/Back** and **Export PDF** from the
+toolbar, and pick one of two views with the pair of icon buttons next to them:
+
+- **Single card** (the default) — one card, as large as the panel allows. The
+  `‹ 3 / 18 ›` control steps through every card in the project, in the order the
+  `Card:` blocks declare them, so the arrows carry you from the end of one deck
+  into the start of the next. A line above the card says which deck you're in.
+- **Grid** — every card at once, grouped by the `Card:` block that made them, with
+  a **zoom** slider for card size. Long decks scroll.
+
+The zoom slider only appears in grid view; in single view the card is already
+sized to the panel, so making the panel bigger (drag the divider) is the zoom.
 
 While your code has errors, the preview **freezes on the last good result** and shows
 an amber note saying so, instead of flickering or emptying. This is the single most

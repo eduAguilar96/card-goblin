@@ -44,6 +44,9 @@ describe("500-card scale (§5 acceptance)", () => {
           excludedPristineRows: result.excludedPristineRows,
         }}
         isStale={false}
+        // The GRID view is what has to survive 504 cards — the single view
+        // renders one card by construction.
+        initialMode="grid"
       />,
     );
 
@@ -58,7 +61,8 @@ describe("500-card scale (§5 acceptance)", () => {
 
     // The preview virtualizes: some cards render, far fewer than all 504
     // (the fallback viewport windows the rows; spacers carry the rest).
-    const svgCount = (markup.match(/<svg/g) ?? []).length;
+    // `role="img"` counts CARD faces only — the toolbar's icons are svgs too.
+    const svgCount = (markup.match(/role="img"/g) ?? []).length;
     expect(svgCount).toBeGreaterThan(0);
     expect(svgCount).toBeLessThan(504);
     expect(markup).toContain("504 cards");
