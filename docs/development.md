@@ -41,11 +41,22 @@ src/app/editor/
                          (windowSpreadsheet, gridModel), statusBar, panelLayout,
                          PDF export (pdfExportModal, pdfLayout, pdfRaster, pdfAssemble)
   _lib/goblinLanguage.ts Monaco language registration (Monarch)
+src/lib/content/         frontmatter parsing shared by the wiki and the blog
 src/lib/docs/            the wiki content layer (pure + one fs module)
   nav.ts                 sections, slug/order conventions, link resolution
   frontmatter.ts         page frontmatter parse
   pages.ts               reads docs/wiki/**.md (build time only)
-src/app/docs/            the /docs route: layout, index, [slug], sidebar, markdown
+src/lib/blog/            the blog content layer
+  posts.ts               post model, filename/date convention, formatting
+  load.ts                reads content/blog/*.md (build time only)
+  rss.ts                 RSS 2.0 rendering (pure)
+src/lib/site.ts          SITE_URL and identity — every canonical/OG/feed URL
+src/app/docs/            the /docs route: layout, index, [slug], sidebar
+src/app/blog/            the /blog route: index, [slug], rss.xml, OG images
+src/app/_components/     shared chrome: siteHeader, siteFooter, markdown
+  landing/               landing sections + the build-time compiled showcase
+src/app/sitemap.ts       sitemap.xml, derived from wiki pages + posts
+src/app/robots.ts        robots.txt
 ```
 
 ## The wiki

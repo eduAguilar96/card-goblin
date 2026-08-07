@@ -24,9 +24,15 @@ There are four doc surfaces. Each owns one thing; a fact lives in exactly one of
 | Surface | Owns | Audience |
 |---|---|---|
 | `docs/wiki/` → `/docs` | what a user does and sees | card designers |
+| `content/blog/` → `/blog` | announcements, design logs, releases | prospective users, search |
 | `docs/DESIGN.md` | decisions and **why**; the decision log | future implementers |
 | `docs/development.md` | how to build, test, navigate | contributors |
 | code comments | why *this file* works the way it does | whoever opens it |
+
+Wiki vs blog: the wiki is **reference** — always current, edited in place. The
+blog is **dated** — a post records what was true when it was written and is not
+retro-edited (use `updated:` for substantive revisions). If a fact needs to stay
+correct forever, it belongs in the wiki, and the post links to it.
 
 **The rule: a user-visible behavior change updates its wiki page in the same commit.**
 
@@ -60,6 +66,50 @@ summary: one line
 - `status:` describes how settled the **subject** is, not the prose. `evolving` pages
   are the re-read queue at each milestone boundary; `planned` pages are deliberate
   placeholders.
+
+### Blog mechanics
+
+Posts live at `content/blog/<YYYY-MM-DD>-<slug>.md`.
+
+- **The date comes from the FILENAME**, not frontmatter — one source of truth,
+  and the directory listing is chronological. The slug excludes the date, so
+  `/blog/<slug>` stays stable if a post is re-dated before publishing.
+- Frontmatter: `title`, `description` (required — it IS the meta description),
+  plus optional `author`, `tags`, `updated`, `hero`, `draft`.
+- `draft: true` keeps a post out of the index, sitemap, and RSS feed, and marks
+  it `noindex` — but it still builds at its URL so it can be previewed.
+- **Link posts into the wiki.** That internal linking is the actual SEO
+  strategy: posts that reference `/docs/...` build a topical cluster. A test
+  fails if a post links a wiki page that doesn't exist.
+
+### SEO
+
+`src/lib/site.ts` owns every URL and identity string. **`SITE_URL` is a
+placeholder** (`https://cardgoblin.app`) until the real domain is set — override
+with `NEXT_PUBLIC_SITE_URL`. Canonical links, OpenGraph, JSON-LD, the sitemap,
+and the feed all derive from it, so a wrong value silently points search engines
+at the wrong host.
+
+Generated automatically, nothing to hand-maintain: `app/sitemap.ts`,
+`app/robots.ts`, `/blog/rss.xml`, and per-post share images
+(`blog/[slug]/opengraph-image.tsx`, rendered from the post title via `next/og`).
+
+### The landing page shows real output
+
+`src/app/_components/landing/` compiles a real Goblin script at build time and
+renders the cards with `CardFaceSvg` — the same markup the editor preview and
+PDF rasterizer use. **Don't replace those with screenshots**: compiled output
+can't drift from what the product actually makes. `showcase.test.ts` fails if
+the showcase stops compiling clean.
+
+The editor screenshot (`public/editor-screenshot.png`) is the one image that
+*can* go stale. Regenerate with the app running:
+
+```bash
+"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --headless=new \
+  --window-size=1600,1000 --virtual-time-budget=8000 \
+  --screenshot=public/editor-screenshot.png http://localhost:3000/editor
+```
 
 ### Documented facts are tested
 
