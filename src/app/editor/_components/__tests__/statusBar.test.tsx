@@ -8,7 +8,7 @@ import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { DEMO_PROJECT_SOURCE } from "@/lib/lang/demoProject";
 import { createEditorStore, type EditorState } from "@/app/editor/_store/editorStore";
-import { StatusBarContent } from "@/app/editor/_components/statusBar";
+import { ResetToDemoButton, StatusBarContent } from "@/app/editor/_components/statusBar";
 
 function renderState(state: EditorState): string {
   return renderToStaticMarkup(
@@ -16,6 +16,8 @@ function renderState(state: EditorState): string {
       compile={state.compile}
       lastGood={state.lastGoodModel}
       isStale={state.isStale}
+      autosaveDisabled={state.autosaveDisabled}
+      onReset={() => {}}
     />,
   );
 }
@@ -30,6 +32,7 @@ describe("StatusBarContent", () => {
     expect(text).toContain("0 flagged cells");
     expect(text).toContain("0 pristine rows excluded");
     expect(text).not.toContain("stale");
+    expect(text).not.toContain("autosave off"); // storage healthy → no indicator
   });
 
   it("broken compile: problems counted red, cards hold the LAST GOOD count, stale indicator on", () => {
@@ -75,10 +78,46 @@ describe("StatusBarContent", () => {
   it("renders sanely before any compile (all-null store surface)", () => {
     const text = stripTags(
       renderToStaticMarkup(
-        <StatusBarContent compile={null} lastGood={null} isStale={false} />,
+        <StatusBarContent
+          compile={null}
+          lastGood={null}
+          isStale={false}
+          autosaveDisabled={false}
+          onReset={() => {}}
+        />,
       ),
     );
     expect(text).toContain("0 cards");
     expect(text).toContain("0 problems");
+  });
+
+  it("shows the quiet 'autosave off' indicator when storage failed this session (§6.2)", () => {
+    const store = createEditorStore();
+    store.setState({ autosaveDisabled: true }); // as persistence.ts does
+    const markup = renderState(store.getState());
+    expect(stripTags(markup)).toContain("autosave off");
+    expect(markup).toContain("won&#x27;t survive a reload"); // the title explains it
+  });
+});
+
+describe("ResetToDemoButton (§6.2 two-step confirm)", () => {
+  it("rests as a single quiet button — no destructive control visible", () => {
+    const markup = renderToStaticMarkup(<ResetToDemoButton onReset={() => {}} />);
+    const text = stripTags(markup);
+    expect(text).toContain("Reset to demo");
+    expect(text).not.toContain("Replace your project");
+    // The armed state's destructive styling is nowhere in the resting state.
+    expect(markup).not.toContain("text-red-400");
+  });
+
+  it("armed (test seam): asks the question and offers Reset / Keep", () => {
+    const markup = renderToStaticMarkup(
+      <ResetToDemoButton onReset={() => {}} initialConfirming />,
+    );
+    const text = stripTags(markup);
+    expect(text).toContain("Replace your project with the demo?");
+    expect(text).toContain("Reset");
+    expect(text).toContain("Keep");
+    expect(markup).toContain("text-red-400"); // the destructive click is marked
   });
 });

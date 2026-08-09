@@ -29,6 +29,7 @@ import { CARD_CAP } from "@/lib/lang/generate";
 import { KEYWORDS } from "@/lib/lang/lexer";
 import { BLOCK_OPENERS } from "@/lib/lang/parser";
 import { DEFAULT_PDF_OPTIONS, PAGE_SIZES } from "@/app/editor/_components/pdfLayout";
+import { PERSIST_DEBOUNCE_MS } from "@/app/editor/_store/persistence";
 import { loadDocPages } from "@/lib/docs/pages";
 
 const pages = loadDocPages();
@@ -148,6 +149,11 @@ const NUMERIC_CLAIMS: {
       /\*\*(\d[\d,]*) physical cards per/g,
     ],
     expected: CARD_CAP,
+  },
+  {
+    label: "Autosave debounce (stated in seconds)",
+    patterns: [/about \*\*(\d[\d,]*) second\*\* after your last change/g],
+    expected: PERSIST_DEBOUNCE_MS / 1000,
   },
 ];
 

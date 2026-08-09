@@ -23,9 +23,10 @@ to read them now than to discover them three hours into a deck.
 
 ## Persistence
 
-- **Projects don't survive a reload.** Copy your code somewhere safe. Your spreadsheet
-  rows go with the page too, so keep decks small enough to retype while this is true,
-  or export a PDF as you go.
+- **One save slot, this browser only.** Your project [autosaves](autosave.md) and
+  survives reloads, but there are no project files yet — nothing to export, import,
+  or sync between browsers — and two open editor tabs overwrite each other (the last
+  one to change wins).
 
 ## Size caps
 

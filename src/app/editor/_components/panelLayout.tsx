@@ -1,12 +1,21 @@
 "use client";
 
+import { useEffect } from "react";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import StatusBar from "@/app/editor/_components/statusBar";
 import WindowCode from "@/app/editor/_components/windowCode";
 import WindowPreview from "@/app/editor/_components/windowPreview";
 import WindowSpreadsheet from "@/app/editor/_components/windowSpreadsheet";
+import { initEditorPersistence } from "@/app/editor/_store/persistence";
 
 export default function PanelLayout() {
+  // Autosave restore + subscription, POST-hydration (§6.2): the prerender and
+  // the hydration pass show the demo; restoring any earlier would mismatch
+  // them. Idempotent, so StrictMode's double effect run is harmless.
+  useEffect(() => {
+    initEditorPersistence();
+  }, []);
+
   return (
     <div className="h-screen flex flex-col bg-gray-900 text-white">
       {/* Main Split Panel */}

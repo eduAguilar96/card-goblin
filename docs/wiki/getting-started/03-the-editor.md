@@ -63,7 +63,8 @@ One tab per `Sheet:` you declare in code. The **columns come from your code**; t
 
 Total cards, code problems, flagged cells, and excluded rows — plus a **stale**
 indicator when the preview is showing an older render because the current code
-doesn't compile.
+doesn't compile, and the **Reset to demo** button (it asks first — see
+[Autosave](autosave.md)).
 
 ## The compile loop
 
@@ -85,5 +86,6 @@ Two rules make it feel stable rather than twitchy:
 
 ## Saving your work
 
-Projects don't persist across reloads yet — **copy your code out to keep it**. Autosave
-and project files are on the [roadmap](roadmap.md).
+The editor [autosaves](autosave.md) your code and rows to this browser and restores
+them when you come back — one save slot, one browser. For anything precious, copy
+the code out too; project files are on the [roadmap](roadmap.md).

@@ -120,6 +120,10 @@ export interface EditorState {
   /** True while the latest compile is bad — preview/grid are showing the
    * last good result (§4.2). */
   isStale: boolean;
+  /** True when autosave hit unusable storage this session (§6.2 failure
+   * posture: private mode, quota). Written by persistence.ts via setState —
+   * no action, because nothing inside the editor ever flips it back. */
+  autosaveDisabled: boolean;
   setCode(code: string): void;
   /** Writes one cell and marks the row edited (◆29). */
   setCell(sheet: string, row: number, column: string, value: string): void;
@@ -129,6 +133,12 @@ export interface EditorState {
   /** Removes the row and its edited flag together. Recompiles synchronously
    * (MAJOR-1: shifted rows must never wear stale cell flags). */
   deleteRow(sheet: string, row: number): void;
+  /** Replace the whole project (§6.2: autosave restore, reset-to-demo) —
+   * equivalent to seeding a fresh store while keeping subscribers: seed
+   * normalized, last-goods cleared, pending debounce cancelled, eager
+   * synchronous recompile. `autosaveDisabled` survives — storage doesn't get
+   * healthier because the project changed. */
+  replaceProject(seed: EditorSeed): void;
   /** Synchronous unconditional compile (cancels any pending debounce). */
   recompile(): void;
   /** Runs the pending debounced compile now; no-op when nothing is pending. */
@@ -436,6 +446,7 @@ export function createEditorStore(seed: EditorSeed = demoSeed()): EditorStore {
       lastGoodSchema: null,
       lastGoodModel: null,
       isStale: false,
+      autosaveDisabled: false,
 
       setCode: (code) => {
         set({ code });
@@ -492,6 +503,21 @@ export function createEditorStore(seed: EditorSeed = demoSeed()): EditorStore {
         // index — cell flags keyed by rowIndex must recompute NOW, not after
         // the 300 ms debounce, or the grid flags the wrong rows meanwhile.
         cancelPending();
+        runCompile();
+      },
+
+      replaceProject: (next) => {
+        // Fresh-store semantics (§6.2): the last-goods belong to the OLD
+        // project — a restore/reset must not leave the preview showing it.
+        cancelPending();
+        set({
+          code: next.code,
+          sheets: normalizeSeedSheets(next.sheets),
+          compile: null,
+          lastGoodSchema: null,
+          lastGoodModel: null,
+          isStale: false,
+        });
         runCompile();
       },
 

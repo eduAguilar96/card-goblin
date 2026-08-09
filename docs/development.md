@@ -36,6 +36,7 @@ src/lib/lang/            the compiler (pure, no React)
   demoProject.ts         the seeded demo (kept byte-identical to DESIGN.md §3.9)
 src/app/editor/
   _store/editorStore.ts  Zustand store: debounced compile, keep-last-good, rename migration
+  _store/persistence.ts  localStorage autosave: debounced save, quarantined restore, reset
   _components/           Monaco window (windowCode), SVG preview (windowPreview,
                          cardSvg, deckSection, previewSingle, previewVirtual),
                          bespoke grid

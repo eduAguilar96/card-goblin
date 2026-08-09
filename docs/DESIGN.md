@@ -521,6 +521,43 @@ exhaustive code list, custom card sizes, compile in a worker if needed.
   the canvas/pdf-lib assembly is a thin injected layer (pdf assembly itself is
   node-testable with stub images).
 
+### 6.2 localStorage autosave — agreed spec (2026-08-08)
+
+- **What persists:** `{ version, code, sheets }` — per sheet, `rows` AND
+  `editedRows` (the ◆29 flags are project data: dropping them would un-dim
+  pristine rows and change D003 behavior on restore). Compile state is derived
+  and never stored. One slot, key `cardgoblin.project.v1`; the version is in the
+  key and repeated in the payload — either mismatching means "not restorable",
+  never "migrate silently".
+- **When:** debounced **1 s** after any code/sheet change — deliberately separate
+  from the 300 ms compile debounce (saving needs no compile result, and a save
+  per keystroke burst is wasted I/O) — plus a flush on `pagehide` and on
+  `visibilitychange → hidden`, the only signals mobile browsers fire reliably.
+- **Restore:** on editor mount, a stored payload that parses, version-matches,
+  and is shape-valid (string `code`; per sheet: `rows` an array of string-valued
+  records, `editedRows` an array — misalignment normalized by the seed contract)
+  replaces the demo via `replaceProject`, equivalent to seeding a fresh store
+  (last-goods cleared, eager recompile; broken saved code restores as broken —
+  what you had is what you get back). Anything else falls back to the demo seed
+  WITHOUT touching the stored payload; the unreadable string is additionally
+  copied to `cardgoblin.project.quarantine` (best-effort) so not even the next
+  autosave can destroy it — a corrupt project stays recoverable by hand.
+- **SSR mechanism:** the store singleton stays SSR-pure, so the static prerender
+  and the hydration pass both show the demo; restore + the persist subscription
+  attach in a post-hydration effect (`initEditorPersistence`, idempotent for
+  StrictMode's double-mount). Accepted cost: returning users see a demo-frame
+  flash before their project appears. Restoring any earlier would make the
+  first client render mismatch the prerendered demo HTML.
+- **Reset to demo:** a status-bar affordance with an inline two-step confirm
+  (destructive — there is one slot). It removes both keys and reseeds via
+  `replaceProject`; the reset itself is not re-persisted, so storage stays
+  empty until the next user edit.
+- **Failure posture:** storage access or writes throwing (private mode, quota)
+  disables autosave for the session — `autosaveDisabled` in the store, a quiet
+  "autosave off" in the status bar, the editor otherwise untouched. Multi-tab
+  is last-writer-wins (no `storage`-event merging in v1; the losing tab's work
+  is gone on its next load) — accepted until real project files (§7).
+
 ## 7. Milestone 3
 
 Projects & persistence (file export/import of `{code, sheets}`, then accounts/backend),

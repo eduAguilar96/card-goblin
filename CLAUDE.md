@@ -120,7 +120,8 @@ missing from the docs. Touching any of these will fail `npm test` until the wiki
 matches:
 
 `SIZE_PRESETS` · `CARD_CAP` · `REPEAT_CAP` · `DICIER_CODES` · `CSS_COLOR_NAMES` ·
-`KEYWORDS` · `BLOCK_OPENERS` · `DEFAULT_PDF_OPTIONS` · `PAGE_SIZES`
+`KEYWORDS` · `BLOCK_OPENERS` · `DEFAULT_PDF_OPTIONS` · `PAGE_SIZES` ·
+`PERSIST_DEBOUNCE_MS`
 
 When it fails there are two honest fixes: update the wiki because the code changed, or
 update the *pattern* because the prose was legitimately reworded. **Never delete a

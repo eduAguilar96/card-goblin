@@ -19,11 +19,13 @@ pipeline from script to rendered deck.
 **PDF export.** Page size, margins, spacing, cut lines, crop marks, and
 duplex-mirrored backs, rendered at 300 DPI. See [PDF export](pdf-export.md).
 
+**Autosave.** Your project — code and rows — survives a reload, saved in your
+browser, with a **Reset to demo** escape hatch. See [Autosave](autosave.md).
+
 ## Being built next
 
 - **`Image` element** — place your own artwork on a card. The biggest gap today.
 - **Autocomplete** — column names, enum cases, and icon codes offered as you type.
-- **Autosave** — your project surviving a reload, then real project files.
 - **Custom card sizes** — beyond the [five presets](card-sizes.md).
 - **Icon styles** — Dicier ships several (flat, block, round, pixel); only one is
   wired up.

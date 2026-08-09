@@ -23,13 +23,19 @@
  *   tabs are holding the last good state while the counts above track the
  *   live (broken) compile.
  *
+ * The right side is the §6.2 autosave surface: a quiet "autosave off" note
+ * when storage is unusable this session, and the destructive "Reset to demo"
+ * affordance behind an inline two-step confirm (no browser confirm() — it
+ * must live in the same dark chrome and be statically renderable for tests).
+ *
  * Split (same pattern as the other windows): `StatusBar` is the thin store
  * subscription; `StatusBarContent` (exported for tests) takes the store
  * surface as props for renderToStaticMarkup-driven tests.
  */
 
-import type { ReactElement } from "react";
+import { useState, type ReactElement } from "react";
 import { buildFlagIndex } from "@/app/editor/_components/gridModel";
+import { resetEditorToDemo } from "@/app/editor/_store/persistence";
 import {
   useEditorStore,
   type CompileState,
@@ -40,13 +46,24 @@ export default function StatusBar(): ReactElement {
   const compile = useEditorStore((s) => s.compile);
   const lastGood = useEditorStore((s) => s.lastGoodModel);
   const isStale = useEditorStore((s) => s.isStale);
-  return <StatusBarContent compile={compile} lastGood={lastGood} isStale={isStale} />;
+  const autosaveDisabled = useEditorStore((s) => s.autosaveDisabled);
+  return (
+    <StatusBarContent
+      compile={compile}
+      lastGood={lastGood}
+      isStale={isStale}
+      autosaveDisabled={autosaveDisabled}
+      onReset={resetEditorToDemo}
+    />
+  );
 }
 
 export interface StatusBarContentProps {
   compile: CompileState | null;
   lastGood: LastGoodModel | null;
   isStale: boolean;
+  autosaveDisabled: boolean;
+  onReset(): void;
 }
 
 const plural = (n: number, noun: string): string => `${n} ${noun}${n === 1 ? "" : "s"}`;
@@ -55,6 +72,8 @@ export function StatusBarContent({
   compile,
   lastGood,
   isStale,
+  autosaveDisabled,
+  onReset,
 }: StatusBarContentProps): ReactElement {
   const cards = (lastGood?.model.decks ?? []).reduce((n, deck) => n + deck.cards.length, 0);
   const diagnostics = compile?.diagnostics ?? [];
@@ -83,12 +102,72 @@ export function StatusBarContent({
       </span>
       <Dot />
       <span>{plural(excluded, "pristine row")} excluded</span>
-      {isStale && (
-        <span className="ml-auto text-amber-400">
-          stale — preview &amp; tabs show last good state
-        </span>
-      )}
+      <span className="ml-auto flex items-center gap-3">
+        {isStale && (
+          <span className="text-amber-400">
+            stale — preview &amp; tabs show last good state
+          </span>
+        )}
+        {autosaveDisabled && (
+          <span
+            className="text-gray-500"
+            title="This browser refused storage (private mode or quota) — changes won't survive a reload."
+          >
+            autosave off
+          </span>
+        )}
+        <ResetToDemoButton onReset={onReset} />
+      </span>
     </div>
+  );
+}
+
+/**
+ * "Reset to demo" with its inline confirm (§6.2): the first click only arms
+ * the question — the destructive click is always a second, differently
+ * colored one. `initialConfirming` is a test seam (no interaction driver in
+ * this project), letting both states render statically.
+ */
+export function ResetToDemoButton({
+  onReset,
+  initialConfirming = false,
+}: {
+  onReset(): void;
+  initialConfirming?: boolean;
+}): ReactElement {
+  const [confirming, setConfirming] = useState(initialConfirming);
+  if (!confirming) {
+    return (
+      <button
+        type="button"
+        onClick={() => setConfirming(true)}
+        className="rounded border border-gray-700 px-1.5 text-gray-400 hover:border-gray-500 hover:text-gray-200"
+      >
+        Reset to demo
+      </button>
+    );
+  }
+  return (
+    <span className="flex items-center gap-1.5">
+      <span className="text-amber-400">Replace your project with the demo?</span>
+      <button
+        type="button"
+        onClick={() => {
+          setConfirming(false);
+          onReset();
+        }}
+        className="rounded border border-red-900 px-1.5 text-red-400 hover:border-red-500 hover:text-red-300"
+      >
+        Reset
+      </button>
+      <button
+        type="button"
+        onClick={() => setConfirming(false)}
+        className="rounded border border-gray-700 px-1.5 text-gray-400 hover:border-gray-500 hover:text-gray-200"
+      >
+        Keep
+      </button>
+    </span>
   );
 }
 
