@@ -24,7 +24,7 @@ import {
   type ReactNode,
   type SVGProps,
 } from "react";
-import type { DataDiagnostic, Shape, TextAnchor } from "@/lib/lang";
+import type { DataDiagnostic, IconStyle, Shape, TextAnchor } from "@/lib/lang";
 
 // ---------------------------------------------------------------------------
 // Font realization constants (§3.4 m10)
@@ -49,8 +49,27 @@ export const ICON_ASCENT = 0.8;
 /** v1 renders Geist only (§8); the CSS variable comes from the root layout. */
 const TEXT_FONT_FAMILY = "var(--font-geist-sans), sans-serif";
 
-/** Must match the @font-face family in globals.css. */
-export const ICON_FONT_FAMILY = "Dicier";
+/**
+ * CSS font-family per Icon `style:` (§3.3, M2). NAMING SCHEME (documented
+ * decision): the family is the vendor's woff2 filename stem — "Dicier-" +
+ * the style token's words capitalized and hyphen-joined ("flat_dark" →
+ * "Dicier-Flat-Dark") — so the globals.css @font-face block, the file on
+ * disk, and this map can be eyeballed against each other. Must match the
+ * @font-face families in globals.css; the Record type keeps it total when a
+ * style is ever added.
+ */
+export const ICON_FONT_FAMILIES: Record<IconStyle, string> = {
+  flat_dark: "Dicier-Flat-Dark",
+  flat_light: "Dicier-Flat-Light",
+  flat_heavy: "Dicier-Flat-Heavy",
+  block_dark: "Dicier-Block-Dark",
+  block_light: "Dicier-Block-Light",
+  block_heavy: "Dicier-Block-Heavy",
+  round_dark: "Dicier-Round-Dark",
+  round_light: "Dicier-Round-Light",
+  round_heavy: "Dicier-Round-Heavy",
+  pixel: "Dicier-Pixel",
+};
 
 /** §4.2 † — liga+calt make codes ligate, `dlig` is REQUIRED for double-digit
  * codes like "13_ON_D20", kern per the Dicier guide (§9). */
@@ -164,7 +183,7 @@ function renderShape(shape: Shape, index: number): ReactElement {
           fontSize={shape.size}
           fill={shape.color}
           textAnchor={SVG_ANCHOR[shape.anchor]}
-          fontFamily={ICON_FONT_FAMILY}
+          fontFamily={ICON_FONT_FAMILIES[shape.style]}
           style={ICON_STYLE}
         >
           {shape.code}

@@ -125,7 +125,8 @@ describe("CardSVG: Dragon front (demo model)", () => {
   it("renders the SWORDS icon in Dicier with all four font features", () => {
     const swords = textTags(markup).find((t) => t.content === "SWORDS");
     expect(swords).toBeDefined();
-    expect(swords!.attrs["font-family"]).toBe("Dicier");
+    // No style: on the demo icons → the flat_dark default family (§3.3 M2).
+    expect(swords!.attrs["font-family"]).toBe("Dicier-Flat-Dark");
     for (const feature of ['"liga" 1', '"calt" 1', '"dlig" 1', '"kern" 1']) {
       expect(swords!.attrs.style).toContain(feature);
     }
@@ -139,7 +140,7 @@ describe("CardSVG: Dragon front (demo model)", () => {
     for (const heart of hearts) {
       expect(heart.attrs.fill).toBe("red");
       expect(heart.attrs.y).toBe(String(25 + ICON_ASCENT * 1.8));
-      expect(heart.attrs["font-family"]).toBe("Dicier");
+      expect(heart.attrs["font-family"]).toBe("Dicier-Flat-Dark");
     }
   });
 
@@ -168,6 +169,22 @@ describe("CardSVG: tarot variant (fractional yUnits)", () => {
     expect(markup).toContain(`viewBox="0 0 20 ${240 / 7}"`);
     expect(markup).toContain(`height="${240 / 7}"`);
     expect(markup).toContain("aspect-ratio:70 / 120");
+  });
+});
+
+// -- icon style → Dicier face family (§3.3 M2) --------------------------------
+
+describe("CardSVG: icon style picks the Dicier face family", () => {
+  it("style: round_heavy renders in Dicier-Round-Heavy (others untouched)", () => {
+    const styledDeck = demoDeck(
+      DEMO_PROJECT_SOURCE.replace('code: "SWORDS"', 'code: "SWORDS"\n    style: round_heavy'),
+    );
+    const markup = renderFace("front", styledDeck.cards[0], styledDeck);
+    const swords = textTags(markup).find((t) => t.content === "SWORDS");
+    expect(swords!.attrs["font-family"]).toBe("Dicier-Round-Heavy");
+    // The un-styled hearts on the same face keep the flat_dark default.
+    const heart = textTags(markup).find((t) => t.content === "HEARTS");
+    expect(heart!.attrs["font-family"]).toBe("Dicier-Flat-Dark");
   });
 });
 

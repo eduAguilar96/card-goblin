@@ -23,8 +23,10 @@
 import type { Bindings } from "@/lib/lang";
 import {
   CSS_COLOR_NAMES,
+  DEFAULT_ICON_STYLE,
   DICIER_CODES,
   DICIER_CODE_CATEGORIES,
+  ICON_STYLES,
   SIZE_PRESETS,
   typeName,
 } from "@/lib/lang";
@@ -191,6 +193,7 @@ const ELEMENT_KEYS: Record<ElementKind, { key: string; detail: string }[]> = {
     { key: "code", detail: "Text — Dicier code" },
     { key: "color", detail: "Color (optional, default black)" },
     { key: "anchor", detail: "left | middle | right (optional)" },
+    { key: "style", detail: `Dicier face (optional, default ${DEFAULT_ICON_STYLE})` },
   ],
 };
 
@@ -199,6 +202,8 @@ const ELEMENT_KEYS: Record<ElementKind, { key: string; detail: string }[]> = {
 const CARD_KEYS: { key: string; detail: string }[] = [
   { key: "sheet", detail: "Sheet name" },
   { key: "size", detail: [...SIZE_PRESETS.keys()].join(" | ") },
+  { key: "width_mm", detail: "positive number (mm) — custom size, with height_mm" },
+  { key: "height_mm", detail: "positive number (mm) — custom size, with width_mm" },
   { key: "x_units", detail: "positive integer — grid columns" },
   { key: "y_units", detail: "auto | positive integer" },
   { key: "loop", detail: "<Enum> as <variable>" },
@@ -900,6 +905,9 @@ function valueSuggestions(
       ];
     case "x_units":
       return NO_SUGGESTIONS; // positive integer literal
+    case "width_mm":
+    case "height_mm":
+      return NO_SUGGESTIONS; // positive number literal (millimetres)
     case "count":
       return expressionExtras(beforeWord, scope(), snapshot);
 
@@ -929,6 +937,15 @@ function valueSuggestions(
         insertText: a,
         kind: "value" as const,
         detail: "anchor",
+        group: 0 as const,
+      }));
+    case "style":
+      // Icon only (§3.3): the ten Dicier faces, closed vocabulary.
+      return ICON_STYLES.map((s) => ({
+        label: s,
+        insertText: s,
+        kind: "value" as const,
+        detail: s === DEFAULT_ICON_STYLE ? "Dicier face (the default)" : "Dicier face",
         group: 0 as const,
       }));
     case "text":

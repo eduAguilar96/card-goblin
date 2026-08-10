@@ -147,7 +147,8 @@ never referenced (⚑11).
 |---|---|---|
 | `Rectangle` | `x y width height color` | anchor: top-left |
 | `Text` | `x y size color text anchor` | single line (◆24); `size` = em height in units; default color `black`, default `anchor: left` |
-| `Icon` | `x y size color code anchor` | Dicier glyph; `code` is a Text expression; literal codes checked against the curated list — unknown literal = **W004 warning**, since the list is non-exhaustive (⚑10†) |
+| `Icon` | `x y size color code anchor style` | Dicier glyph; `code` is a Text expression; literal codes checked against the curated list — unknown literal = **W004 warning**, since the list is non-exhaustive (⚑10†). `style:` (M2, agreed 2026-08-09) is an optional bare identifier — `flat_dark` (default), `flat_light`, `flat_heavy`, `block_dark`, `block_light`, `block_heavy`, `round_dark`, `round_light`, `round_heavy`, `pixel` — resolved by expected type like `anchor:`; unknown value = E008. All ten faces are declared as `@font-face`; browsers fetch only the ones actually used |
+| `Image` | `x y width height src fit` | (M2, agreed 2026-08-09) raster art from a URL. `src:` is a Text expression (URLs may come from a sheet column); `fit:` optional bare identifier `contain` (default) \| `cover` \| `stretch`, realized via SVG `preserveAspectRatio`. Loading → subtle placeholder box; failed load → placeholder with warning styling (renderer-level state, **not** a D-code — the model stays pure, per-card isolation preserved). At PDF export, images load with `crossorigin=anonymous`; a load failure or canvas taint exports that image as a marked placeholder box and the modal warns "N images could not be embedded" before export — the deck always exports (⚑8 philosophy) |
 | `Repeat` | `Repeat: <Number expr> as <var>` (single line, ◆23†) | children emitted N times; `[var]` is the 0-based index (◆18), usable in any child expression; nests; cap 500/card (◆27) |
 
 **The showcase** — one number in the sheet becomes a row of hearts (⚑6, ⚑9, ⚑10):
@@ -165,7 +166,16 @@ Repeat: [health] as i
 ### 3.4 Geometry (⚑7†)
 
 - `size:` picks a physical preset: `poker` 63.5×88.9 mm, `bridge` 57.15×88.9,
-  `tarot` 70×120, `square` 70×70, `mini` 44×63.5. (Custom sizes: M2.)
+  `tarot` 70×120, `square` 70×70, `mini` 44×63.5. **Custom sizes (M2, agreed
+  2026-08-09):** a Card may *instead* declare `width_mm:` + `height_mm:` (positive
+  number literals, both required together; combining them with `size:`, or giving
+  only one, is E008). Values must be **exact in hundredths of a millimetre with a
+  0.01 mm floor** (E008 otherwise) — the unit math works in integer mm-hundredths,
+  and this constraint is what keeps `y_units: auto` exactly square and the model
+  free of non-finite numbers for every accepted size. Chosen over dedicated
+  dimension syntax (`40mm x 40mm`)
+  because two ordinary Number properties need zero new grammar — parser, pins,
+  autocomplete, and docs all extend mechanically.
 - `x_units: N` divides the card width into N units → **1 unit = width/N mm**, exact
   for PDF later. `y_units: auto` = the exact fractional value `N × height/width` —
   **units are always square; the vertical unit count may be fractional** (poker@20

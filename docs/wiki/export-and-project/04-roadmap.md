@@ -26,12 +26,15 @@ browser, with a **Reset to demo** escape hatch. See [Autosave](autosave.md).
 names, property names, enum cases, color names, icon codes. See
 [The editor](the-editor.md).
 
+**Custom card sizes.** `width_mm:` + `height_mm:` on a Card, beyond the
+[five presets](card-sizes.md).
+
+**Icon styles.** All ten Dicier faces (flat/block/round × dark/light/heavy,
+plus pixel) via `style:` — see [Icons](icons.md).
+
 ## Being built next
 
 - **`Image` element** — place your own artwork on a card. The biggest gap today.
-- **Custom card sizes** — beyond the [five presets](card-sizes.md).
-- **Icon styles** — Dicier ships several (flat, block, round, pixel); only one is
-  wired up.
 
 ## Further out
 

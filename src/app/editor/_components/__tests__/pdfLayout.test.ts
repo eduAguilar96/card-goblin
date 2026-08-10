@@ -161,6 +161,49 @@ describe("layoutPdf on the real demo model", () => {
     expect(layout.faceSpecs.size).toBe(6);
     expect(layout.pages.reduce((n, p) => n + p.cards.length, 0)).toBe(9);
   });
+
+  it("custom-size decks (§3.4 M2) lay out from their own mm — fit both ways", () => {
+    const customModel = (widthMm: number, heightMm: number) => {
+      const result = compileProject(
+        [
+          "Sheet: Sh",
+          "  column t: Text",
+          "Template: T",
+          "  Text:",
+          "    x: 0",
+          "    y: 0",
+          "    size: 1",
+          "    text: [t]",
+          "Card: Token",
+          "  sheet: Sh",
+          `  width_mm: ${widthMm}`,
+          `  height_mm: ${heightMm}`,
+          "  x_units: 10",
+          "  y_units: auto",
+          "  Front: T",
+        ].join("\n") + "\n",
+        { Sh: [{ t: "x" }] },
+      );
+      expect(result.diagnostics).toEqual([]);
+      return result.model;
+    };
+
+    // 40×40 mm on letter, margin 10: ⌊195.9/40⌋ × ⌊259.4/40⌋ = 4 × 6 per page.
+    const fits = layoutPdf(customModel(40, 40), opts({ backs: "none" }));
+    expect(fits.fitErrors).toEqual([]);
+    expect(fits.pages[0].cards[0]).toMatchObject({ widthMm: 40, heightMm: 40 });
+    expect(computeGrid(PAGE_SIZES.letter, 10, 0, 40, 40)).toMatchObject({
+      cols: 4,
+      rows: 6,
+    });
+
+    // 250 mm exceeds letter's printable width → the fit error carries the mm.
+    const tooBig = layoutPdf(customModel(250, 250), opts({ backs: "none" }));
+    expect(tooBig.pages).toEqual([]);
+    expect(tooBig.fitErrors).toMatchObject([
+      { deckName: "Token", cardWidthMm: 250, cardHeightMm: 250 },
+    ]);
+  });
 });
 
 describe("assemblePdf (node smoke with stub images)", () => {

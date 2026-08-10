@@ -7,7 +7,13 @@
  * keeps them honest by probing E008 behavior in both directions.
  */
 import { describe, expect, it } from "vitest";
-import { compileSource, DICIER_CODES, SIZE_PRESETS } from "@/lib/lang";
+import {
+  compileSource,
+  DEFAULT_ICON_STYLE,
+  DICIER_CODES,
+  ICON_STYLES,
+  SIZE_PRESETS,
+} from "@/lib/lang";
 import type { SchemaSnapshot } from "@/app/editor/_store/editorStore";
 import {
   buildCompletionSnapshot,
@@ -339,19 +345,20 @@ describe("property keys", () => {
     expect(byLabel(r, "x").insertText).toBe("x: ");
   });
 
-  it("Text keys include text/anchor; Icon keys include code", () => {
+  it("Text keys include text/anchor; Icon keys include code and style", () => {
     expect(labels(at(src("Template: T", "  Text:", "    ¦")))).toEqual([
       "x", "y", "size", "text", "color", "anchor",
     ]);
     expect(labels(at(src("Template: T", "  Icon:", "    ¦")))).toEqual([
-      "x", "y", "size", "code", "color", "anchor",
+      "x", "y", "size", "code", "color", "anchor", "style",
     ]);
   });
 
-  it("Card keys include properties and Front/Back face lines", () => {
+  it("Card keys include properties (custom-size pair too) and Front/Back face lines", () => {
     const r = at(src("Card: M", "  ¦"));
     expect(labels(r)).toEqual([
-      "sheet", "size", "x_units", "y_units", "loop", "count", "Front", "Back",
+      "sheet", "size", "width_mm", "height_mm", "x_units", "y_units", "loop", "count",
+      "Front", "Back",
     ]);
     expect(byLabel(r, "size").detail).toBe([...SIZE_PRESETS.keys()].join(" | "));
   });
@@ -460,6 +467,12 @@ describe("value positions", () => {
     ]);
   });
 
+  it("style: offers exactly the ten Dicier faces, default marked", () => {
+    const r = at(src("Template: T", "  Icon:", "    style: ¦"));
+    expect(labels(r)).toEqual([...ICON_STYLES]);
+    expect(byLabel(r, DEFAULT_ICON_STYLE).detail).toContain("default");
+  });
+
   it("x: includes middle on Text/Icon but not on Rectangle", () => {
     expect(labels(at(src("Template: T", "  Icon:", "    x: ¦")))).toContain("middle");
     expect(labels(at(src("Template: T", "  Rectangle:", "    x: ¦")))).not.toContain("middle");
@@ -494,6 +507,11 @@ describe("value positions", () => {
   it("y_units: offers auto; x_units: offers nothing", () => {
     expect(labels(at(src("Card: M", "  y_units: ¦")))).toEqual(["auto"]);
     expect(at(src("Card: M", "  x_units: ¦")).suggestions).toEqual([]);
+  });
+
+  it("width_mm:/height_mm: are literal positions — nothing offered", () => {
+    expect(at(src("Card: M", "  width_mm: ¦")).suggestions).toEqual([]);
+    expect(at(src("Card: M", "  height_mm: ¦")).suggestions).toEqual([]);
   });
 
   it("Repeat: header is an expression until `as`, then naming silence", () => {
@@ -705,6 +723,7 @@ describe("compiler pins (E008 probes)", () => {
     '    code: "HEARTS"',
     "    color: red",
     "    anchor: right",
+    "    style: round_heavy",
     "Template: BackT",
     "  Rectangle:",
     "    x: 0",
@@ -721,6 +740,15 @@ describe("compiler pins (E008 probes)", () => {
     "  count: [cost]",
     "  Front: AllKeys",
     "  Back: BackT",
+    // Custom size (§3.4 M2): width_mm/height_mm REPLACE size:, so the pair
+    // needs its own Card — mixing them with a preset is E008 by design.
+    "Card: Token",
+    "  sheet: Monsters",
+    "  width_mm: 40",
+    "  height_mm: 40",
+    "  x_units: 10",
+    "  y_units: auto",
+    "  Front: BackT",
   );
 
   it("every suggested key, used together, checks clean (no E008)", () => {

@@ -32,7 +32,8 @@ import type {
   TemplateNode,
 } from "./ast";
 import type { CardBindings, ResolvableNode, Resolution } from "./check";
-import type { DataDiagnostic, LoopCaseBinding, Shape, TextAnchor } from "./model";
+import type { DataDiagnostic, IconStyle, LoopCaseBinding, Shape, TextAnchor } from "./model";
+import { DEFAULT_ICON_STYLE } from "./model";
 import { DICIER_CODES } from "./dicier-codes";
 
 // ---------------------------------------------------------------------------
@@ -486,6 +487,7 @@ function evalElement(el: ElementNode, ctx: EvalContext): Shape {
         color: colorProp(el, ctx, "black"),
         code,
         anchor,
+        style: styleOf(el, ctx),
       };
     }
   }
@@ -544,6 +546,17 @@ function anchorOf(el: ElementNode, ctx: EvalContext): TextAnchor {
   const res = ctx.card.resolutions.get(expr);
   if (res?.kind !== "anchor") return poisoned();
   return res.keyword;
+}
+
+/** Icon `style:` (§3.3, M2): checker-blessed identifier or the flat_dark
+ * default — the same follow-the-resolution shape as anchorOf. */
+function styleOf(el: ElementNode, ctx: EvalContext): IconStyle {
+  const expr = findProp(el, "style");
+  if (!expr) return DEFAULT_ICON_STYLE;
+  if (expr.kind !== "Identifier") return poisoned();
+  const res = ctx.card.resolutions.get(expr);
+  if (res?.kind !== "iconStyle") return poisoned();
+  return res.style;
 }
 
 /** The literal value of a string with NO interpolation parts, else null. */

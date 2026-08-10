@@ -34,7 +34,7 @@ them.
 |---|---|---|---|
 | `Rectangle` | `x y width height color` | — | anchored at its top-left corner |
 | `Text` | `x y size text` | `color` (black), `anchor` (left) | one line; `size` is text height in units |
-| `Icon` | `x y size code` | `color` (black), `anchor` (left) | a game glyph — see [Icons](icons.md) |
+| `Icon` | `x y size code` | `color` (black), `anchor` (left), `style` (flat_dark) | a game glyph — see [Icons](icons.md) |
 | `Repeat: N as i` | — | — | draws its children N times |
 
 Positioning rules:

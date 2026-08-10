@@ -16,17 +16,18 @@
  * renders in an isolated document that can neither see the page's loaded
  * fonts nor fetch external resources. `document.fonts.ready` alone is NOT
  * enough — Dicier (and Geist) must be re-declared INSIDE the SVG as
- * `@font-face` rules with data: URIs. `buildFontEmbedCss` scrapes the page's
- * own @font-face rules for the needed families, inlines their sources, and
- * also pins the `--font-geist-sans` variable (cardSvg's text family is
- * `var(--font-geist-sans), sans-serif`, and CSS variables don't cross into
- * the img document either). Any scrape/fetch failure degrades to fallback
- * fonts rather than failing the export.
+ * `@font-face` rules with data: URIs. `getFontEmbedCss` scrapes the page's
+ * own @font-face rules for the needed families — Geist plus exactly the
+ * Dicier faces the exported shapes use (iconFamiliesUsed) — inlines their
+ * sources, and also pins the `--font-geist-sans` variable (cardSvg's text
+ * family is `var(--font-geist-sans), sans-serif`, and CSS variables don't
+ * cross into the img document either). Any scrape/fetch failure degrades to
+ * fallback fonts rather than failing the export.
  */
 
 import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
-import { CardFaceSvg, ICON_FONT_FAMILY } from "@/app/editor/_components/cardSvg";
+import { CardFaceSvg, ICON_FONT_FAMILIES } from "@/app/editor/_components/cardSvg";
 import type { FaceRasterSpec } from "@/app/editor/_components/pdfLayout";
 
 /** §6.1: rasterize at 300 DPI — px = mm × 300 / 25.4. */
@@ -107,16 +108,28 @@ function geistFamilies(): string[] {
 }
 
 /**
- * Build the `<style>` CSS injected into every rasterized SVG: data-URI
- * @font-face rules for Dicier + the page's Geist, plus a `--font-geist-sans`
- * definition so cardSvg's var() resolves inside the img document. Cached for
- * the session (fonts never change at runtime).
+ * The Dicier families the faces being exported ACTUALLY draw (§3.3, M2).
+ * Ten faces exist and globals.css declares them all, but embedding every one
+ * into each rasterized SVG would add ~1 MB of base64 per face — so the embed
+ * CSS covers exactly the styles used across this export's specs (plus Geist
+ * for Text shapes). Pure and exported for unit tests.
  */
-async function buildFontEmbedCss(): Promise<string> {
-  const geist = geistFamilies();
-  const sources = findFontFaces([ICON_FONT_FAMILY, ...geist]);
+export function iconFamiliesUsed(specs: ReadonlyMap<string, FaceRasterSpec>): string[] {
+  const families = new Set<string>();
+  for (const spec of specs.values()) {
+    for (const shape of spec.face) {
+      if (shape.kind === "icon") families.add(ICON_FONT_FAMILIES[shape.style]);
+    }
+  }
+  return [...families].sort();
+}
+
+/** Data-URI @font-face rules for ONE family, scraped from the page's own
+ * stylesheets (a family may own several rules — Geist can). A fetch failure
+ * degrades that rule to fallback fonts instead of blocking the export. */
+async function buildFamilyCss(family: string): Promise<string> {
   const parts: string[] = [];
-  for (const { family, url } of sources) {
+  for (const { family: found, url } of findFontFaces([family])) {
     try {
       const response = await fetch(url);
       if (!response.ok) continue;
@@ -125,7 +138,7 @@ async function buildFontEmbedCss(): Promise<string> {
       // and it is labeled woff2 unconditionally — fine for next/font and the
       // bundled Dicier today, wrong the day a face lists another format first.
       parts.push(
-        `@font-face{font-family:'${family}';src:url(data:font/woff2;base64,${bytesToBase64(
+        `@font-face{font-family:'${found}';src:url(data:font/woff2;base64,${bytesToBase64(
           bytes,
         )}) format('woff2');}`,
       );
@@ -133,25 +146,44 @@ async function buildFontEmbedCss(): Promise<string> {
       // Degrade: the face renders with fallback fonts instead of blocking.
     }
   }
+  return parts.join("\n");
+}
+
+/** Per-family session cache (fonts never change at runtime) — but never a
+ * REJECTED promise: an unexpected failure mid-scrape must poison only its own
+ * export, not every later one. */
+const familyCssCache = new Map<string, Promise<string>>();
+
+function getFamilyCss(family: string): Promise<string> {
+  let cached = familyCssCache.get(family);
+  if (cached === undefined) {
+    cached = buildFamilyCss(family).catch((error: unknown) => {
+      familyCssCache.delete(family); // evict so the next export retries
+      throw error;
+    });
+    familyCssCache.set(family, cached);
+  }
+  return cached;
+}
+
+/**
+ * Build the `<style>` CSS injected into every rasterized SVG of one export:
+ * data-URI @font-face rules for the icon families these faces use + the
+ * page's Geist, plus a `--font-geist-sans` definition so cardSvg's var()
+ * resolves inside the img document.
+ */
+async function getFontEmbedCss(specs: ReadonlyMap<string, FaceRasterSpec>): Promise<string> {
+  const geist = geistFamilies();
+  const parts: string[] = [];
+  for (const family of [...geist, ...iconFamiliesUsed(specs)]) {
+    const css = await getFamilyCss(family);
+    if (css) parts.push(css);
+  }
   if (geist.length > 0) {
     parts.push(`svg{--font-geist-sans:${geist.map((f) => `'${f}'`).join(",")};}`);
   }
   return parts.join("\n");
 }
-
-let fontCssCache: Promise<string> | null = null;
-
-/** Cached for the session — but never as a REJECTED promise: an unexpected
- * failure mid-scrape must poison only its own export, not every later one. */
-const getFontEmbedCss = (): Promise<string> => {
-  if (fontCssCache === null) {
-    fontCssCache = buildFontEmbedCss().catch((error: unknown) => {
-      fontCssCache = null; // evict so the next export retries
-      throw error;
-    });
-  }
-  return fontCssCache;
-};
 
 // ---------------------------------------------------------------------------
 // SVG serialization and rasterization
@@ -240,7 +272,7 @@ async function rasterizeOne(spec: FaceRasterSpec, fontCss: string): Promise<Uint
  */
 export const rasterizeFaces: RasterizeFaces = async (specs) => {
   await document.fonts.ready;
-  const fontCss = await getFontEmbedCss();
+  const fontCss = await getFontEmbedCss(specs);
   const out = new Map<string, Uint8Array>();
   for (const [key, spec] of specs) {
     out.set(key, await rasterizeOne(spec, fontCss));

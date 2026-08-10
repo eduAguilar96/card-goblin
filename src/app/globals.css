@@ -2,17 +2,84 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Dicier Flat-Dark (DESIGN.md ⚑10, ◆28) — the icon font for `Icon` elements,
-   referenced by family name from CardSVG's inline SVG <text> shapes. The
-   .woff2 ships from src/app/fonts/dicier/ with its LICENSE.txt adjacent
-   (CC BY 4.0 requires distributing the license with the font, §9).
-   `font-display: block`: while the font loads, a fallback face would show the
-   raw ligature code text for EVERY icon — raw text is D005's deliberate
-   unknown-code indicator (§3.8), so a global flash of it would read as a wall
-   of errors. Better to keep icons invisible for the brief load. */
+/* Dicier (DESIGN.md ⚑10, §3.3) — the icon fonts for `Icon` elements, one
+   @font-face per `style:` value. Family names are the vendor filename stems
+   ("Dicier-Flat-Dark") and must match ICON_FONT_FAMILIES in cardSvg.tsx,
+   which derives them mechanically from the style token. All ten faces are
+   DECLARED here, but a browser only fetches the ones a rendered card
+   actually uses (§3.3). The .woff2 files ship from src/app/fonts/dicier/
+   with LICENSE.txt adjacent (CC BY 4.0 requires distributing the license
+   with the font, §9).
+   `font-display: block`: while a face loads, a fallback would show the raw
+   ligature code text for EVERY icon — raw text is D005's deliberate
+   unknown-code indicator (§3.8), so a global flash of it would read as a
+   wall of errors. Better to keep icons invisible for the brief load. */
 @font-face {
-  font-family: "Dicier";
+  font-family: "Dicier-Flat-Dark";
   src: url("./fonts/dicier/Dicier-Flat-Dark.woff2") format("woff2");
+  font-weight: normal;
+  font-style: normal;
+  font-display: block;
+}
+@font-face {
+  font-family: "Dicier-Flat-Light";
+  src: url("./fonts/dicier/Dicier-Flat-Light.woff2") format("woff2");
+  font-weight: normal;
+  font-style: normal;
+  font-display: block;
+}
+@font-face {
+  font-family: "Dicier-Flat-Heavy";
+  src: url("./fonts/dicier/Dicier-Flat-Heavy.woff2") format("woff2");
+  font-weight: normal;
+  font-style: normal;
+  font-display: block;
+}
+@font-face {
+  font-family: "Dicier-Block-Dark";
+  src: url("./fonts/dicier/Dicier-Block-Dark.woff2") format("woff2");
+  font-weight: normal;
+  font-style: normal;
+  font-display: block;
+}
+@font-face {
+  font-family: "Dicier-Block-Light";
+  src: url("./fonts/dicier/Dicier-Block-Light.woff2") format("woff2");
+  font-weight: normal;
+  font-style: normal;
+  font-display: block;
+}
+@font-face {
+  font-family: "Dicier-Block-Heavy";
+  src: url("./fonts/dicier/Dicier-Block-Heavy.woff2") format("woff2");
+  font-weight: normal;
+  font-style: normal;
+  font-display: block;
+}
+@font-face {
+  font-family: "Dicier-Round-Dark";
+  src: url("./fonts/dicier/Dicier-Round-Dark.woff2") format("woff2");
+  font-weight: normal;
+  font-style: normal;
+  font-display: block;
+}
+@font-face {
+  font-family: "Dicier-Round-Light";
+  src: url("./fonts/dicier/Dicier-Round-Light.woff2") format("woff2");
+  font-weight: normal;
+  font-style: normal;
+  font-display: block;
+}
+@font-face {
+  font-family: "Dicier-Round-Heavy";
+  src: url("./fonts/dicier/Dicier-Round-Heavy.woff2") format("woff2");
+  font-weight: normal;
+  font-style: normal;
+  font-display: block;
+}
+@font-face {
+  font-family: "Dicier-Pixel";
+  src: url("./fonts/dicier/Dicier-Pixel.woff2") format("woff2");
   font-weight: normal;
   font-style: normal;
   font-display: block;

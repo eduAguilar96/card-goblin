@@ -24,6 +24,7 @@ import { describe, expect, it } from "vitest";
 import { SIZE_PRESETS } from "@/lib/lang/check";
 import { CSS_COLOR_NAMES } from "@/lib/lang/css-colors";
 import { DICIER_CODES } from "@/lib/lang/dicier-codes";
+import { DEFAULT_ICON_STYLE, ICON_STYLES } from "@/lib/lang/model";
 import { REPEAT_CAP } from "@/lib/lang/eval";
 import { CARD_CAP } from "@/lib/lang/generate";
 import { KEYWORDS } from "@/lib/lang/lexer";
@@ -234,6 +235,33 @@ describe("the card-sizes table matches SIZE_PRESETS", () => {
     }
 
     expect(checked.sort()).toEqual([...SIZE_PRESETS.keys()].sort());
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Icon styles
+// ---------------------------------------------------------------------------
+
+describe("the icon-styles table matches ICON_STYLES", () => {
+  const text = pageText("icons");
+  /** `flat_dark` → its Face-column prose, from the table with a "style" header. */
+  const documented = new Map(
+    tableWithHeader(text, "style").rows.map(
+      (cells) => [plain(cells[0]), plain(cells[1] ?? "")] as const,
+    ),
+  );
+
+  it("documents every style — a new face can't ship undocumented", () => {
+    expect([...documented.keys()].sort()).toEqual([...ICON_STYLES].sort());
+  });
+
+  it("marks exactly the code's default style as the default", () => {
+    for (const [style, face] of documented) {
+      expect(
+        /default/i.test(face),
+        `"${style}" default marking must match DEFAULT_ICON_STYLE (${DEFAULT_ICON_STYLE})`,
+      ).toBe(style === DEFAULT_ICON_STYLE);
+    }
   });
 });
 

@@ -9,7 +9,7 @@ import { describe, expect, it } from "vitest";
 import type { DataRef, ElementNode, Program, RepeatNode, TemplateDecl } from "../ast";
 import type { CheckResult } from "../check";
 import { check } from "../check";
-import { compileSource } from "../index";
+import { compileSource, ICON_STYLES } from "../index";
 import type { Diagnostic } from "../diagnostics";
 import { parse } from "../parser";
 
@@ -565,6 +565,157 @@ describe("E008 required properties", () => {
     const ds = diagsOf(withCard([...CARD_ITEMS, "loop: Suit"]));
     expect(ds.map((d) => d.code)).toEqual(["E008"]);
     expect(ds[0].message).toContain("as <variable>");
+  });
+});
+
+// -- Icon style: (§3.3, M2) --------------------------------------------------
+
+describe("Icon style: (§3.3 M2)", () => {
+  const ICON_BASE = ["x: 1", "y: 1", "size: 1", 'code: "HEARTS"'];
+
+  it("accepts every one of the ten faces and records an iconStyle resolution", () => {
+    for (const style of ICON_STYLES) {
+      const result = checkOf(withElement("Icon:", [...ICON_BASE, `style: ${style}`]));
+      expect(result.diagnostics, style).toEqual([]);
+      const tpl = result.bindings.templates.get("T") as TemplateDecl;
+      const prop = (tpl.children[0] as ElementNode).properties.find(
+        (p) => p.key.name === "style",
+      )!;
+      expect(result.bindings.cards[0].resolutions.get(prop.value as never)).toEqual({
+        kind: "iconStyle",
+        style,
+      });
+    }
+  });
+
+  it("omitting style: is legal — the default is the evaluator's business", () => {
+    expect(codesOf(withElement("Icon:", ICON_BASE))).toEqual([]);
+  });
+
+  it("an unknown style is E008 naming the closed vocabulary", () => {
+    const ds = diagsOf(withElement("Icon:", [...ICON_BASE, "style: shiny"]));
+    expect(ds.map((d) => d.code)).toEqual(["E008"]);
+    expect(ds[0].message).toContain("style: must be one of flat_dark");
+  });
+
+  it("style must be a bare identifier — strings and expressions are E008", () => {
+    for (const bad of ['style: "flat_dark"', "style: 1", "style: 1 + 1"]) {
+      expect(codesOf(withElement("Icon:", [...ICON_BASE, bad])), bad).toEqual(["E008"]);
+    }
+  });
+
+  it("style on Text or Rectangle is an unknown property (Icon only, §3.3)", () => {
+    const ds = diagsOf(withElement("Text:", [...TEXT_BASE, 'text: "a"', "style: pixel"]));
+    expect(ds.map((d) => d.code)).toEqual(["E008"]);
+    expect(ds[0].message).toBe("Unknown property 'style:' on Text");
+  });
+});
+
+// -- custom card sizes (§3.4, M2) --------------------------------------------
+
+describe("custom card sizes (§3.4 M2)", () => {
+  const REST = ["x_units: 20", "y_units: auto", "Front: T"];
+
+  it("a width_mm/height_mm pair replaces size: and binds a 'custom' size", () => {
+    const result = checkOf(
+      withCard(["sheet: Monsters", "width_mm: 40", "height_mm: 61.5", ...REST]),
+    );
+    expect(result.diagnostics).toEqual([]);
+    expect(result.bindings.cards[0].size).toEqual({
+      name: "custom",
+      widthMm: 40,
+      heightMm: 61.5,
+    });
+  });
+
+  it("values below 0.01mm or finer than hundredths are E008 (never-NaN guard)", () => {
+    // Sub-hundredth sizes would make generate.ts's integer mm-hundredths math
+    // produce NaN/Infinity or silently non-square auto units (§3.4).
+    for (const pair of [
+      ["width_mm: 0.001", "height_mm: 40"],
+      ["width_mm: 40", "height_mm: 0.004"],
+      ["width_mm: 0.154", "height_mm: 40"],
+    ]) {
+      const codes = codesOf(withCard(["sheet: Monsters", ...pair, ...REST]));
+      expect(codes).toContain("E008");
+    }
+    // The floor itself is legal, as are ordinary two-decimal values.
+    expect(
+      diagsOf(withCard(["sheet: Monsters", "width_mm: 0.01", "height_mm: 0.01", ...REST])),
+    ).toEqual([]);
+    expect(
+      diagsOf(withCard(["sheet: Monsters", "width_mm: 57.15", "height_mm: 88.9", ...REST])),
+    ).toEqual([]);
+  });
+
+  it("giving only one of the pair is E008 naming the missing half", () => {
+    const noHeight = diagsOf(withCard(["sheet: Monsters", "width_mm: 40", ...REST]));
+    expect(noHeight.map((d) => d.code)).toEqual(["E008"]);
+    expect(noHeight[0].message).toContain("'height_mm:' is missing");
+
+    const noWidth = diagsOf(withCard(["sheet: Monsters", "height_mm: 40", ...REST]));
+    expect(noWidth.map((d) => d.code)).toEqual(["E008"]);
+    expect(noWidth[0].message).toContain("'width_mm:' is missing");
+  });
+
+  it("combining the pair (or half of it) with size: is E008, and poisons size", () => {
+    const source = withCard([
+      "sheet: Monsters",
+      "size: poker",
+      "width_mm: 40",
+      "height_mm: 40",
+      ...REST,
+    ]);
+    const result = checkOf(source);
+    expect(result.diagnostics.map((d) => d.code)).toEqual(["E008"]);
+    expect(result.diagnostics[0].message).toContain("not both");
+    // No deterministic winner exists — the card binds NO size (no deck).
+    expect(result.bindings.cards[0].size).toBeNull();
+
+    expect(
+      codesOf(withCard(["sheet: Monsters", "size: poker", "width_mm: 40", ...REST])),
+    ).toEqual(["E008"]);
+  });
+
+  it("values must be positive number literals", () => {
+    for (const bad of [
+      "width_mm: 0",
+      "width_mm: -40",
+      "width_mm: [cost]",
+      "width_mm: 40 + 1",
+      'width_mm: "40"',
+    ]) {
+      expect(
+        codesOf(withCard(["sheet: Monsters", bad, "height_mm: 40", ...REST])),
+        bad,
+      ).toEqual(["E008"]);
+    }
+  });
+
+  it("decimals are legal — the pair is exact millimetres like the presets", () => {
+    expect(
+      codesOf(withCard(["sheet: Monsters", "width_mm: 57.15", "height_mm: 88.9", ...REST])),
+    ).toEqual([]);
+  });
+
+  it("neither size: nor the pair → the plain missing-size E008", () => {
+    const ds = diagsOf(withCard(["sheet: Monsters", ...REST]));
+    expect(ds.map((d) => d.code)).toEqual(["E008"]);
+    expect(ds[0].message).toContain("'size:'");
+  });
+
+  it("W003 squareness math runs against the custom pair too", () => {
+    // 40×60 @ x_units 20 → the exact square value is 30; 31 stretches.
+    expect(
+      codesOf(
+        withCard(["sheet: Monsters", "width_mm: 40", "height_mm: 60", "x_units: 20", "y_units: 30", "Front: T"]),
+      ),
+    ).toEqual([]);
+    expect(
+      codesOf(
+        withCard(["sheet: Monsters", "width_mm: 40", "height_mm: 60", "x_units: 20", "y_units: 31", "Front: T"]),
+      ),
+    ).toEqual(["W003"]);
   });
 });
 

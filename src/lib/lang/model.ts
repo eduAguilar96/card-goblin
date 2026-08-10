@@ -79,6 +79,31 @@ export interface DataDiagnostic {
 /** Horizontal anchor of Text/Icon (§3.4); default `left`. */
 export type TextAnchor = "left" | "middle" | "right";
 
+/**
+ * The ten Dicier faces selectable via Icon `style:` (§3.3, M2 — ◆28's
+ * "Flat-Dark only" restriction lifted). Order is the docs/completion order:
+ * flat → block → round (dark/light/heavy each), then pixel. This array is the
+ * single source of truth — the checker's vocabulary, the renderer's
+ * font-family map, and the wiki's style table (docFacts) all pin to it.
+ */
+export const ICON_STYLES = [
+  "flat_dark",
+  "flat_light",
+  "flat_heavy",
+  "block_dark",
+  "block_light",
+  "block_heavy",
+  "round_dark",
+  "round_light",
+  "round_heavy",
+  "pixel",
+] as const;
+
+export type IconStyle = (typeof ICON_STYLES)[number];
+
+/** §3.3: `style:` is optional; the default face is Flat-Dark. */
+export const DEFAULT_ICON_STYLE: IconStyle = "flat_dark";
+
 /** Anchored top-left (§3.3). */
 export interface RectShape {
   kind: "rect";
@@ -112,6 +137,8 @@ export interface IconShape {
    * the failed ligature is its own visible indicator. */
   code: string;
   anchor: TextAnchor;
+  /** Which Dicier face draws the glyph (§3.3); `flat_dark` when omitted. */
+  style: IconStyle;
 }
 
 /** In declaration order — later shapes draw on top (◆15). */

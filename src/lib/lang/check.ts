@@ -48,6 +48,8 @@ import type {
   TemplateNode,
 } from "./ast";
 import type { Diagnostic, Range, Severity } from "./diagnostics";
+import type { IconStyle } from "./model";
+import { ICON_STYLES } from "./model";
 import { CSS_COLOR_NAMES } from "./css-colors";
 import { DICIER_CODES } from "./dicier-codes";
 
@@ -87,7 +89,8 @@ export type Resolution =
   | { kind: "enumCase"; enumName: string; caseName: string }
   | { kind: "colorName"; name: string }
   | { kind: "geometry"; keyword: "full" | "half" | "middle" }
-  | { kind: "anchor"; keyword: "left" | "middle" | "right" };
+  | { kind: "anchor"; keyword: "left" | "middle" | "right" }
+  | { kind: "iconStyle"; style: IconStyle };
 
 /** AST nodes that get an entry in `CardBindings.resolutions`. */
 export type ResolvableNode = DataRef | IdentifierExpr | QualifiedName | StringRefPart;
@@ -104,7 +107,8 @@ export interface SheetInfo {
   columns: ReadonlyMap<string, ColumnInfo>;
 }
 
-/** One physical size preset (§3.4). */
+/** One physical size (§3.4): a named preset, or `name: "custom"` when the
+ * Card declared a `width_mm:`/`height_mm:` pair instead (M2). */
 export interface SizePreset {
   name: string;
   widthMm: number;
@@ -244,22 +248,28 @@ const MAX_EXPR_DEPTH = 500;
 const CARD_PROPERTY_KEYS: ReadonlySet<string> = new Set([
   "sheet",
   "size",
+  "width_mm",
+  "height_mm",
   "x_units",
   "y_units",
   "loop",
   "count",
 ]);
 
+/** Membership set over the §3.3 ICON_STYLES vocabulary (ten Dicier faces). */
+const ICON_STYLE_SET: ReadonlySet<string> = new Set(ICON_STYLES);
+
 interface ElementSpec {
   required: readonly string[];
   optional: readonly string[];
 }
 
-/** §3.3 property tables. Text/Icon color defaults to black, anchor to left. */
+/** §3.3 property tables. Text/Icon color defaults to black, anchor to left;
+ * Icon style defaults to flat_dark (M2). */
 const ELEMENT_SPECS: Record<ElementNode["element"], ElementSpec> = {
   Rectangle: { required: ["x", "y", "width", "height", "color"], optional: [] },
   Text: { required: ["x", "y", "size", "text"], optional: ["color", "anchor"] },
-  Icon: { required: ["x", "y", "size", "code"], optional: ["color", "anchor"] },
+  Icon: { required: ["x", "y", "size", "code"], optional: ["color", "anchor", "style"] },
 };
 
 /** Mutable recording target while checking in one Card's context; null during
@@ -481,6 +491,8 @@ class Checker {
     const loopProps: PropertyNode[] = [];
     let sheet: SheetInfo | null = null;
     let size: SizePreset | null = null;
+    let customWidthMm: number | null = null;
+    let customHeightMm: number | null = null;
     let xUnits: number | null = null;
     let yUnits: number | "auto" | null = null;
     let yUnitsRange: Range | null = null;
@@ -572,6 +584,30 @@ class Checker {
           );
           break;
         }
+        case "width_mm":
+        case "height_mm": {
+          // Custom sizes (§3.4, M2): positive number LITERALS, like x_units —
+          // physical dimensions are layout constants, never data-driven. Values
+          // must be exact in hundredths of a mm with a 0.01 floor: the unit
+          // math (here and in generate.ts) works in integer mm-hundredths, and
+          // this bound is what keeps y_units:auto exactly square and NaN/
+          // Infinity out of the model for every accepted size.
+          if (value.kind === "Error") break;
+          const hundredths = isPositiveNumberLiteral(value)
+            ? Math.round(value.value * 100)
+            : 0;
+          if (hundredths >= 1 && isPositiveNumberLiteral(value) && hundredths / 100 === value.value) {
+            if (key === "width_mm") customWidthMm = value.value;
+            else customHeightMm = value.value;
+            break;
+          }
+          this.error(
+            "E008",
+            `${key}: must be a positive number literal in millimetres, at least 0.01 and exact to two decimals (e.g. ${key}: 63.5)`,
+            value.range,
+          );
+          break;
+        }
         case "x_units": {
           if (value.kind === "Error") break;
           if (isPositiveIntegerLiteral(value)) {
@@ -656,8 +692,36 @@ class Checker {
       }
     }
 
-    // Required properties (E008 †): sheet, size, Front, x_units, y_units.
+    // Custom sizes (§3.4, M2): width_mm/height_mm travel as a PAIR and are an
+    // alternative to size: — combining them with the preset, or giving only
+    // one, is E008. A clean pair becomes a synthetic "custom" preset so
+    // everything downstream (auto y_units, W003, the generator) flows
+    // unchanged; on any misuse `size` stays/becomes null — no deck is
+    // generated, the squiggle owns the surface (same as an unknown preset).
+    const mmKeys = (["width_mm", "height_mm"] as const).filter((k) => present.has(k));
+    if (mmKeys.length > 0 && present.has("size")) {
+      this.error(
+        "E008",
+        `Card '${decl.name.name}' declares both size: and ${mmKeys.join("/")}: — use the preset or the custom pair, not both`,
+        seenKeys.get(mmKeys[0]) ?? decl.name.range,
+      );
+      size = null;
+    } else if (mmKeys.length === 1) {
+      const missing = mmKeys[0] === "width_mm" ? "height_mm" : "width_mm";
+      this.error(
+        "E008",
+        `A custom card size needs both width_mm: and height_mm: — '${missing}:' is missing`,
+        seenKeys.get(mmKeys[0]) ?? decl.name.range,
+      );
+    } else if (customWidthMm !== null && customHeightMm !== null) {
+      size = { name: "custom", widthMm: customWidthMm, heightMm: customHeightMm };
+    }
+
+    // Required properties (E008 †): sheet, size, Front, x_units, y_units —
+    // except that any width_mm/height_mm presence stands in for size: (its
+    // OWN diagnostics above already cover an incomplete pair).
     for (const req of ["sheet", "size", "x_units", "y_units", "Front"] as const) {
+      if (req === "size" && mmKeys.length > 0) continue;
       if (!present.has(req)) {
         this.error(
           "E008",
@@ -876,6 +940,21 @@ class Checker {
           return;
         }
         this.error("E008", `anchor: must be left, middle, or right`, value.range);
+        return;
+      }
+      case "style": {
+        // Icon only (ELEMENT_SPECS): a bare identifier from the closed ten-
+        // face vocabulary, resolved by expected type like anchor (§3.3, M2).
+        // Unlike codes (open list, W004) the faces ARE the full set — E008.
+        if (value.kind === "Error") return;
+        if (value.kind === "Identifier" && ICON_STYLE_SET.has(value.name)) {
+          this.recordResolution(ctx, value, {
+            kind: "iconStyle",
+            style: value.name as IconStyle,
+          });
+          return;
+        }
+        this.error("E008", `style: must be one of ${ICON_STYLES.join(", ")}`, value.range);
         return;
       }
     }
@@ -1357,6 +1436,13 @@ function sameType(a: ValueType, b: ValueType): boolean {
 
 function isPositiveIntegerLiteral(expr: Expr): expr is NumberLit {
   return expr.kind === "Number" && Number.isInteger(expr.value) && expr.value > 0;
+}
+
+/** §3.4 width_mm/height_mm: any positive number literal (decimals welcome —
+ * bridge itself is 57.15 mm). A leading minus parses as unary negation, so a
+ * NumberLit is non-negative already; `> 0` only excludes zero. */
+function isPositiveNumberLiteral(expr: Expr): expr is NumberLit {
+  return expr.kind === "Number" && expr.value > 0;
 }
 
 /** The literal value of a string with NO interpolation parts, else null. */

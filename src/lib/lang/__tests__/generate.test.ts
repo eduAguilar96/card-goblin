@@ -170,7 +170,7 @@ describe("demo fixture end to end (§3.9)", () => {
     expect((deck.cards[6].front[2] as TextShape).text).toBe("Cost: 1");
   });
 
-  it("attack icon: SWORDS, white, default left anchor", () => {
+  it("attack icon: SWORDS, white, default left anchor and flat_dark style", () => {
     const attack = deck.cards[0].front[3] as IconShape;
     expect(attack).toEqual({
       kind: "icon",
@@ -180,6 +180,7 @@ describe("demo fixture end to end (§3.9)", () => {
       color: "white",
       code: "SWORDS",
       anchor: "left",
+      style: "flat_dark", // no style: in the demo → the §3.3 default
     });
   });
 
@@ -310,6 +311,92 @@ describe("geometry resolution: full / half / middle, fractional y (⚑7†)", ()
     expect(p.model.decks[0].cards[0].back).toEqual([
       { kind: "rect", x: 0, y: 0, width: 20, height: 28, color: "white" },
     ]);
+  });
+});
+
+// -- custom card sizes (§3.4, M2) -------------------------------------------
+
+describe("custom card sizes flow to the RenderModel (§3.4 M2)", () => {
+  it("width_mm/height_mm reach the Deck; auto y_units stays exact", () => {
+    const p = projectOf(
+      src(
+        ...sheetLines(["t: Text"]),
+        ...textTemplate("[t]"),
+        "Card: C",
+        "  sheet: Sh",
+        "  width_mm: 40",
+        "  height_mm: 60",
+        "  x_units: 20",
+        "  y_units: auto",
+        "  Front: T",
+      ),
+      { Sh: [{ t: "x" }] },
+    );
+    const deck = p.model.decks[0];
+    expect(deck.widthMm).toBe(40);
+    expect(deck.heightMm).toBe(60);
+    // Units square (⚑7†): 20 × 60/40 — exactly 30, custom sizes included.
+    expect(deck.yUnits).toBe(30);
+    // The synthetic default back spans the custom grid exactly (◆16).
+    expect(deck.cards[0].back).toEqual([
+      { kind: "rect", x: 0, y: 0, width: 20, height: 30, color: "white" },
+    ]);
+  });
+
+  it("an incomplete pair binds no size → NO deck (compile errors own it)", () => {
+    const p = compileProject(
+      src(
+        ...sheetLines(["t: Text"]),
+        ...textTemplate("[t]"),
+        "Card: C",
+        "  sheet: Sh",
+        "  width_mm: 40",
+        "  x_units: 20",
+        "  y_units: auto",
+        "  Front: T",
+      ),
+      { Sh: [{ t: "x" }] },
+    );
+    expect(p.diagnostics.some((d) => d.code === "E008")).toBe(true);
+    expect(p.model.decks).toEqual([]);
+  });
+});
+
+// -- Icon style: (§3.3, M2) --------------------------------------------------
+
+describe("Icon style: flows to the shape (§3.3 M2)", () => {
+  const iconProject = (styleLine: string[]): ProjectResult =>
+    projectOf(
+      src(
+        ...sheetLines(["t: Text"]),
+        "Template: T",
+        "  Icon:",
+        "    x: 1",
+        "    y: 1",
+        "    size: 2",
+        '    code: "HEARTS"',
+        ...styleLine.map((l) => `    ${l}`),
+        ...CARD_LINES,
+        "  Front: T",
+      ),
+      { Sh: [{ t: "x" }] },
+    );
+
+  it("a declared style reaches the IconShape", () => {
+    const icon = iconProject(["style: round_heavy"]).model.decks[0].cards[0]
+      .front[0] as IconShape;
+    expect(icon.style).toBe("round_heavy");
+  });
+
+  it("omitted style defaults to flat_dark (§3.3)", () => {
+    const icon = iconProject([]).model.decks[0].cards[0].front[0] as IconShape;
+    expect(icon.style).toBe("flat_dark");
+  });
+
+  it("a style change changes the contentHash (styles are visible content)", () => {
+    const flat = iconProject(["style: flat_dark"]).model.decks[0].cards[0];
+    const pixel = iconProject(["style: pixel"]).model.decks[0].cards[0];
+    expect(flat.contentHash).not.toBe(pixel.contentHash);
   });
 });
 

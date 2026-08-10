@@ -37,6 +37,7 @@ export { CSS_COLOR_NAMES } from "./css-colors";
 export { DICIER_CODES, DICIER_CODE_CATEGORIES } from "./dicier-codes";
 export { generateModel } from "./generate";
 export type { EditedRows, GenerateResult, SheetRows } from "./generate";
+export { DEFAULT_ICON_STYLE, ICON_STYLES } from "./model";
 export type {
   CardInstance,
   CardMeta,
@@ -46,6 +47,7 @@ export type {
   DataDiagnosticCode,
   Deck,
   IconShape,
+  IconStyle,
   LoopCaseBinding,
   RectShape,
   RenderModel,

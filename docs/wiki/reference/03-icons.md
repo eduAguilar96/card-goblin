@@ -1,7 +1,7 @@
 ---
 title: Icons
 status: stable
-summary: The 888 Dicier game glyphs — how to use them and what the categories are.
+summary: The 888 Dicier game glyphs — how to use them, the ten styles, and the categories.
 ---
 
 # Icons
@@ -22,6 +22,36 @@ Icon:
 
 Codes are **UPPERCASE quoted strings**. A misspelled code gets a warning squiggle and
 renders as raw text on the card, so you can spot it immediately.
+
+## Styles
+
+Dicier draws every glyph in ten faces, and `style:` picks one per icon. It's
+optional — leaving it off means `flat_dark`.
+
+```goblin
+Icon:
+  x: 1
+  y: 4
+  size: 2
+  code: "D20"
+  style: round_heavy
+```
+
+| `style:` | Face |
+|---|---|
+| `flat_dark` | flat, filled shapes — **the default** |
+| `flat_light` | flat, outlined |
+| `flat_heavy` | flat, thick outlines |
+| `block_dark` | blocky, filled |
+| `block_light` | blocky, outlined |
+| `block_heavy` | blocky, thick outlines |
+| `round_dark` | rounded, filled |
+| `round_light` | rounded, outlined |
+| `round_heavy` | rounded, thick outlines |
+| `pixel` | pixel art |
+
+Unlike codes, the styles are a closed list — a misspelled style is an **error**,
+not a warning, because there is no "maybe it exists" here.
 
 ## Codes can be computed
 

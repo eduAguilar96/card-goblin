@@ -22,6 +22,8 @@ Card: Monster
 ```
 
 `sheet:`, `size:`, and `Front:` are required; everything else has a default.
+Instead of a `size:` preset, a Card may declare an exact `width_mm:` +
+`height_mm:` pair — see [custom sizes](card-sizes.md).
 
 ## How many cards you get
 
