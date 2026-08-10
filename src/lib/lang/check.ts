@@ -48,8 +48,8 @@ import type {
   TemplateNode,
 } from "./ast";
 import type { Diagnostic, Range, Severity } from "./diagnostics";
-import type { IconStyle } from "./model";
-import { ICON_STYLES } from "./model";
+import type { IconStyle, ImageFit } from "./model";
+import { ICON_STYLES, IMAGE_FITS } from "./model";
 import { CSS_COLOR_NAMES } from "./css-colors";
 import { DICIER_CODES } from "./dicier-codes";
 
@@ -90,7 +90,8 @@ export type Resolution =
   | { kind: "colorName"; name: string }
   | { kind: "geometry"; keyword: "full" | "half" | "middle" }
   | { kind: "anchor"; keyword: "left" | "middle" | "right" }
-  | { kind: "iconStyle"; style: IconStyle };
+  | { kind: "iconStyle"; style: IconStyle }
+  | { kind: "imageFit"; fit: ImageFit };
 
 /** AST nodes that get an entry in `CardBindings.resolutions`. */
 export type ResolvableNode = DataRef | IdentifierExpr | QualifiedName | StringRefPart;
@@ -259,17 +260,21 @@ const CARD_PROPERTY_KEYS: ReadonlySet<string> = new Set([
 /** Membership set over the §3.3 ICON_STYLES vocabulary (ten Dicier faces). */
 const ICON_STYLE_SET: ReadonlySet<string> = new Set(ICON_STYLES);
 
+/** Membership set over the §3.3 IMAGE_FITS vocabulary (three fit modes). */
+const IMAGE_FIT_SET: ReadonlySet<string> = new Set(IMAGE_FITS);
+
 interface ElementSpec {
   required: readonly string[];
   optional: readonly string[];
 }
 
 /** §3.3 property tables. Text/Icon color defaults to black, anchor to left;
- * Icon style defaults to flat_dark (M2). */
+ * Icon style defaults to flat_dark, Image fit to contain (M2). */
 const ELEMENT_SPECS: Record<ElementNode["element"], ElementSpec> = {
   Rectangle: { required: ["x", "y", "width", "height", "color"], optional: [] },
   Text: { required: ["x", "y", "size", "text"], optional: ["color", "anchor"] },
   Icon: { required: ["x", "y", "size", "code"], optional: ["color", "anchor", "style"] },
+  Image: { required: ["x", "y", "width", "height", "src"], optional: ["fit"] },
 };
 
 /** Mutable recording target while checking in one Card's context; null during
@@ -887,10 +892,10 @@ class Checker {
     switch (key) {
       case "x": {
         // `middle` is legal ONLY as the ENTIRE x: value of Text/Icon (§3.4:
-        // sugar for `x: half` + `anchor: middle`; Rectangle has no anchor, so
-        // `x: middle` there is E007 like any other misplacement).
+        // sugar for `x: half` + `anchor: middle`; Rectangle and Image have no
+        // anchor, so `x: middle` there is E007 like any other misplacement).
         if (
-          el.element !== "Rectangle" &&
+          (el.element === "Text" || el.element === "Icon") &&
           value.kind === "Identifier" &&
           value.name === "middle"
         ) {
@@ -911,6 +916,12 @@ class Checker {
         this.checkValue(value, EXP_COLOR, ctx, false);
         return;
       case "text":
+        this.checkValue(value, EXP_TEXT, ctx, false);
+        return;
+      case "src":
+        // Image only (ELEMENT_SPECS): a Text expression with the usual §3.5
+        // coercions — URLs routinely come from a sheet column or an
+        // interpolated string, so no literal-shape restriction applies.
         this.checkValue(value, EXP_TEXT, ctx, false);
         return;
       case "code": {
@@ -955,6 +966,21 @@ class Checker {
           return;
         }
         this.error("E008", `style: must be one of ${ICON_STYLES.join(", ")}`, value.range);
+        return;
+      }
+      case "fit": {
+        // Image only (ELEMENT_SPECS): a bare identifier from the closed
+        // three-mode vocabulary, resolved by expected type like style (§3.3,
+        // M2) — E008 on anything else.
+        if (value.kind === "Error") return;
+        if (value.kind === "Identifier" && IMAGE_FIT_SET.has(value.name)) {
+          this.recordResolution(ctx, value, {
+            kind: "imageFit",
+            fit: value.name as ImageFit,
+          });
+          return;
+        }
+        this.error("E008", `fit: must be one of ${IMAGE_FITS.join(", ")}`, value.range);
         return;
       }
     }

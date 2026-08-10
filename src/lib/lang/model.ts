@@ -104,6 +104,19 @@ export type IconStyle = (typeof ICON_STYLES)[number];
 /** §3.3: `style:` is optional; the default face is Flat-Dark. */
 export const DEFAULT_ICON_STYLE: IconStyle = "flat_dark";
 
+/**
+ * Image `fit:` vocabulary (§3.3, M2): how the raster art maps onto the shape's
+ * box, realized as SVG `preserveAspectRatio` by the renderer. Closed set like
+ * ICON_STYLES — the checker's vocabulary, the renderer's preserveAspectRatio
+ * map, and the wiki's fit table (docFacts) all pin to this array.
+ */
+export const IMAGE_FITS = ["contain", "cover", "stretch"] as const;
+
+export type ImageFit = (typeof IMAGE_FITS)[number];
+
+/** §3.3: `fit:` is optional; the default keeps the whole image visible. */
+export const DEFAULT_IMAGE_FIT: ImageFit = "contain";
+
 /** Anchored top-left (§3.3). */
 export interface RectShape {
   kind: "rect";
@@ -141,8 +154,24 @@ export interface IconShape {
   style: IconStyle;
 }
 
+/** Raster art from a URL (§3.3, M2). Anchored top-left like Rectangle. The
+ * model carries only the resolved URL string — loading, failure, and
+ * placeholder states are RENDERER-level (§3.3: not a D-code; the model stays
+ * pure and per-card isolation is preserved). */
+export interface ImageShape {
+  kind: "image";
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  /** Resolved Text expression — usually a URL, possibly from a sheet column. */
+  src: string;
+  /** How the image maps onto the box (§3.3); `contain` when omitted. */
+  fit: ImageFit;
+}
+
 /** In declaration order — later shapes draw on top (◆15). */
-export type Shape = RectShape | TextShape | IconShape;
+export type Shape = RectShape | TextShape | IconShape | ImageShape;
 
 // ---------------------------------------------------------------------------
 // Cards and decks (§3.7, §4.1)

@@ -34,6 +34,7 @@ const BLOCK_OPENERS = [
   "Rectangle",
   "Text",
   "Icon",
+  "Image",
   "Repeat",
   "Front",
   "Back",

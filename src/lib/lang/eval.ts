@@ -32,8 +32,15 @@ import type {
   TemplateNode,
 } from "./ast";
 import type { CardBindings, ResolvableNode, Resolution } from "./check";
-import type { DataDiagnostic, IconStyle, LoopCaseBinding, Shape, TextAnchor } from "./model";
-import { DEFAULT_ICON_STYLE } from "./model";
+import type {
+  DataDiagnostic,
+  IconStyle,
+  ImageFit,
+  LoopCaseBinding,
+  Shape,
+  TextAnchor,
+} from "./model";
+import { DEFAULT_ICON_STYLE, DEFAULT_IMAGE_FIT } from "./model";
 import { DICIER_CODES } from "./dicier-codes";
 
 // ---------------------------------------------------------------------------
@@ -490,6 +497,20 @@ function evalElement(el: ElementNode, ctx: EvalContext): Shape {
         style: styleOf(el, ctx),
       };
     }
+    case "Image":
+      // §3.3 (M2): src resolves like text (Text coercions apply); fit is
+      // materialized to its default like style — the shape (and therefore
+      // the contentHash) always carries concrete values. Whether the URL
+      // loads is the RENDERER's state, never the model's (no D-code).
+      return {
+        kind: "image",
+        x: numberProp(el, "x", ctx, ctx.xUnits),
+        y: numberProp(el, "y", ctx, ctx.yUnits),
+        width: numberProp(el, "width", ctx, ctx.xUnits),
+        height: numberProp(el, "height", ctx, ctx.yUnits),
+        src: toText(evalExpr(requireProp(el, "src"), ctx, null)),
+        fit: fitOf(el, ctx),
+      };
   }
 }
 
@@ -557,6 +578,17 @@ function styleOf(el: ElementNode, ctx: EvalContext): IconStyle {
   const res = ctx.card.resolutions.get(expr);
   if (res?.kind !== "iconStyle") return poisoned();
   return res.style;
+}
+
+/** Image `fit:` (§3.3, M2): checker-blessed identifier or the contain
+ * default — the same follow-the-resolution shape as styleOf. */
+function fitOf(el: ElementNode, ctx: EvalContext): ImageFit {
+  const expr = findProp(el, "fit");
+  if (!expr) return DEFAULT_IMAGE_FIT;
+  if (expr.kind !== "Identifier") return poisoned();
+  const res = ctx.card.resolutions.get(expr);
+  if (res?.kind !== "imageFit") return poisoned();
+  return res.fit;
 }
 
 /** The literal value of a string with NO interpolation parts, else null. */

@@ -15,6 +15,7 @@ import { compileProject, type RenderModel } from "@/lib/lang";
 import { DEMO_PROJECT_ROWS, DEMO_PROJECT_SOURCE } from "@/lib/lang/demoProject";
 import {
   PdfExportModal,
+  imageEmbedWarning,
   resetSessionPdfOptions,
 } from "@/app/editor/_components/pdfExportModal";
 
@@ -93,5 +94,63 @@ describe("PdfExportModal — page preview", () => {
     // No empty page frame, and no stepper for zero pages.
     expect(markup).not.toContain("aria-label=\"Page preview");
     expect(markup).not.toContain('aria-label="Next page"');
+  });
+});
+
+/** A one-card model whose face draws an Image (§3.3 M2) — the pre-flight case. */
+function imageModel(): RenderModel {
+  const result = compileProject(
+    [
+      "Sheet: S",
+      "  column name: Text",
+      "Template: T",
+      "  Image:",
+      "    x: 0",
+      "    y: 0",
+      "    width: 10",
+      "    height: 10",
+      '    src: "https://example.com/[name].png"',
+      "Card: Art",
+      "  sheet: S",
+      "  size: poker",
+      "  x_units: 20",
+      "  y_units: auto",
+      "  Front: T",
+    ].join("\n") + "\n",
+    { S: [{ name: "a" }] },
+    { S: [true] },
+  );
+  expect(result.diagnostics).toEqual([]);
+  return result.model;
+}
+
+describe("PdfExportModal — image pre-flight (§3.3 M2)", () => {
+  beforeEach(resetSessionPdfOptions);
+
+  it("holds Export and says so while the deck's image URLs are being checked", () => {
+    // Static markup runs no effects, so this IS the modal's opening state:
+    // the probe hasn't settled, the status notice shows, Export is held.
+    // The probe's completion (warning counts, unblocking) has no driver here
+    // — manual browser checklist; the pure pieces are imageUrlsUsed and
+    // imageEmbedWarning.
+    const markup = render(imageModel());
+    expect(markup).toContain("Checking 1 image…");
+    const exportButton = /<button[^>]*>Export<\/button>/.exec(markup)?.[0];
+    expect(exportButton).toContain('disabled=""');
+  });
+
+  it("a model without images skips the pre-flight entirely", () => {
+    const markup = render(demoModel());
+    expect(markup).not.toContain("Checking");
+    expect(markup).not.toContain("could not be embedded");
+  });
+
+  it("imageEmbedWarning words the §3.3 warning with counts", () => {
+    expect(imageEmbedWarning(1)).toBe(
+      "1 image could not be embedded — it will print as a marked placeholder box.",
+    );
+    expect(imageEmbedWarning(3)).toBe(
+      "3 images could not be embedded — they will print as marked placeholder boxes.",
+    );
   });
 });

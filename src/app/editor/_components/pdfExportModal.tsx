@@ -31,6 +31,12 @@
  *   placeholder / zero cards after skipping) — a zero-page PDF helps nobody.
  * - Margin/spacing accept any finite value ≥ 0; validation failures disable
  *   Export rather than clamping silently.
+ * - Image pre-flight (§3.3 M2): the spec wants "N images could not be
+ *   embedded" warned BEFORE export, so a lightweight probe of the export's
+ *   image URLs runs when the modal opens (injectable `resolveImages` seam;
+ *   per-URL cache makes reopening free). Export is held until the probe
+ *   settles, failures only warn, and the resolved data URIs are handed to
+ *   the rasterizer so the warning describes exactly the produced PDF.
  * - Filename: single-deck models download as `<deckname>.pdf` (sanitized),
  *   anything else as `cardgoblin.pdf` (spec).
  * - Dialog a11y, dependency-free: role="dialog" aria-modal, the dialog takes
@@ -66,7 +72,13 @@ import {
 } from "@/app/editor/_components/pdfLayout";
 import { assemblePdf } from "@/app/editor/_components/pdfAssemble";
 import { PdfPagePreview } from "@/app/editor/_components/pdfPagePreview";
-import { rasterizeFaces, type RasterizeFaces } from "@/app/editor/_components/pdfRaster";
+import {
+  imageUrlsUsed,
+  rasterizeFaces,
+  resolveImageSources,
+  type RasterizeFaces,
+  type ResolveImages,
+} from "@/app/editor/_components/pdfRaster";
 import { Pager, clampIndex } from "@/app/editor/_components/pager";
 
 // ---------------------------------------------------------------------------
@@ -87,6 +99,15 @@ export function parseNonNegativeMm(text: string): number | null {
   if (text.trim() === "") return null;
   const value = Number(text);
   return Number.isFinite(value) && value >= 0 ? value : null;
+}
+
+/** §3.3 (M2): the pre-export image warning, worded per the spec ("N images
+ * could not be embedded"). Warning only — the deck always exports, with the
+ * failures as marked placeholder boxes. */
+export function imageEmbedWarning(count: number): string {
+  return count === 1
+    ? "1 image could not be embedded — it will print as a marked placeholder box."
+    : `${count} images could not be embedded — they will print as marked placeholder boxes.`;
 }
 
 // ---------------------------------------------------------------------------
@@ -150,12 +171,15 @@ export interface PdfExportModalProps {
   onClose(): void;
   /** Injection seam for tests (default: the real browser rasterizer). */
   rasterize?: RasterizeFaces;
+  /** Injection seam for tests (default: the real browser image loader). */
+  resolveImages?: ResolveImages;
 }
 
 export function PdfExportModal({
   model,
   onClose,
   rasterize = rasterizeFaces,
+  resolveImages = resolveImageSources,
 }: PdfExportModalProps): ReactElement {
   const [options, setOptions] = useState<PdfExportOptions>(() => ({ ...sessionOptions }));
   const [marginText, setMarginText] = useState(() => String(sessionOptions.marginMm));
@@ -217,10 +241,48 @@ export function PdfExportModal({
   const previewIndex = clampIndex(pageIndex, layout.pages.length);
   const previewPage = layout.pages[previewIndex];
 
+  // PRE-FLIGHT image check (§3.3, M2): the spec's "N images could not be
+  // embedded" warning must appear BEFORE export, so the exported faces' image
+  // URLs are probed when the modal opens (and when the option-dependent URL
+  // set changes — e.g. backs: none drops the back faces' images). Export is
+  // held until the probe settles; failures only WARN — the deck always
+  // exports, with failed images as marked placeholder boxes. The key is
+  // JSON (URLs come from cell data and could contain any character), and the
+  // resolved map remembers which key it answered so an in-flight option
+  // change can never pair stale results with a new URL set.
+  const imageUrlsKey = useMemo(
+    () => JSON.stringify(imageUrlsUsed(layout.faceSpecs)),
+    [layout.faceSpecs],
+  );
+  const [resolvedImages, setResolvedImages] = useState<{
+    key: string;
+    images: Map<string, string | null>;
+  } | null>(null);
+  useEffect(() => {
+    const urls = JSON.parse(imageUrlsKey) as string[];
+    if (urls.length === 0) return; // nothing to probe; readiness is immediate
+    let cancelled = false;
+    void resolveImages(urls).then((images) => {
+      if (!cancelled) setResolvedImages({ key: imageUrlsKey, images });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [imageUrlsKey, resolveImages]);
+
+  const imageUrls = JSON.parse(imageUrlsKey) as string[];
+  const imagesReady =
+    imageUrls.length === 0 ||
+    (resolvedImages !== null && resolvedImages.key === imageUrlsKey);
+  const failedImages = imagesReady
+    ? imageUrls.filter((url) => resolvedImages?.images.get(url) == null).length
+    : 0;
+
   const exportBlocked =
     working ||
     !marginValid ||
     !spacingValid ||
+    !imagesReady ||
     layout.fitErrors.length > 0 ||
     layout.placedCards === 0;
 
@@ -228,7 +290,10 @@ export function PdfExportModal({
     setWorking(true);
     setFailure(null);
     try {
-      const images = await rasterize(layout.faceSpecs);
+      const images = await rasterize(
+        layout.faceSpecs,
+        imagesReady && resolvedImages !== null ? resolvedImages.images : undefined,
+      );
       const bytes = await assemblePdf(layout, images, options);
       downloadPdf(bytes, pdfFileName(model));
       onClose();
@@ -368,7 +433,13 @@ export function PdfExportModal({
               </label>
             </div>
 
-            <Notices layout={layout} marginValid={marginValid} spacingValid={spacingValid} />
+            <Notices
+              layout={layout}
+              marginValid={marginValid}
+              spacingValid={spacingValid}
+              checkingImages={!imagesReady ? imageUrls.length : 0}
+              failedImages={failedImages}
+            />
 
             {failure !== null && (
               <p className="mt-3 rounded border border-red-900 bg-red-950 px-2 py-1 text-xs text-red-300">
@@ -455,17 +526,46 @@ export function PdfExportModal({
 }
 
 /** The §6.1 modal notices: the error-skip warning and the card-doesn't-fit
- * error(s), plus the nothing-printable state. */
+ * error(s), plus the nothing-printable state — and the §3.3 image pre-flight
+ * (probing status, then the could-not-embed warning). */
 function Notices({
   layout,
   marginValid,
   spacingValid,
+  checkingImages,
+  failedImages,
 }: {
   layout: ReturnType<typeof layoutPdf>;
   marginValid: boolean;
   spacingValid: boolean;
+  /** Number of image URLs still being probed (0 = settled or none). */
+  checkingImages: number;
+  failedImages: number;
 }): ReactElement | null {
   const notes: ReactNode[] = [];
+
+  if (checkingImages > 0) {
+    notes.push(
+      <p
+        key="img-check"
+        role="status"
+        className="rounded border border-gray-700 bg-gray-900 px-2 py-1 text-xs text-gray-400"
+      >
+        Checking {checkingImages} image{checkingImages === 1 ? "" : "s"}…
+      </p>,
+    );
+  }
+
+  if (failedImages > 0) {
+    notes.push(
+      <p
+        key="img-fail"
+        className="rounded border border-amber-900 bg-amber-950 px-2 py-1 text-xs text-amber-300"
+      >
+        {imageEmbedWarning(failedImages)}
+      </p>,
+    );
+  }
 
   if (layout.skippedErrorCards > 0) {
     notes.push(

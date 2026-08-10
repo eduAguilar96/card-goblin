@@ -10,8 +10,10 @@ import { describe, expect, it } from "vitest";
 import {
   compileSource,
   DEFAULT_ICON_STYLE,
+  DEFAULT_IMAGE_FIT,
   DICIER_CODES,
   ICON_STYLES,
+  IMAGE_FITS,
   SIZE_PRESETS,
 } from "@/lib/lang";
 import type { SchemaSnapshot } from "@/app/editor/_store/editorStore";
@@ -354,6 +356,13 @@ describe("property keys", () => {
     ]);
   });
 
+  it("Image keys include src and fit (§3.3 M2)", () => {
+    const r = at(src("Template: T", "  Image:", "    ¦"));
+    expect(labels(r)).toEqual(["x", "y", "width", "height", "src", "fit"]);
+    expect(byLabel(r, "src").detail).toBe("Text — image URL");
+    expect(byLabel(r, "fit").detail).toContain("contain | cover | stretch");
+  });
+
   it("Card keys include properties (custom-size pair too) and Front/Back face lines", () => {
     const r = at(src("Card: M", "  ¦"));
     expect(labels(r)).toEqual([
@@ -369,7 +378,7 @@ describe("property keys", () => {
       src("Template: T", "  Repeat: 3 as i", "    ¦"),
     ]) {
       const r = at(doc);
-      expect(labels(r)).toEqual(["Rectangle", "Text", "Icon", "Repeat"]);
+      expect(labels(r)).toEqual(["Rectangle", "Text", "Icon", "Image", "Repeat"]);
       expect(byLabel(r, "Rectangle").insertText).toBe("Rectangle: ");
     }
   });
@@ -473,9 +482,23 @@ describe("value positions", () => {
     expect(byLabel(r, DEFAULT_ICON_STYLE).detail).toContain("default");
   });
 
-  it("x: includes middle on Text/Icon but not on Rectangle", () => {
+  it("fit: offers exactly the three image fits, default marked (§3.3 M2)", () => {
+    const r = at(src("Template: T", "  Image:", "    fit: ¦"));
+    expect(labels(r)).toEqual([...IMAGE_FITS]);
+    expect(byLabel(r, DEFAULT_IMAGE_FIT).detail).toBe("image fit (the default)");
+    expect(byLabel(r, "cover").detail).toBe("image fit");
+  });
+
+  it("src: is an expression position outside its string, silent inside (URLs)", () => {
+    const outside = at(src("Template: T", "  Image:", "    src: ¦"));
+    expect(labels(outside)).toContain("if");
+    expect(at(src("Template: T", "  Image:", '    src: "https://¦"')).suggestions).toEqual([]);
+  });
+
+  it("x: includes middle on Text/Icon but not on Rectangle or Image", () => {
     expect(labels(at(src("Template: T", "  Icon:", "    x: ¦")))).toContain("middle");
     expect(labels(at(src("Template: T", "  Rectangle:", "    x: ¦")))).not.toContain("middle");
+    expect(labels(at(src("Template: T", "  Image:", "    x: ¦")))).not.toContain("middle");
   });
 
   it("middle is whole-value only (E007): dropped mid-expression, kept mid-word", () => {
@@ -724,6 +747,13 @@ describe("compiler pins (E008 probes)", () => {
     "    color: red",
     "    anchor: right",
     "    style: round_heavy",
+    "  Image:",
+    "    x: 2",
+    "    y: 4",
+    "    width: 16",
+    "    height: 12",
+    '    src: "https://example.com/[name].png"',
+    "    fit: cover",
     "Template: BackT",
     "  Rectangle:",
     "    x: 0",
@@ -760,7 +790,10 @@ describe("compiler pins (E008 probes)", () => {
     const rectKeys = labels(at(src("Template: T", "  Rectangle:", "    ¦")));
     const textKeys = labels(at(src("Template: T", "  Text:", "    ¦")));
     const iconKeys = labels(at(src("Template: T", "  Icon:", "    ¦")));
-    for (const key of new Set([...cardKeys, ...rectKeys, ...textKeys, ...iconKeys])) {
+    const imageKeys = labels(at(src("Template: T", "  Image:", "    ¦")));
+    for (const key of new Set([
+      ...cardKeys, ...rectKeys, ...textKeys, ...iconKeys, ...imageKeys,
+    ])) {
       expect(PIN, `pin program must use suggested key '${key}:'`).toMatch(
         new RegExp(`^\\s+${key}: `, "m"),
       );
@@ -782,7 +815,7 @@ describe("compiler pins (E008 probes)", () => {
     const cardKeys = labels(at(src("Card: M", "  ¦")));
     for (const key of cardMissing) expect(cardKeys).toContain(key);
 
-    for (const element of ["Rectangle", "Text", "Icon"] as const) {
+    for (const element of ["Rectangle", "Text", "Icon", "Image"] as const) {
       const missing = missingKeys(src("Template: T", `  ${element}:`, "    x: 1"));
       expect(missing.length).toBeGreaterThan(0);
       const offered = labels(at(src("Template: T", `  ${element}:`, "    ¦")));
@@ -796,6 +829,7 @@ describe("compiler pins (E008 probes)", () => {
       Rectangle: labels(at(src("Template: T", "  Rectangle:", "    ¦"))),
       Text: labels(at(src("Template: T", "  Text:", "    ¦"))),
       Icon: labels(at(src("Template: T", "  Icon:", "    ¦"))),
+      Image: labels(at(src("Template: T", "  Image:", "    ¦"))),
     };
     // Candidate universe: every lowercase key offered on ANY block, plus a
     // decoy that must never be accepted. Front:/Back: are face lines, not
@@ -812,7 +846,7 @@ describe("compiler pins (E008 probes)", () => {
         (d) =>
           d.code === "E008" && d.message.includes(`Unknown property '${key}:' on ${block}`),
       );
-    for (const el of ["Rectangle", "Text", "Icon"] as const) {
+    for (const el of ["Rectangle", "Text", "Icon", "Image"] as const) {
       const accepted = candidates.filter(
         (k) => !unknownOn(src("Template: T", `  ${el}:`, `    ${k}: 1`), k, el),
       );

@@ -73,7 +73,7 @@ Working name: **Goblin script**, file extension `.goblin` (cosmetic, revisit fre
 - **Continuation rule (◆23†):** only a **property line** (a lowercase key + `:`) may
   continue: its expression extends across subsequent lines while they are indented
   deeper than the key. Block headers (`Enum:`, `Sheet:`, `Template:`, `Card:`,
-  `Rectangle:`, `Text:`, `Icon:`, `Repeat:`, `Front:`, `Back:`) never continue —
+  `Rectangle:`, `Text:`, `Icon:`, `Image:`, `Repeat:`, `Front:`, `Back:`) never continue —
   their deeper-indented lines are children. Consequently a `Repeat:` count expression
   must fit on one line. Continuation is a parser-level rule; the lexer only reports
   indent levels.
@@ -82,7 +82,8 @@ Working name: **Goblin script**, file extension `.goblin` (cosmetic, revisit fre
 - **Literals:** numbers (`3`, `1.5`), strings (`"Cost: [cost]"` — see interpolation
   §3.5), colors (`#RRGGBB` anywhere; CSS names only in Color-typed positions, ◆21†).
 - **Reserved words (◆30†):** block openers (`Enum Sheet Template Card Rectangle Text
-  Icon Repeat Front Back`), declaration words (`case column`), and expression
+  Icon Image Repeat Front Back` — `Image` added M2, 2026-08-09), declaration words
+  (`case column`), and expression
   structure (`if then else and or not as`). Everything else — including `count`,
   `size`, `sheet`, `loop`, `x`, `color`, `anchor`, `left`, `right`, `full`, `half`,
   `middle`, `auto`, size presets, and CSS color names — is an ordinary identifier

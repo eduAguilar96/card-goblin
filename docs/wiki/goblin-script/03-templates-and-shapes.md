@@ -1,7 +1,7 @@
 ---
 title: Templates & shapes
 status: stable
-summary: Rectangle, Text, Icon, Repeat — and the unit grid they're placed on.
+summary: Rectangle, Text, Icon, Image, Repeat — and the unit grid they're placed on.
 ---
 
 # Templates & shapes
@@ -35,6 +35,7 @@ them.
 | `Rectangle` | `x y width height color` | — | anchored at its top-left corner |
 | `Text` | `x y size text` | `color` (black), `anchor` (left) | one line; `size` is text height in units |
 | `Icon` | `x y size code` | `color` (black), `anchor` (left), `style` (flat_dark) | a game glyph — see [Icons](icons.md) |
+| `Image` | `x y width height src` | `fit` (contain) | your own artwork, from a URL — see below |
 | `Repeat: N as i` | — | — | draws its children N times |
 
 Positioning rules:
@@ -42,7 +43,38 @@ Positioning rules:
 - `y` is the **top** of a text or icon line; `x` is its left edge unless anchored.
 - `anchor: left | middle | right` chooses which point of the shape `x` refers to.
 - `x: middle` is shorthand for "horizontally centered" (Text and Icon only —
-  `y: middle` is an error).
+  `y: middle` is an error, and so is `x: middle` on Rectangle or Image).
+
+## `Image` — your own artwork
+
+```goblin
+Image: "Portrait"
+  x: 2
+  y: 4
+  width: 16
+  height: 12
+  src: "https://example.com/art/[name].png"
+  fit: cover
+```
+
+`src:` is a text [expression](expressions.md), so the URL can come straight from a
+sheet column (`src: [art_url]`) or be built with interpolation, and different rows get
+different art.
+
+`fit:` says how the image maps onto its box when the shapes don't match:
+
+| `fit:` | What it does |
+|---|---|
+| `contain` | whole image visible, letterboxed inside the box — **the default** |
+| `cover` | box fully covered, overflow cropped |
+| `stretch` | image distorted to exactly fill the box |
+
+While an image downloads, its box shows a subtle gray placeholder; if the URL fails to
+load, the box turns into an amber crossed-out placeholder instead. **Neither is a
+code or data error** — the rest of the card renders normally, and fixing the URL fixes
+the box. Images come from the web by URL (uploading files into the project isn't a
+thing yet), and PDF export has one extra requirement for them — see
+[PDF export](pdf-export.md).
 
 ## `Repeat` — the interesting one
 

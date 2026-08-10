@@ -24,7 +24,12 @@ import { describe, expect, it } from "vitest";
 import { SIZE_PRESETS } from "@/lib/lang/check";
 import { CSS_COLOR_NAMES } from "@/lib/lang/css-colors";
 import { DICIER_CODES } from "@/lib/lang/dicier-codes";
-import { DEFAULT_ICON_STYLE, ICON_STYLES } from "@/lib/lang/model";
+import {
+  DEFAULT_ICON_STYLE,
+  DEFAULT_IMAGE_FIT,
+  ICON_STYLES,
+  IMAGE_FITS,
+} from "@/lib/lang/model";
 import { REPEAT_CAP } from "@/lib/lang/eval";
 import { CARD_CAP } from "@/lib/lang/generate";
 import { KEYWORDS } from "@/lib/lang/lexer";
@@ -261,6 +266,33 @@ describe("the icon-styles table matches ICON_STYLES", () => {
         /default/i.test(face),
         `"${style}" default marking must match DEFAULT_ICON_STYLE (${DEFAULT_ICON_STYLE})`,
       ).toBe(style === DEFAULT_ICON_STYLE);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Image fits
+// ---------------------------------------------------------------------------
+
+describe("the image-fit table matches IMAGE_FITS", () => {
+  const text = pageText("templates-and-shapes");
+  /** `contain` → its What-it-does prose, from the table with a "fit" header. */
+  const documented = new Map(
+    tableWithHeader(text, "fit").rows.map(
+      (cells) => [plain(cells[0]), plain(cells[1] ?? "")] as const,
+    ),
+  );
+
+  it("documents every fit — a new mode can't ship undocumented", () => {
+    expect([...documented.keys()].sort()).toEqual([...IMAGE_FITS].sort());
+  });
+
+  it("marks exactly the code's default fit as the default", () => {
+    for (const [fit, what] of documented) {
+      expect(
+        /default/i.test(what),
+        `"${fit}" default marking must match DEFAULT_IMAGE_FIT (${DEFAULT_IMAGE_FIT})`,
+      ).toBe(fit === DEFAULT_IMAGE_FIT);
     }
   });
 });

@@ -68,6 +68,11 @@ describe("reserved words are illegal as declared names (§3.1)", () => {
     reservedDiags("Sheet: Repeat\n");
     reservedDiags("Template: Front\n");
     reservedDiags("Card: Icon\n");
+    // Image joined the openers in M2 — the declared-name rejection must
+    // cover it everywhere the other openers are rejected (§3.1).
+    reservedDiags("Enum: Image\n  case A\n");
+    reservedDiags("Sheet: S\n  column Image: Number\n");
+    reservedDiags("Card: C\n  loop: Suit as Image\n");
   });
 
   it("rejects opener words as column names, keeping siblings", () => {
@@ -220,6 +225,47 @@ describe("elements and Repeat (§3.3)", () => {
     const tpl = p.declarations[0] as TemplateDecl;
     expect((tpl.children[0] as ElementNode).label).not.toBeNull();
     expect((tpl.children[1] as ElementNode).label).toBeNull();
+  });
+
+  it("Image blocks parse like any element, label allowed (§3.3 M2)", () => {
+    const p = parseClean(
+      [
+        "Template: T",
+        '  Image: "Portrait"',
+        "    x: 1",
+        "    y: 2",
+        "    width: 10",
+        "    height: 8",
+        '    src: "https://example.com/[name].png"',
+        "    fit: cover",
+        "  Image:",
+        "    x: 0",
+        "    y: 0",
+        "    width: 1",
+        "    height: 1",
+        '    src: [art]',
+        "",
+      ].join("\n"),
+    );
+    const tpl = p.declarations[0] as TemplateDecl;
+    const labelled = tpl.children[0] as ElementNode;
+    expect(labelled.element).toBe("Image");
+    expect(labelled.label).not.toBeNull();
+    expect(labelled.properties.map((q) => q.key.name)).toEqual([
+      "x", "y", "width", "height", "src", "fit",
+    ]);
+    const bare = tpl.children[1] as ElementNode;
+    expect(bare.element).toBe("Image");
+    expect(bare.label).toBeNull();
+    expect(asKind(bare.properties[4].value, "Ref").name).toBe("art");
+  });
+
+  it("Image nests inside Repeat", () => {
+    const p = parseClean(
+      "Template: T\n  Repeat: 3 as i\n    Image:\n      x: [i]\n      y: 0\n      width: 1\n      height: 1\n      src: \"u\"\n",
+    );
+    const rep = (p.declarations[0] as TemplateDecl).children[0] as RepeatNode;
+    expect((rep.children[0] as ElementNode).element).toBe("Image");
   });
 });
 

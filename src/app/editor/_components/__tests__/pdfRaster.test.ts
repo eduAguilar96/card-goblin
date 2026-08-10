@@ -8,7 +8,7 @@
 import { describe, expect, it } from "vitest";
 import type { IconStyle, Shape } from "@/lib/lang";
 import type { FaceRasterSpec } from "../pdfLayout";
-import { iconFamiliesUsed } from "../pdfRaster";
+import { iconFamiliesUsed, imageUrlsUsed } from "../pdfRaster";
 
 const icon = (style: IconStyle): Shape => ({
   kind: "icon",
@@ -19,6 +19,16 @@ const icon = (style: IconStyle): Shape => ({
   code: "HEARTS",
   anchor: "left",
   style,
+});
+
+const image = (src: string): Shape => ({
+  kind: "image",
+  x: 0,
+  y: 0,
+  width: 10,
+  height: 8,
+  src,
+  fit: "contain",
 });
 
 const text: Shape = {
@@ -46,5 +56,19 @@ describe("iconFamiliesUsed", () => {
 
   it("no icons → no Dicier families requested at all", () => {
     expect(iconFamiliesUsed(new Map([["a:front", spec([text])]]))).toEqual([]);
+  });
+});
+
+describe("imageUrlsUsed (§3.3 M2)", () => {
+  it("collects the distinct image URLs across all faces, deduped and sorted", () => {
+    const specs = new Map<string, FaceRasterSpec>([
+      ["a:front", spec([image("https://x/b.png"), image("https://x/a.png"), text])],
+      ["a:back", spec([image("https://x/a.png"), icon("pixel")])],
+    ]);
+    expect(imageUrlsUsed(specs)).toEqual(["https://x/a.png", "https://x/b.png"]);
+  });
+
+  it("no image shapes → no URLs (the modal pre-flight is then a no-op)", () => {
+    expect(imageUrlsUsed(new Map([["a:front", spec([text, icon("pixel")])]]))).toEqual([]);
   });
 });

@@ -9,7 +9,7 @@ import { describe, expect, it } from "vitest";
 import type { DataRef, ElementNode, Program, RepeatNode, TemplateDecl } from "../ast";
 import type { CheckResult } from "../check";
 import { check } from "../check";
-import { compileSource, ICON_STYLES } from "../index";
+import { compileSource, ICON_STYLES, IMAGE_FITS } from "../index";
 import type { Diagnostic } from "../diagnostics";
 import { parse } from "../parser";
 
@@ -608,6 +608,146 @@ describe("Icon style: (§3.3 M2)", () => {
     const ds = diagsOf(withElement("Text:", [...TEXT_BASE, 'text: "a"', "style: pixel"]));
     expect(ds.map((d) => d.code)).toEqual(["E008"]);
     expect(ds[0].message).toBe("Unknown property 'style:' on Text");
+  });
+});
+
+// -- Image (§3.3, M2) --------------------------------------------------------
+
+describe("Image (§3.3 M2)", () => {
+  const IMAGE_BASE = [
+    "x: 1",
+    "y: 1",
+    "width: 5",
+    "height: 5",
+    'src: "https://example.com/a.png"',
+  ];
+
+  it("accepts the full property set and records an imageFit resolution per fit", () => {
+    for (const fit of IMAGE_FITS) {
+      const result = checkOf(withElement("Image:", [...IMAGE_BASE, `fit: ${fit}`]));
+      expect(result.diagnostics, fit).toEqual([]);
+      const tpl = result.bindings.templates.get("T") as TemplateDecl;
+      const prop = (tpl.children[0] as ElementNode).properties.find(
+        (p) => p.key.name === "fit",
+      )!;
+      expect(result.bindings.cards[0].resolutions.get(prop.value as never)).toEqual({
+        kind: "imageFit",
+        fit,
+      });
+    }
+  });
+
+  it("omitting fit: is legal — the default is the evaluator's business", () => {
+    expect(codesOf(withElement("Image:", IMAGE_BASE))).toEqual([]);
+  });
+
+  it("required-property matrix: dropping any one of x/y/width/height/src is E008", () => {
+    for (let i = 0; i < IMAGE_BASE.length; i++) {
+      const key = IMAGE_BASE[i].split(":")[0];
+      const ds = diagsOf(withElement("Image:", IMAGE_BASE.filter((_, j) => j !== i)));
+      expect(ds.map((d) => d.code), key).toEqual(["E008"]);
+      expect(ds[0].message).toBe(`Image is missing required property '${key}:'`);
+    }
+  });
+
+  it("an unknown fit is E008 naming the closed vocabulary", () => {
+    const ds = diagsOf(withElement("Image:", [...IMAGE_BASE, "fit: zoom"]));
+    expect(ds.map((d) => d.code)).toEqual(["E008"]);
+    expect(ds[0].message).toBe("fit: must be one of contain, cover, stretch");
+  });
+
+  it("fit must be a bare identifier — strings and expressions are E008", () => {
+    for (const bad of ['fit: "contain"', "fit: 1", "fit: 1 + 1"]) {
+      expect(codesOf(withElement("Image:", [...IMAGE_BASE, bad])), bad).toEqual(["E008"]);
+    }
+  });
+
+  it("fit on Text or Rectangle is an unknown property (Image only, §3.3)", () => {
+    const ds = diagsOf(withElement("Text:", [...TEXT_BASE, 'text: "a"', "fit: cover"]));
+    expect(ds.map((d) => d.code)).toEqual(["E008"]);
+    expect(ds[0].message).toBe("Unknown property 'fit:' on Text");
+  });
+
+  it("src is Text-typed with the §3.5 coercions: columns, Numbers, enums, interpolation", () => {
+    const head = IMAGE_BASE.slice(0, 4);
+    expect(codesOf(withElement("Image:", [...head, "src: [name]"]))).toEqual([]);
+    expect(codesOf(withElement("Image:", [...head, "src: [cost]"]))).toEqual([]);
+    expect(codesOf(withElement("Image:", [...head, "src: [suit]"]))).toEqual([]);
+    expect(
+      codesOf(withElement("Image:", [...head, 'src: "img/[name]-[cost].png"'])),
+    ).toEqual([]);
+  });
+
+  it("a Color or Bool src is E003 (the non-coercing kinds)", () => {
+    const head = IMAGE_BASE.slice(0, 4);
+    expect(codesOf(withElement("Image:", [...head, "src: #ff0000"]))).toEqual(["E003"]);
+    expect(codesOf(withElement("Image:", [...head, "src: 1 == 2"]))).toEqual(["E003"]);
+  });
+
+  it("geometry keywords resolve in Image geometry positions", () => {
+    expect(
+      codesOf(
+        withElement("Image:", ["x: 0", "y: 0", "width: full", "height: half", 'src: "u"']),
+      ),
+    ).toEqual([]);
+  });
+
+  it("x: middle is E007 on Image — the §3.4 sugar is Text/Icon only", () => {
+    const ds = diagsOf(
+      withElement("Image:", ["x: middle", "y: 1", "width: 5", "height: 5", 'src: "u"']),
+    );
+    expect(ds.map((d) => d.code)).toEqual(["E007"]);
+    expect(ds[0].message).toContain("Text or Icon");
+  });
+
+  it("Image inside Repeat sees the repeat variable", () => {
+    const source = src(
+      ...PRELUDE,
+      "Template: T",
+      "  Repeat: [cost] as i",
+      "    Image:",
+      "      x: [i] * 2",
+      "      y: 0",
+      "      width: 1",
+      "      height: 1",
+      '      src: "img/[i].png"',
+      "Card: C",
+      ...CARD_ITEMS.map((i) => `  ${i}`),
+    );
+    expect(diagsOf(source)).toEqual([]);
+  });
+
+  it("templates with an Image are checked per using Card (§3.6): a src ref must resolve in each context", () => {
+    const source = src(
+      "Sheet: A",
+      "  column art: Text",
+      "Sheet: B",
+      "  column other: Text",
+      "Template: T",
+      "  Image:",
+      "    x: 0",
+      "    y: 0",
+      "    width: 5",
+      "    height: 5",
+      "    src: [art]",
+      "Card: CA",
+      "  sheet: A",
+      "  size: poker",
+      "  x_units: 20",
+      "  y_units: auto",
+      "  Front: T",
+      "Card: CB",
+      "  sheet: B",
+      "  size: poker",
+      "  x_units: 20",
+      "  y_units: auto",
+      "  Front: T",
+    );
+    // CA's context resolves [art]; CB's does not — one E002 (context-free
+    // message, deduped across using Cards at the template's range).
+    const ds = diagsOf(source);
+    expect(ds.map((d) => d.code)).toEqual(["E002"]);
+    expect(ds[0].message).toBe("Unknown reference [art]");
   });
 });
 

@@ -5,7 +5,7 @@
  * for expressions (§3.5). Implements the two Revision-A grammar rules:
  *
  * - Contextual keywords (◆30†): block openers (Enum, Sheet, Template, Card,
- *   Rectangle, Text, Icon, Repeat, Front, Back) are only special in HEADER
+ *   Rectangle, Text, Icon, Image, Repeat, Front, Back) are only special in HEADER
  *   position — start of a line, followed by ':'. Everywhere else they are
  *   ordinary identifiers, so `column count: Number`, `[count]`, `x: full`,
  *   `anchor: right` all parse. Reserved words are however ILLEGAL as DECLARED
@@ -62,6 +62,7 @@ export const BLOCK_OPENERS: ReadonlySet<string> = new Set([
   "Rectangle",
   "Text",
   "Icon",
+  "Image",
   "Repeat",
   "Front",
   "Back",
@@ -505,7 +506,12 @@ class Parser {
       this.peekAt(1).kind === "op" &&
       (this.peekAt(1) as Token & { kind: "op" }).op === ":"
     ) {
-      if (t.text === "Rectangle" || t.text === "Text" || t.text === "Icon") {
+      if (
+        t.text === "Rectangle" ||
+        t.text === "Text" ||
+        t.text === "Icon" ||
+        t.text === "Image"
+      ) {
         return this.parseElement(t.text);
       }
       if (t.text === "Repeat") return this.parseRepeat();
@@ -516,21 +522,21 @@ class Parser {
       }
       if (/^[a-z]/.test(t.text)) {
         this.error(
-          `Property line '${t.text}:' is only allowed inside an element (Rectangle:, Text:, Icon:)`,
+          `Property line '${t.text}:' is only allowed inside an element (Rectangle:, Text:, Icon:, Image:)`,
           t.range,
         );
         this.sync(0);
         return null;
       }
       this.error(
-        `Unknown element '${t.text}:' — expected Rectangle:, Text:, Icon:, or Repeat:`,
+        `Unknown element '${t.text}:' — expected Rectangle:, Text:, Icon:, Image:, or Repeat:`,
         t.range,
       );
       this.sync(0);
       return null;
     }
     this.error(
-      `Expected an element (Rectangle:, Text:, Icon:, or Repeat:), found ${this.describe(t)}`,
+      `Expected an element (Rectangle:, Text:, Icon:, Image:, or Repeat:), found ${this.describe(t)}`,
       t.range,
     );
     this.sync(0);

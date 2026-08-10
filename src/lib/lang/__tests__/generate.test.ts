@@ -11,6 +11,7 @@ import type { Bindings } from "../check";
 import type {
   EditedRows,
   IconShape,
+  ImageShape,
   ProjectResult,
   RectShape,
   SheetRows,
@@ -397,6 +398,62 @@ describe("Icon style: flows to the shape (§3.3 M2)", () => {
     const flat = iconProject(["style: flat_dark"]).model.decks[0].cards[0];
     const pixel = iconProject(["style: pixel"]).model.decks[0].cards[0];
     expect(flat.contentHash).not.toBe(pixel.contentHash);
+  });
+});
+
+// -- Image (§3.3, M2) --------------------------------------------------------
+
+describe("Image flows to the shape (§3.3 M2)", () => {
+  const imageProject = (extra: string[], row: Record<string, string> = { t: "x" }): ProjectResult =>
+    projectOf(
+      src(
+        ...sheetLines(["t: Text"]),
+        "Template: T",
+        "  Image:",
+        "    x: 1",
+        "    y: 2",
+        "    width: half",
+        "    height: full",
+        '    src: "img/[t].png"',
+        ...extra.map((l) => `    ${l}`),
+        ...CARD_LINES,
+        "  Front: T",
+      ),
+      { Sh: [row] },
+    );
+
+  it("resolves geometry per axis and src through interpolation", () => {
+    const image = imageProject([], { t: "dragon" }).model.decks[0].cards[0]
+      .front[0] as ImageShape;
+    // width: half is the X axis (20 units → 10); height: full the Y axis.
+    expect(image).toEqual({
+      kind: "image",
+      x: 1,
+      y: 2,
+      width: 10,
+      height: 28,
+      src: "img/dragon.png",
+      fit: "contain",
+    });
+  });
+
+  it("omitted fit is MATERIALIZED as contain — the shape always carries a concrete fit", () => {
+    const image = imageProject([]).model.decks[0].cards[0].front[0] as ImageShape;
+    expect(image.fit).toBe("contain");
+  });
+
+  it("a declared fit reaches the ImageShape", () => {
+    const image = imageProject(["fit: stretch"]).model.decks[0].cards[0]
+      .front[0] as ImageShape;
+    expect(image.fit).toBe("stretch");
+  });
+
+  it("src and fit changes change the contentHash (both are visible content)", () => {
+    const base = imageProject([]).model.decks[0].cards[0];
+    const otherSrc = imageProject([], { t: "y" }).model.decks[0].cards[0];
+    const otherFit = imageProject(["fit: cover"]).model.decks[0].cards[0];
+    expect(base.contentHash).not.toBe(otherSrc.contentHash);
+    expect(base.contentHash).not.toBe(otherFit.contentHash);
   });
 });
 

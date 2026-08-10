@@ -23,20 +23,34 @@
  * family is `var(--font-geist-sans), sans-serif`, and CSS variables don't
  * cross into the img document either). Any scrape/fetch failure degrades to
  * fallback fonts rather than failing the export.
+ *
+ * Image shapes (§3.3, M2) hit the same wall: the img document fetches
+ * nothing, so their URLs are pre-loaded here with `crossorigin=anonymous`
+ * and re-encoded as PNG data URIs (per-URL session cache). A load failure
+ * or canvas taint rasterizes as the §3.3 marked placeholder box — the deck
+ * always exports; the modal's pre-flight warns "N images could not be
+ * embedded" BEFORE the export runs.
  */
 
 import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
-import { CardFaceSvg, ICON_FONT_FAMILIES } from "@/app/editor/_components/cardSvg";
+import {
+  CardFaceSvg,
+  ICON_FONT_FAMILIES,
+  type ResolvedImages,
+} from "@/app/editor/_components/cardSvg";
 import type { FaceRasterSpec } from "@/app/editor/_components/pdfLayout";
 
 /** §6.1: rasterize at 300 DPI — px = mm × 300 / 25.4. */
 export const RASTER_DPI = 300;
 
 /** The injection seam: the export flow (pdfExportModal) takes one of these;
- * the app passes `rasterizeFaces`, tests pass a stub. */
+ * the app passes `rasterizeFaces`, tests pass a stub. `images` carries the
+ * modal's pre-flight resolutions (§3.3 M2 — URL → data URI, null = failed);
+ * omitted, the rasterizer resolves the specs' URLs itself. */
 export type RasterizeFaces = (
   specs: ReadonlyMap<string, FaceRasterSpec>,
+  images?: ResolvedImages,
 ) => Promise<Map<string, Uint8Array>>;
 
 // ---------------------------------------------------------------------------
@@ -186,6 +200,88 @@ async function getFontEmbedCss(specs: ReadonlyMap<string, FaceRasterSpec>): Prom
 }
 
 // ---------------------------------------------------------------------------
+// Image embedding (§3.3, M2)
+// ---------------------------------------------------------------------------
+
+/**
+ * Every distinct image URL the faces being exported draw, sorted. Pure and
+ * exported for unit tests — the modal's pre-flight check and the rasterizer
+ * both start from this list.
+ */
+export function imageUrlsUsed(specs: ReadonlyMap<string, FaceRasterSpec>): string[] {
+  const urls = new Set<string>();
+  for (const spec of specs.values()) {
+    for (const shape of spec.face) {
+      if (shape.kind === "image") urls.add(shape.src);
+    }
+  }
+  return [...urls].sort();
+}
+
+/** The pre-flight/embedding seam (injectable like RasterizeFaces): resolve
+ * each URL to a data URI, or null when it cannot be embedded. */
+export type ResolveImages = (urls: readonly string[]) => Promise<Map<string, string | null>>;
+
+/**
+ * Load one image URL for embedding: `crossorigin=anonymous` (§3.3 — the
+ * rasterized SVG lives in an `<img>` document that cannot fetch external
+ * resources, AND the canvas must stay untainted), redrawn at natural size
+ * onto a canvas and re-encoded as a PNG data URI. A load failure, a missing
+ * CORS header, or a taint at toDataURL all resolve to null — the §3.3 marked
+ * placeholder box, never a blocked export.
+ */
+async function loadImageData(url: string): Promise<string | null> {
+  const img = new Image();
+  img.crossOrigin = "anonymous";
+  const loaded = await new Promise<boolean>((resolve) => {
+    img.onload = () => resolve(true);
+    img.onerror = () => resolve(false);
+    img.src = url;
+  });
+  if (!loaded || img.naturalWidth === 0 || img.naturalHeight === 0) return null;
+  try {
+    const canvas = document.createElement("canvas");
+    canvas.width = img.naturalWidth;
+    canvas.height = img.naturalHeight;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null;
+    ctx.drawImage(img, 0, 0);
+    return canvas.toDataURL("image/png");
+  } catch {
+    return null; // tainted canvas or encoding failure — placeholder box
+  }
+}
+
+/** Per-URL session cache. Successes are kept (an image's bytes are assumed
+ * stable for the session, like fonts); FAILURES are evicted on settle so the
+ * next modal open / export retries — a fixed CORS header or a network blip
+ * should not stay failed until reload. */
+const imageDataCache = new Map<string, Promise<string | null>>();
+
+function getImageData(url: string): Promise<string | null> {
+  let cached = imageDataCache.get(url);
+  if (cached === undefined) {
+    cached = loadImageData(url).then((data) => {
+      if (data === null) imageDataCache.delete(url);
+      return data;
+    });
+    imageDataCache.set(url, cached);
+  }
+  return cached;
+}
+
+/** The real (browser) ResolveImages — concurrent per URL, cache-backed. */
+export const resolveImageSources: ResolveImages = async (urls) => {
+  const out = new Map<string, string | null>();
+  await Promise.all(
+    urls.map(async (url) => {
+      out.set(url, await getImageData(url));
+    }),
+  );
+  return out;
+};
+
+// ---------------------------------------------------------------------------
 // SVG serialization and rasterization
 // ---------------------------------------------------------------------------
 
@@ -198,6 +294,7 @@ export function serializeFaceSvg(
   widthPx: number,
   heightPx: number,
   fontCss: string,
+  images: ResolvedImages,
 ): string {
   const host = document.createElement("div");
   const root = createRoot(host);
@@ -208,6 +305,7 @@ export function serializeFaceSvg(
           xUnits={spec.xUnits}
           yUnits={spec.yUnits}
           face={spec.face}
+          images={images}
           svgAttributes={{
             xmlns: "http://www.w3.org/2000/svg",
             width: widthPx,
@@ -235,10 +333,14 @@ function loadImage(url: string): Promise<HTMLImageElement> {
   });
 }
 
-async function rasterizeOne(spec: FaceRasterSpec, fontCss: string): Promise<Uint8Array> {
+async function rasterizeOne(
+  spec: FaceRasterSpec,
+  fontCss: string,
+  images: ResolvedImages,
+): Promise<Uint8Array> {
   const widthPx = Math.round((spec.widthMm * RASTER_DPI) / 25.4);
   const heightPx = Math.round((spec.heightMm * RASTER_DPI) / 25.4);
-  const markup = serializeFaceSvg(spec, widthPx, heightPx, fontCss);
+  const markup = serializeFaceSvg(spec, widthPx, heightPx, fontCss, images);
   const blob = new Blob([markup], { type: "image/svg+xml;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   try {
@@ -270,12 +372,17 @@ async function rasterizeOne(spec: FaceRasterSpec, fontCss: string): Promise<Uint
  * ~750×1050 px, and one canvas at a time keeps memory flat on 500-card decks
  * (copies share faces, so distinct faces stay small).
  */
-export const rasterizeFaces: RasterizeFaces = async (specs) => {
+export const rasterizeFaces: RasterizeFaces = async (specs, images) => {
   await document.fonts.ready;
   const fontCss = await getFontEmbedCss(specs);
+  // Image sources must arrive as data URIs (the img document fetches
+  // nothing): use the modal's pre-flight resolutions when given — its
+  // "N images could not be embedded" warning then describes exactly this
+  // export — or resolve here (cache-backed, so this is cheap either way).
+  const resolved = images ?? (await resolveImageSources(imageUrlsUsed(specs)));
   const out = new Map<string, Uint8Array>();
   for (const [key, spec] of specs) {
-    out.set(key, await rasterizeOne(spec, fontCss));
+    out.set(key, await rasterizeOne(spec, fontCss, resolved));
   }
   return out;
 };

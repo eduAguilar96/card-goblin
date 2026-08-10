@@ -19,12 +19,20 @@
 
 import {
   memo,
+  useSyncExternalStore,
   type CSSProperties,
   type ReactElement,
   type ReactNode,
   type SVGProps,
 } from "react";
-import type { DataDiagnostic, IconStyle, Shape, TextAnchor } from "@/lib/lang";
+import type {
+  DataDiagnostic,
+  IconStyle,
+  ImageFit,
+  ImageShape,
+  Shape,
+  TextAnchor,
+} from "@/lib/lang";
 
 // ---------------------------------------------------------------------------
 // Font realization constants (§3.4 m10)
@@ -89,6 +97,175 @@ const SVG_ANCHOR: Record<TextAnchor, "start" | "middle" | "end"> = {
 export const ERROR_MESSAGE_MAX = 40;
 
 // ---------------------------------------------------------------------------
+// Images (§3.3, M2)
+// ---------------------------------------------------------------------------
+
+/** Image `fit:` → SVG preserveAspectRatio (§3.3). The `<image>` element is
+ * its own viewport, so `cover`'s overflow clips to the box without an
+ * explicit clipPath. */
+export const IMAGE_PRESERVE_ASPECT: Record<ImageFit, string> = {
+  contain: "xMidYMid meet",
+  cover: "xMidYMid slice",
+  stretch: "none",
+};
+
+/**
+ * Pre-resolved image sources for STATIC rendering: shape `src` → data URI,
+ * or null when the load failed. Supplied by the PDF rasterizer (an SVG in an
+ * `<img>` document cannot fetch external resources, so URLs must arrive as
+ * data URIs) — and by tests. When absent, image shapes render through the
+ * LIVE path below: placeholder first, real image swapped in client-side.
+ */
+export type ResolvedImages = ReadonlyMap<string, string | null>;
+
+/**
+ * Loading/failure of an image URL is RENDERER state, never the model's
+ * (§3.3: no D-code — the model stays pure). This module-level store tracks
+ * one status per URL for the live preview; `useSyncExternalStore` in
+ * LiveImage keeps SSR/static output on the "loading" placeholder and lets
+ * the real image swap in after the browser probe settles.
+ */
+export type ImageLoadStatus = "loading" | "loaded" | "failed";
+
+/** Probe seam: browser-only image loading stays OUT of vitest by injection
+ * (same policy as the PDF rasterizer) — tests replace this with a stub. */
+export type ImageProbe = (src: string) => Promise<boolean>;
+
+const browserImageProbe: ImageProbe = (src) =>
+  new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => resolve(true);
+    img.onerror = () => resolve(false);
+    img.src = src;
+  });
+
+let imageProbe: ImageProbe = browserImageProbe;
+const imageStatuses = new Map<string, ImageLoadStatus>();
+const imageListeners = new Map<string, Set<() => void>>();
+
+/** Test seam: replace (or with null, restore) the browser probe. */
+export function setImageProbeForTests(probe: ImageProbe | null): void {
+  imageProbe = probe ?? browserImageProbe;
+}
+
+/** Test seam: forget every probed status so cases don't leak into each other. */
+export function resetImageStatusesForTests(): void {
+  imageStatuses.clear();
+  imageListeners.clear();
+}
+
+function imageStatusOf(src: string): ImageLoadStatus {
+  return imageStatuses.get(src) ?? "loading";
+}
+
+/** Subscribe to one URL's status, kicking off the probe on first interest.
+ * Subscription only ever happens client-side (React calls it on mount), so
+ * the probe never runs during SSR/static rendering. */
+function subscribeImageStatus(src: string, onChange: () => void): () => void {
+  let listeners = imageListeners.get(src);
+  if (!listeners) {
+    listeners = new Set();
+    imageListeners.set(src, listeners);
+  }
+  listeners.add(onChange);
+  if (!imageStatuses.has(src)) {
+    imageStatuses.set(src, "loading");
+    void imageProbe(src).then((ok) => {
+      imageStatuses.set(src, ok ? "loaded" : "failed");
+      for (const cb of imageListeners.get(src) ?? []) cb();
+    });
+  }
+  return () => {
+    listeners.delete(onChange);
+  };
+}
+
+/** Placeholder stroke width, relative to the box so it reads the same at any
+ * unit scale. Exported for the markup tests. */
+export function imagePlaceholderStroke(shape: ImageShape): number {
+  return Math.min(shape.width, shape.height) * 0.06;
+}
+
+/**
+ * The §3.3 placeholder box: subtle while loading, warning-styled (amber, with
+ * a diagonal cross so the mark survives rasterization without any font) when
+ * the load failed. Same geometry as the image would occupy, so layout never
+ * shifts when the real art arrives.
+ */
+function renderImagePlaceholder(
+  shape: ImageShape,
+  index: number,
+  variant: "loading" | "failed",
+): ReactElement {
+  const stroke = imagePlaceholderStroke(shape);
+  const failed = variant === "failed";
+  return (
+    <g key={index} data-image-placeholder={variant}>
+      <title>
+        {failed ? `Image failed to load: ${shape.src}` : `Loading image: ${shape.src}`}
+      </title>
+      <rect
+        x={shape.x}
+        y={shape.y}
+        width={shape.width}
+        height={shape.height}
+        fill={failed ? "#fef3c7" : "#f3f4f6"}
+        stroke={failed ? "#b45309" : "#d1d5db"}
+        strokeWidth={stroke}
+      />
+      {failed && (
+        <>
+          <line
+            x1={shape.x}
+            y1={shape.y}
+            x2={shape.x + shape.width}
+            y2={shape.y + shape.height}
+            stroke="#b45309"
+            strokeWidth={stroke}
+          />
+          <line
+            x1={shape.x + shape.width}
+            y1={shape.y}
+            x2={shape.x}
+            y2={shape.y + shape.height}
+            stroke="#b45309"
+            strokeWidth={stroke}
+          />
+        </>
+      )}
+    </g>
+  );
+}
+
+function renderImageTag(shape: ImageShape, index: number, href: string): ReactElement {
+  return (
+    <image
+      key={index}
+      href={href}
+      x={shape.x}
+      y={shape.y}
+      width={shape.width}
+      height={shape.height}
+      preserveAspectRatio={IMAGE_PRESERVE_ASPECT[shape.fit]}
+    />
+  );
+}
+
+/** Live image path (no ResolvedImages supplied): SSR/static output is the
+ * loading placeholder — renderToStaticMarkup runs no effects, so this IS the
+ * static default — and the client swaps in the real `<image>` (or the failed
+ * placeholder) once the probe settles. */
+function LiveImage({ shape, index }: { shape: ImageShape; index: number }): ReactElement {
+  const status = useSyncExternalStore(
+    (onChange) => subscribeImageStatus(shape.src, onChange),
+    () => imageStatusOf(shape.src),
+    () => "loading" as const,
+  );
+  if (status === "loaded") return renderImageTag(shape, index, shape.src);
+  return renderImagePlaceholder(shape, index, status === "failed" ? "failed" : "loading");
+}
+
+// ---------------------------------------------------------------------------
 // Props and the §4.2 memo comparator
 // ---------------------------------------------------------------------------
 
@@ -144,8 +321,21 @@ export function cardSvgPropsEqual(
 // Shape → SVG
 // ---------------------------------------------------------------------------
 
-function renderShape(shape: Shape, index: number): ReactElement {
+function renderShape(shape: Shape, index: number, images?: ResolvedImages): ReactElement {
   switch (shape.kind) {
+    case "image": {
+      if (images) {
+        // Static path (rasterizer/tests): the caller resolved every URL.
+        // A data URI renders directly; a failed (or unexpectedly missing)
+        // resolution renders the marked warning box — §3.3: failures export
+        // as marked placeholder boxes, the deck always exports.
+        const href = images.get(shape.src);
+        return typeof href === "string"
+          ? renderImageTag(shape, index, href)
+          : renderImagePlaceholder(shape, index, "failed");
+      }
+      return <LiveImage key={index} shape={shape} index={index} />;
+    }
     case "rect":
       return (
         <rect
@@ -268,6 +458,10 @@ export interface CardFaceSvgProps {
    * classes; the PDF rasterizer passes xmlns + pixel width/height so the
    * serialized markup is a standalone SVG document. */
   svgAttributes?: SVGProps<SVGSVGElement>;
+  /** Pre-resolved image sources (§3.3, M2) — the rasterizer passes data URIs
+   * (or null for failures); the preview omits this and gets the live
+   * placeholder-then-swap behavior. */
+  images?: ResolvedImages;
   /** Rendered before the shapes — the rasterizer injects a `<style>` block
    * with embedded fonts here. The preview passes nothing. */
   children?: ReactNode;
@@ -286,6 +480,7 @@ export function CardFaceSvg({
   face,
   error,
   svgAttributes,
+  images,
   children,
 }: CardFaceSvgProps): ReactElement {
   return (
@@ -295,7 +490,9 @@ export function CardFaceSvg({
       {...svgAttributes}
     >
       {children}
-      {error ? renderErrorFace(xUnits, yUnits, error) : face.map(renderShape)}
+      {error
+        ? renderErrorFace(xUnits, yUnits, error)
+        : face.map((shape, index) => renderShape(shape, index, images))}
     </svg>
   );
 }

@@ -24,9 +24,11 @@ import type { Bindings } from "@/lib/lang";
 import {
   CSS_COLOR_NAMES,
   DEFAULT_ICON_STYLE,
+  DEFAULT_IMAGE_FIT,
   DICIER_CODES,
   DICIER_CODE_CATEGORIES,
   ICON_STYLES,
+  IMAGE_FITS,
   SIZE_PRESETS,
   typeName,
 } from "@/lib/lang";
@@ -165,7 +167,7 @@ export interface CompletionResult {
  * position-specific (loop:) and handled where it is legal. */
 const EXPRESSION_KEYWORDS = ["if", "then", "else", "and", "or", "not"] as const;
 
-type ElementKind = "Rectangle" | "Text" | "Icon";
+type ElementKind = "Rectangle" | "Text" | "Icon" | "Image";
 type BlockKind = ElementKind | "Repeat" | "Card" | "Template" | "Sheet" | "Enum";
 
 /** §3.3 property tables — mirrors check.ts's private ELEMENT_SPECS (pinned by
@@ -195,6 +197,14 @@ const ELEMENT_KEYS: Record<ElementKind, { key: string; detail: string }[]> = {
     { key: "anchor", detail: "left | middle | right (optional)" },
     { key: "style", detail: `Dicier face (optional, default ${DEFAULT_ICON_STYLE})` },
   ],
+  Image: [
+    { key: "x", detail: "Number — units" },
+    { key: "y", detail: "Number — units" },
+    { key: "width", detail: "Number — units" },
+    { key: "height", detail: "Number — units" },
+    { key: "src", detail: "Text — image URL" },
+    { key: "fit", detail: `${IMAGE_FITS.join(" | ")} (optional, default ${DEFAULT_IMAGE_FIT})` },
+  ],
 };
 
 /** §3.2 Card properties — mirrors check.ts's private CARD_PROPERTY_KEYS
@@ -216,6 +226,7 @@ const ELEMENT_OPENERS: { key: string; detail: string }[] = [
   { key: "Rectangle", detail: "x y width height color" },
   { key: "Text", detail: "x y size text (color anchor)" },
   { key: "Icon", detail: "x y size code (color anchor)" },
+  { key: "Image", detail: "x y width height src (fit)" },
   { key: "Repeat", detail: "<count expr> as <variable>" },
 ];
 
@@ -227,7 +238,7 @@ const TOP_LEVEL_OPENERS: { key: string; detail: string }[] = [
 ];
 
 const BLOCK_HEADER_RE =
-  /^(Enum|Sheet|Template|Card|Rectangle|Text|Icon|Repeat|Front|Back)[ \t]*:[ \t]*(.*)$/;
+  /^(Enum|Sheet|Template|Card|Rectangle|Text|Icon|Image|Repeat|Front|Back)[ \t]*:[ \t]*(.*)$/;
 const WORD_CHAR = /[A-Za-z0-9_]/;
 
 // ---------------------------------------------------------------------------
@@ -338,7 +349,7 @@ function scanAncestors(lines: string[], lineIndex: number, startIndent: number):
         if (asMatch) out.repeatVars.push(asMatch[1]);
         continue;
       }
-      if (kind === "Rectangle" || kind === "Text" || kind === "Icon") {
+      if (kind === "Rectangle" || kind === "Text" || kind === "Icon" || kind === "Image") {
         if (out.elementKind === null) out.elementKind = kind;
         continue;
       }
@@ -776,6 +787,7 @@ export function computeCompletions(
       case "Rectangle":
       case "Text":
       case "Icon":
+      case "Image":
         return result(keySuggestions(ELEMENT_KEYS[ancestors.innermost], colonFollows, false));
       case "Card": {
         const suggestions = CARD_KEYS.map(({ key, detail }) => ({
@@ -839,6 +851,7 @@ function valueSuggestions(
     case "Rectangle":
     case "Text":
     case "Icon":
+    case "Image":
       return NO_SUGGESTIONS;
     case "Repeat":
       // `Repeat: <Number expr> as <var>` — expression until `as`, then naming.
@@ -913,12 +926,15 @@ function valueSuggestions(
 
     // ---- element properties ------------------------------------------------
     case "x": {
-      // `middle` must be the WHOLE value (E007) — offer it only while nothing
-      // but the word being typed follows the colon. full/half are Numbers and
-      // stay legal mid-expression.
+      // `middle` must be the WHOLE value (E007), and only Text/Icon have the
+      // anchor sugar (§3.4) — Rectangle and Image get plain geometry. An
+      // unknown block (broken code) keeps offering it. full/half are Numbers
+      // and stay legal mid-expression.
       const bareValue = /^[ \t]*[A-Za-z0-9_]*$/.test(afterColon);
+      const middleOk =
+        ancestors.elementKind !== "Rectangle" && ancestors.elementKind !== "Image";
       return [
-        ...geometrySuggestions(ancestors.elementKind !== "Rectangle" && bareValue),
+        ...geometrySuggestions(middleOk && bareValue),
         ...expressionExtras(beforeWord, scope(), snapshot),
       ];
     }
@@ -948,8 +964,18 @@ function valueSuggestions(
         detail: s === DEFAULT_ICON_STYLE ? "Dicier face (the default)" : "Dicier face",
         group: 0 as const,
       }));
+    case "fit":
+      // Image only (§3.3, M2): three fit modes, closed vocabulary.
+      return IMAGE_FITS.map((f) => ({
+        label: f,
+        insertText: f,
+        kind: "value" as const,
+        detail: f === DEFAULT_IMAGE_FIT ? "image fit (the default)" : "image fit",
+        group: 0 as const,
+      }));
     case "text":
     case "code":
+    case "src":
       // Outside the string: an expression (in-string handled by the caller).
       return expressionExtras(beforeWord, scope(), snapshot);
 

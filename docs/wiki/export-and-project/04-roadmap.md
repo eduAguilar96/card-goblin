@@ -32,9 +32,9 @@ names, property names, enum cases, color names, icon codes. See
 **Icon styles.** All ten Dicier faces (flat/block/round × dark/light/heavy,
 plus pixel) via `style:` — see [Icons](icons.md).
 
-## Being built next
-
-- **`Image` element** — place your own artwork on a card. The biggest gap today.
+**The `Image` element.** Your own artwork on a card, from a URL — with `fit:`
+control and PDF embedding. See
+[Templates & shapes](templates-and-shapes.md).
 
 ## Further out
 

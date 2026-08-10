@@ -7,14 +7,22 @@
  */
 import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
-import { compileProject, type DataDiagnostic, type Deck } from "@/lib/lang";
+import {
+  compileProject,
+  type DataDiagnostic,
+  type Deck,
+  type ImageShape,
+} from "@/lib/lang";
 import { DEMO_PROJECT_ROWS, DEMO_PROJECT_SOURCE } from "@/lib/lang/demoProject";
 import {
+  CardFaceSvg,
   CardSVG,
   ERROR_MESSAGE_MAX,
   ICON_ASCENT,
+  IMAGE_PRESERVE_ASPECT,
   TEXT_ASCENT,
   cardSvgPropsEqual,
+  imagePlaceholderStroke,
   type CardSvgProps,
 } from "@/app/editor/_components/cardSvg";
 
@@ -239,6 +247,87 @@ describe("CardSVG: error placeholder", () => {
 });
 
 // -- the §4.2 memo comparator ------------------------------------------------
+
+describe("CardFaceSvg: Image shapes (§3.3 M2)", () => {
+  const imageShape = (fit: ImageShape["fit"]): ImageShape => ({
+    kind: "image",
+    x: 1,
+    y: 2,
+    width: 10,
+    height: 8,
+    src: "https://example.com/a.png",
+    fit,
+  });
+
+  const render = (
+    shape: ImageShape,
+    images?: ReadonlyMap<string, string | null>,
+  ): string =>
+    renderToStaticMarkup(
+      <CardFaceSvg xUnits={20} yUnits={28} face={[shape]} images={images} />,
+    );
+
+  it("a resolved source renders an <image> with box and per-fit preserveAspectRatio", () => {
+    for (const [fit, expected] of [
+      ["contain", "xMidYMid meet"],
+      ["cover", "xMidYMid slice"],
+      ["stretch", "none"],
+    ] as const) {
+      const markup = render(
+        imageShape(fit),
+        new Map([["https://example.com/a.png", "data:image/png;base64,AAA"]]),
+      );
+      const image = /<image\b[^>]*\/?>/.exec(markup)?.[0];
+      expect(image, fit).toBeDefined();
+      const attrs = parseAttrs(image!);
+      expect(attrs.href).toBe("data:image/png;base64,AAA");
+      expect(attrs.x).toBe("1");
+      expect(attrs.y).toBe("2");
+      expect(attrs.width).toBe("10");
+      expect(attrs.height).toBe("8");
+      expect(attrs.preserveAspectRatio).toBe(expected);
+      expect(IMAGE_PRESERVE_ASPECT[fit]).toBe(expected);
+    }
+  });
+
+  it("static rendering WITHOUT resolutions is the loading placeholder (SSR default; the live swap is browser-only)", () => {
+    const markup = render(imageShape("contain"));
+    expect(markup).not.toContain("<image");
+    expect(markup).toContain('data-image-placeholder="loading"');
+    expect(markup).toContain("Loading image: https://example.com/a.png");
+    // Subtle box, same geometry the image would occupy — layout never shifts.
+    const rect = rectTags(markup)[0];
+    expect(rect.x).toBe("1");
+    expect(rect.width).toBe("10");
+    expect(rect.fill).toBe("#f3f4f6");
+    expect(Number(rect["stroke-width"])).toBeCloseTo(
+      imagePlaceholderStroke(imageShape("contain")),
+    );
+    // No diagonal cross while merely loading.
+    expect(markup).not.toContain("<line");
+  });
+
+  it("a failed (null) resolution renders the marked warning box", () => {
+    const markup = render(
+      imageShape("contain"),
+      new Map([["https://example.com/a.png", null]]),
+    );
+    expect(markup).not.toContain("<image");
+    expect(markup).toContain('data-image-placeholder="failed"');
+    expect(markup).toContain("Image failed to load: https://example.com/a.png");
+    const rect = rectTags(markup)[0];
+    expect(rect.fill).toBe("#fef3c7");
+    expect(rect.stroke).toBe("#b45309");
+    // The diagonal cross marks the box without depending on any font.
+    expect([...markup.matchAll(/<line\b/g)]).toHaveLength(2);
+  });
+
+  it("a source MISSING from the resolutions map renders the warning box too (never a broken href)", () => {
+    const markup = render(imageShape("contain"), new Map());
+    expect(markup).not.toContain("<image");
+    expect(markup).toContain('data-image-placeholder="failed"');
+  });
+});
 
 describe("cardSvgPropsEqual (the §4.2 memo comparator)", () => {
   const base: CardSvgProps = {

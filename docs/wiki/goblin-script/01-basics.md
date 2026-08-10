@@ -42,8 +42,8 @@ Declared names — `Suit`, `Monsters`, `MonsterFront` — are plain words: a let
 then letters, digits, or underscores. No quotes.
 
 A small set of words is reserved and can't be used as names: the block openers
-(`Enum` `Sheet` `Template` `Card` `Rectangle` `Text` `Icon` `Repeat` `Front` `Back`),
-the declaration words (`case` `column`), and the expression words
+(`Enum` `Sheet` `Template` `Card` `Rectangle` `Text` `Icon` `Image` `Repeat`
+`Front` `Back`), the declaration words (`case` `column`), and the expression words
 (`if` `then` `else` `and` `or` `not` `as`).
 
 Everything else is fair game. Property words like `count`, `size`, `color`, and `full`

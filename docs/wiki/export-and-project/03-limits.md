@@ -18,8 +18,13 @@ to read them now than to discover them three hours into a deck.
 
 ## Images
 
-- **No `Image` element yet.** Icons cover a lot of ground — 888 glyphs — but you can't
-  place your own artwork on a card. This is the most-requested gap and is next up.
+- **URLs only.** The [`Image` element](templates-and-shapes.md) pulls artwork from the
+  web; there's no way to upload a file into the project yet, so the art has to be
+  hosted somewhere.
+- **PDF embedding needs CORS.** An image displays in the preview from any URL, but
+  embedding it into an exported PDF requires the host to allow cross-origin use —
+  see [PDF export](pdf-export.md). Hosts that don't cooperate print as placeholder
+  boxes.
 
 ## Persistence
 
