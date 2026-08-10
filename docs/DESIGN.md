@@ -565,6 +565,40 @@ exhaustive code list, custom card sizes, compile in a worker if needed.
   is last-writer-wins (no `storage`-event merging in v1; the losing tab's work
   is gone on its next load) — accepted until real project files (§7).
 
+### 6.3 Monaco autocomplete — agreed spec (2026-08-09)
+
+- **Architecture:** context derivation and suggestion computation are pure —
+  `computeCompletions(documentText, offset, snapshot) → suggestions + replace range`
+  in `goblinCompletion.ts`, unit-tested without Monaco; the registered provider is a
+  thin offset↔position adapter (triggers `[` `.` `"` `:`, plus in-string quick
+  suggestions so `code:` completion runs while typing). The name snapshot is rebuilt
+  per invocation from the LATEST compile's bindings — partial bindings from a broken
+  compile included, since `check()` never throws — falling back per category to
+  `lastGoodSchema`, so suggestions track every keystroke without re-registration.
+- **No clean compile required:** the cursor's *context* comes from a cheap textual
+  scan of the document — indentation + nearest block headers walking upward,
+  `Repeat`/`loop` `as`-variables, and a whole-document Template→using-Card scan
+  (completions follow §3.6's per-using-Card rule). Unrecognizable ancestors are
+  stepped over; when the scan cannot place the cursor at all, bracket completions
+  degrade to the union of all sheets' columns rather than to silence.
+- **What completes where:** `[` → the enclosing Card's (or the using Cards' union)
+  sheet columns + loop/Repeat variables in scope, inside string interpolation too
+  (◆30); property-key positions → the block kind's key set with type-hint details
+  (the tables mirror check.ts's private CARD_PROPERTY_KEYS/ELEMENT_SPECS — the test
+  suite pins them to the checker with E008 probes); value positions by expected
+  type — size presets, sheet names, template names on `Front:`/`Back:`, enum names
+  on `loop:`, CSS color names (◆21), left/middle/right on `anchor:`, full/half
+  (+ middle for x on Text/Icon) on geometry; `code:` strings → the full Dicier list
+  with each code's source-list section header as detail (`DICIER_CODE_CATEGORIES`,
+  generated alongside `DICIER_CODES`); `Enum.` → that enum's cases; bare cases where
+  ◆14 makes them legal (expected type first, otherwise globally-unique only);
+  expression keywords at low priority. Comments complete nothing.
+- **Ranking and ranges:** four sort tiers — context-primary, secondary (enum names,
+  unique bare cases), keywords, hints — so context-relevant names surface first.
+  Replace ranges span the word under the cursor (or the whole `code:` string
+  content, since Dicier codes contain spaces), so mid-word acceptance overtypes
+  cleanly instead of splicing.
+
 ## 7. Milestone 3
 
 Projects & persistence (file export/import of `{code, sheets}`, then accounts/backend),

@@ -22,10 +22,13 @@ duplex-mirrored backs, rendered at 300 DPI. See [PDF export](pdf-export.md).
 **Autosave.** Your project — code and rows — survives a reload, saved in your
 browser, with a **Reset to demo** escape hatch. See [Autosave](autosave.md).
 
+**Autocomplete.** The code editor suggests what fits where your cursor is — column
+names, property names, enum cases, color names, icon codes. See
+[The editor](the-editor.md).
+
 ## Being built next
 
 - **`Image` element** — place your own artwork on a card. The biggest gap today.
-- **Autocomplete** — column names, enum cases, and icon codes offered as you type.
 - **Custom card sizes** — beyond the [five presets](card-sizes.md).
 - **Icon styles** — Dicier ships several (flat, block, round, pixel); only one is
   wired up.

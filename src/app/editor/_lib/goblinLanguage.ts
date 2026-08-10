@@ -16,6 +16,13 @@
 
 import type { Monaco } from "@monaco-editor/react";
 import type { languages } from "monaco-editor";
+import type { Bindings } from "@/lib/lang";
+import type { SchemaSnapshot } from "@/app/editor/_store/editorStore";
+import {
+  buildCompletionSnapshot,
+  computeCompletions,
+  type SuggestionKind,
+} from "@/app/editor/_lib/goblinCompletion";
 
 export const GOBLIN_LANGUAGE_ID = "goblin";
 
@@ -103,4 +110,100 @@ export function registerGoblinLanguage(monaco: Monaco): void {
   monaco.languages.register({ id: GOBLIN_LANGUAGE_ID, extensions: [".goblin"] });
   monaco.languages.setMonarchTokensProvider(GOBLIN_LANGUAGE_ID, monarchLanguage);
   monaco.languages.setLanguageConfiguration(GOBLIN_LANGUAGE_ID, languageConfiguration);
+}
+
+// ---------------------------------------------------------------------------
+// Completion provider — a thin adapter over the pure module (DESIGN.md §6.3).
+// All context/suggestion logic lives in goblinCompletion.ts, tested without
+// Monaco; this layer only converts offsets ↔ positions and item shapes.
+// ---------------------------------------------------------------------------
+
+/** What the provider reads from the store on every invocation: the LATEST
+ * compile's bindings (mid-edit partials welcome) + the last good schema. */
+export interface CompletionSource {
+  bindings: Bindings | null;
+  schema: SchemaSnapshot | null;
+}
+
+function monacoKind(monaco: Monaco, kind: SuggestionKind): languages.CompletionItemKind {
+  const k = monaco.languages.CompletionItemKind;
+  switch (kind) {
+    case "column":
+      return k.Field;
+    case "variable":
+      return k.Variable;
+    case "property":
+      return k.Property;
+    case "element":
+      return k.Struct;
+    case "keyword":
+      return k.Keyword;
+    case "enum":
+      return k.Enum;
+    case "enumCase":
+      return k.EnumMember;
+    case "color":
+      return k.Color;
+    case "iconCode":
+      return k.Constant;
+    case "sheet":
+      return k.Class;
+    case "template":
+      return k.Function;
+    case "sizePreset":
+      return k.Unit;
+    case "value":
+      return k.Value;
+    case "hint":
+      return k.Text;
+  }
+}
+
+/** One registration per monaco instance — StrictMode double-mounts (and any
+ * future second editor) must not duplicate every suggestion. */
+const completionsRegistered = new WeakSet<object>();
+
+export function registerGoblinCompletions(
+  monaco: Monaco,
+  getSource: () => CompletionSource,
+): void {
+  if (completionsRegistered.has(monaco)) return;
+  completionsRegistered.add(monaco);
+  monaco.languages.registerCompletionItemProvider(GOBLIN_LANGUAGE_ID, {
+    triggerCharacters: ["[", ".", '"', ":"],
+    provideCompletionItems(model, position) {
+      const { bindings, schema } = getSource();
+      const snapshot = buildCompletionSnapshot(bindings, schema);
+      const result = computeCompletions(
+        model.getValue(),
+        model.getOffsetAt(position),
+        snapshot,
+      );
+      const start = model.getPositionAt(result.replaceStart);
+      const end = model.getPositionAt(result.replaceEnd);
+      const insert = new monaco.Range(
+        start.lineNumber,
+        start.column,
+        position.lineNumber,
+        position.column,
+      );
+      const replace = new monaco.Range(
+        start.lineNumber,
+        start.column,
+        end.lineNumber,
+        end.column,
+      );
+      return {
+        suggestions: result.suggestions.map((s, i) => ({
+          label: s.label,
+          insertText: s.insertText,
+          detail: s.detail,
+          kind: monacoKind(monaco, s.kind),
+          // Tier first, then the pure module's deliberate ordering.
+          sortText: `${s.group}_${String(i).padStart(4, "0")}`,
+          range: { insert, replace },
+        })),
+      };
+    },
+  });
 }

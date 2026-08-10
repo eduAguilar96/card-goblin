@@ -23,8 +23,14 @@ The editor lives at [`/editor`](/editor). Three panels and a status bar:
 
 ## Code (top left)
 
-Your Goblin script, in a real code editor (Monaco) with syntax highlighting. Errors
-appear as red squiggles where they happen, and in the problems strip.
+Your Goblin script, in a real code editor (Monaco) with syntax highlighting and
+autocomplete. Suggestions appear as you type (or on **Ctrl+Space**) and fit where
+your cursor is: your column names inside `[brackets]`, the properties a block
+accepts, size presets, [color names](colors.md), enum cases after a `.`, and
+[icon codes](icons.md) inside `code:` strings. They come from your latest compile,
+so they keep working while the code is broken mid-edit — the moment a `Sheet:`
+declares a column, that column is offered everywhere it's legal. Errors appear as
+red squiggles where they happen, and in the problems strip.
 
 ## Preview (top right)
 

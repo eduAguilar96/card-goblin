@@ -34,7 +34,7 @@ export type {
   ValueType,
 } from "./check";
 export { CSS_COLOR_NAMES } from "./css-colors";
-export { DICIER_CODES } from "./dicier-codes";
+export { DICIER_CODES, DICIER_CODE_CATEGORIES } from "./dicier-codes";
 export { generateModel } from "./generate";
 export type { EditedRows, GenerateResult, SheetRows } from "./generate";
 export type {

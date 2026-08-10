@@ -6,6 +6,7 @@ import type { editor } from "monaco-editor";
 import type { Diagnostic } from "@/lib/lang";
 import {
   GOBLIN_LANGUAGE_ID,
+  registerGoblinCompletions,
   registerGoblinLanguage,
 } from "@/app/editor/_lib/goblinLanguage";
 import { editorStore, useEditorStore } from "@/app/editor/_store/editorStore";
@@ -100,6 +101,13 @@ export default function WindowCode() {
         onMount={(editorInstance, monaco) => {
           editorRef.current = editorInstance;
           monacoRef.current = monaco;
+          // Completions read the store LAZILY per invocation, so they track
+          // every compile without re-registration (§6.3: latest bindings,
+          // last good schema as the fallback name source).
+          registerGoblinCompletions(monaco, () => {
+            const s = editorStore.getState();
+            return { bindings: s.compile?.bindings ?? null, schema: s.lastGoodSchema };
+          });
           // Monaco mounts async — pull the freshest compile rather than the
           // diagnostics captured when this closure rendered.
           const current = editorStore.getState().compile?.diagnostics ?? NO_DIAGNOSTICS;
@@ -113,6 +121,9 @@ export default function WindowCode() {
           minimap: { enabled: false },
           automaticLayout: true,
           scrollBeyondLastLine: false, // Prevents unnecessary scrolling
+          // Icon-code completion works INSIDE `code:` strings (§6.3); Monaco
+          // disables string quick-suggestions by default.
+          quickSuggestions: { other: true, comments: false, strings: true },
         }}
       />
     </div>
