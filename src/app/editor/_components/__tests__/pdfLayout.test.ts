@@ -116,6 +116,23 @@ describe("layoutPdf on the real demo model", () => {
     expect(layout.pages[0].crossMarks).toHaveLength(24);
   });
 
+  it("clamps cross-mark arms to the page box at sub-arm margins (1 mm probe)", () => {
+    // margin 1 mm < CROSS_ARM_MM 1.5 mm: the top row's upward arms would
+    // reach y = −0.5 mm unclamped and bleed off the page.
+    const layout = layoutPdf(demoModel(), opts({ marginMm: 1 }));
+    const segments = layout.pages.flatMap((p) => p.crossMarks);
+    expect(segments.length).toBeGreaterThan(0);
+    const { widthMm, heightMm } = layout.pages[0];
+    for (const s of segments) {
+      expect(Math.min(s.x1Mm, s.x2Mm)).toBeGreaterThanOrEqual(0);
+      expect(Math.max(s.x1Mm, s.x2Mm)).toBeLessThanOrEqual(widthMm);
+      expect(Math.min(s.y1Mm, s.y2Mm)).toBeGreaterThanOrEqual(0);
+      expect(Math.max(s.y1Mm, s.y2Mm)).toBeLessThanOrEqual(heightMm);
+    }
+    // And the clamp really engaged: a top-corner arm now stops exactly at 0.
+    expect(segments.some((s) => s.y1Mm === 0)).toBe(true);
+  });
+
   it("error cards are skipped and counted; faceSpecs cover every placement", () => {
     const rows = DEMO_PROJECT_ROWS.map((r) => ({ ...r }));
     rows[0] = { ...rows[0], cost: "abc" }; // Dragon rows → placeholders

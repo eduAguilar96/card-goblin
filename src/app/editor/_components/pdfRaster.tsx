@@ -121,6 +121,9 @@ async function buildFontEmbedCss(): Promise<string> {
       const response = await fetch(url);
       if (!response.ok) continue;
       const bytes = new Uint8Array(await response.arrayBuffer());
+      // Known fragility (review-noted): only the FIRST url() source is inlined
+      // and it is labeled woff2 unconditionally — fine for next/font and the
+      // bundled Dicier today, wrong the day a face lists another format first.
       parts.push(
         `@font-face{font-family:'${family}';src:url(data:font/woff2;base64,${bytesToBase64(
           bytes,
@@ -137,7 +140,18 @@ async function buildFontEmbedCss(): Promise<string> {
 }
 
 let fontCssCache: Promise<string> | null = null;
-const getFontEmbedCss = (): Promise<string> => (fontCssCache ??= buildFontEmbedCss());
+
+/** Cached for the session — but never as a REJECTED promise: an unexpected
+ * failure mid-scrape must poison only its own export, not every later one. */
+const getFontEmbedCss = (): Promise<string> => {
+  if (fontCssCache === null) {
+    fontCssCache = buildFontEmbedCss().catch((error: unknown) => {
+      fontCssCache = null; // evict so the next export retries
+      throw error;
+    });
+  }
+  return fontCssCache;
+};
 
 // ---------------------------------------------------------------------------
 // SVG serialization and rasterization

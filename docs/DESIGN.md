@@ -510,6 +510,13 @@ exhaustive code list, custom card sizes, compile in a worker if needed.
   a back page with columns mirrored (col′ = cols−1−col, rows unchanged — long-edge
   double-sided alignment). **Separate:** all back pages appended after all front
   pages, same mirroring. **None:** fronts only.
+- **Grid anchoring** († 2026-08-09): the grid is horizontally **centered** between
+  the margins — col-index mirroring aligns duplex backs under a long-edge flip only
+  when the column x-positions are symmetric about the page's vertical center line;
+  margin-anchoring would leave the backs offset by the leftover width. Vertically
+  the grid is top-anchored at the margin (a long-edge flip leaves rows unchanged,
+  so alignment never depends on the vertical anchor). The margin option is
+  therefore the *minimum* outer margin; the fit formula still uses it exactly.
 - **Guides:** cut lines run edge-to-edge across the page at every card boundary
   (spacing 0 → one shared line; spacing > 0 → a line along each edge of the gap).
   Cross marks are ~3 mm crop crosses at card corners only. Styles: dotted = 0.2 mm

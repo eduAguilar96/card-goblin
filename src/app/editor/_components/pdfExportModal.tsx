@@ -33,9 +33,23 @@
  *   Export rather than clamping silently.
  * - Filename: single-deck models download as `<deckname>.pdf` (sanitized),
  *   anything else as `cardgoblin.pdf` (spec).
+ * - Dialog a11y, dependency-free: role="dialog" aria-modal, the dialog takes
+ *   focus on open, Tab wraps at its ends, and Escape / a backdrop click close
+ *   it — except while an export is running (same rule as the Cancel button;
+ *   losing a render mid-flight to a stray click helps nobody). Static tests
+ *   cover the roles/attributes; the focus/keyboard behavior itself has no
+ *   driver here and is on the manual browser checklist.
  */
 
-import { useMemo, useState, type ReactElement, type ReactNode } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type ReactElement,
+  type ReactNode,
+} from "react";
 import type { RenderModel } from "@/lib/lang";
 import {
   useEditorStore,
@@ -150,13 +164,50 @@ export function PdfExportModal({
   const [failure, setFailure] = useState<string | null>(null);
   /** Previewed page. Clamped at render, never in state (module note). */
   const [pageIndex, setPageIndex] = useState(0);
+  const dialogRef = useRef<HTMLDivElement>(null);
+
+  // Focus the dialog on open (tabIndex −1 makes it focusable) so keyboard
+  // users land inside it and Escape works immediately. Effects never run in
+  // renderToStaticMarkup — behavior is on the manual browser checklist.
+  useEffect(() => {
+    dialogRef.current?.focus();
+  }, []);
+
+  /** Escape closes; Tab wraps at the dialog's ends (minimal focus trap over
+   * the modal's own controls — no dependency, no portal). Closing is blocked
+   * while exporting, matching the Cancel button. */
+  const handleDialogKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
+    if (event.key === "Escape") {
+      event.stopPropagation();
+      if (!working) onClose();
+      return;
+    }
+    if (event.key !== "Tab" || dialogRef.current === null) return;
+    const focusable = [
+      ...dialogRef.current.querySelectorAll<HTMLElement>(
+        'button, input, select, textarea, a[href], [tabindex]:not([tabindex="-1"])',
+      ),
+    ].filter((el) => !el.hasAttribute("disabled"));
+    if (focusable.length === 0) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    const active = document.activeElement;
+    if (event.shiftKey && (active === first || active === dialogRef.current)) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && active === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  };
 
   const update = (patch: Partial<PdfExportOptions>): void => {
-    setOptions((prev) => {
-      const next = { ...prev, ...patch };
-      sessionOptions = { ...next }; // session persistence (module note)
-      return next;
-    });
+    setOptions((prev) => ({ ...prev, ...patch }));
+    // Session persistence (module note) — OUTSIDE the state updater, which
+    // React expects to be pure (StrictMode re-invokes it). `options` started
+    // as a copy of `sessionOptions` and both receive every patch, so the two
+    // never drift.
+    sessionOptions = { ...sessionOptions, ...patch };
   };
 
   const marginValid = parseNonNegativeMm(marginText) !== null;
@@ -191,12 +242,20 @@ export function PdfExportModal({
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
       role="presentation"
+      // Backdrop click closes; clicks inside the dialog bubble here with a
+      // different target, so only true backdrop hits pass the guard.
+      onClick={(event) => {
+        if (event.target === event.currentTarget && !working) onClose();
+      }}
     >
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby="pdf-export-title"
-        className="flex max-h-[90vh] w-full max-w-4xl flex-col overflow-y-auto rounded-lg border border-gray-700 bg-gray-800 p-4 text-sm text-gray-200 shadow-xl"
+        tabIndex={-1}
+        onKeyDown={handleDialogKeyDown}
+        className="flex max-h-[90vh] w-full max-w-4xl flex-col overflow-y-auto rounded-lg border border-gray-700 bg-gray-800 p-4 text-sm text-gray-200 shadow-xl outline-none"
       >
         <h2 id="pdf-export-title" className="mb-3 text-base font-semibold text-white">
           Export PDF

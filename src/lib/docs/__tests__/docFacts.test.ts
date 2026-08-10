@@ -28,7 +28,13 @@ import { REPEAT_CAP } from "@/lib/lang/eval";
 import { CARD_CAP } from "@/lib/lang/generate";
 import { KEYWORDS } from "@/lib/lang/lexer";
 import { BLOCK_OPENERS } from "@/lib/lang/parser";
-import { DEFAULT_PDF_OPTIONS, PAGE_SIZES } from "@/app/editor/_components/pdfLayout";
+import {
+  DEFAULT_PDF_OPTIONS,
+  GUIDE_STROKES,
+  PAGE_SIZES,
+  type PdfExportOptions,
+} from "@/app/editor/_components/pdfLayout";
+import { RASTER_DPI } from "@/app/editor/_components/pdfRaster";
 import { PERSIST_DEBOUNCE_MS } from "@/app/editor/_store/persistence";
 import { loadDocPages } from "@/lib/docs/pages";
 
@@ -155,6 +161,11 @@ const NUMERIC_CLAIMS: {
     patterns: [/about \*\*(\d[\d,]*) second\*\* after your last change/g],
     expected: PERSIST_DEBOUNCE_MS / 1000,
   },
+  {
+    label: "PDF raster DPI",
+    patterns: [/(\d[\d,]*)\s*DPI/g],
+    expected: RASTER_DPI,
+  },
 ];
 
 describe("numeric claims match their constants", () => {
@@ -259,16 +270,33 @@ describe("the PDF options table matches the export defaults", () => {
     ),
   );
 
-  const EXPECTED: [label: string, actual: string][] = [
-    ["Page size", PAGE_SIZES[DEFAULT_PDF_OPTIONS.pageSize].name],
-    ["Backs", DEFAULT_PDF_OPTIONS.backs],
-    ["Outer margin (mm)", String(DEFAULT_PDF_OPTIONS.marginMm)],
-    ["Card spacing (mm)", String(DEFAULT_PDF_OPTIONS.spacingMm)],
-    ["Cut lines", DEFAULT_PDF_OPTIONS.cutLines],
-    ["Cross marks", DEFAULT_PDF_OPTIONS.crossMarks],
-  ];
+  /** Wiki row label for each option KEY. The Record type makes this total:
+   * adding an option to PdfExportOptions without labeling it here is a type
+   * error, and the key-set check below then demands its wiki row — the same
+   * "new one can't ship undocumented" shape as the SIZE_PRESETS section. */
+  const OPTION_LABELS: Record<keyof PdfExportOptions, string> = {
+    pageSize: "Page size",
+    backs: "Backs",
+    marginMm: "Outer margin (mm)",
+    spacingMm: "Card spacing (mm)",
+    cutLines: "Cut lines",
+    crossMarks: "Cross marks",
+  };
 
-  for (const [label, actual] of EXPECTED) {
+  const optionKeys = Object.keys(DEFAULT_PDF_OPTIONS) as (keyof PdfExportOptions)[];
+
+  it("documents every option — a new option can't ship undocumented", () => {
+    expect([...documented.keys()].sort()).toEqual(
+      optionKeys.map((key) => OPTION_LABELS[key]).sort(),
+    );
+  });
+
+  for (const key of optionKeys) {
+    const label = OPTION_LABELS[key];
+    const actual =
+      key === "pageSize"
+        ? PAGE_SIZES[DEFAULT_PDF_OPTIONS.pageSize].name
+        : String(DEFAULT_PDF_OPTIONS[key]);
     it(`states the ${label} default as "${actual}"`, () => {
       const stated = documented.get(label);
       expect(stated, `no "${label}" row in the options table`).toBeDefined();
@@ -282,6 +310,25 @@ describe("the PDF options table matches the export defaults", () => {
     for (const size of Object.values(PAGE_SIZES)) {
       expect(text).toContain(`${size.widthMm} × ${size.heightMm} mm`);
       expect(text).toContain(size.name);
+    }
+  });
+
+  it("states every guide style's stroke width, and no unknown styles", () => {
+    // The wiki writes "**dotted** (0.2 mm dotted black)" etc.; scrape every
+    // "**style** (N mm" claim on the page and compare the full set against
+    // GUIDE_STROKES — both directions: no stated width may disagree, and no
+    // style in the code may go unstated.
+    const stated = new Map(
+      [...text.matchAll(/\*\*(\w+)\*\* \(([\d.]+) mm/g)].map(
+        (m) => [m[1], Number(m[2])] as const,
+      ),
+    );
+    expect([...stated.keys()].sort()).toEqual(Object.keys(GUIDE_STROKES).sort());
+    for (const [style, stroke] of Object.entries(GUIDE_STROKES)) {
+      expect(
+        stated.get(style),
+        `wiki states the ${style} stroke as ${stated.get(style)} mm, code says ${stroke.widthMm} mm`,
+      ).toBe(stroke.widthMm);
     }
   });
 });

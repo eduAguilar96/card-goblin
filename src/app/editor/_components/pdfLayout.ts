@@ -11,15 +11,12 @@
  * convention, matching the RenderModel); pdfAssemble converts to PDF points
  * and flips to PDF's bottom-left origin.
  *
+ * The grid is horizontally CENTERED between the margins and top-anchored
+ * vertically, making the margin option a MINIMUM (§6.1 "grid anchoring":
+ * col-index mirroring aligns duplex backs under a long-edge flip only when
+ * the column x-positions are symmetric about the page's vertical center).
+ *
  * Spec decisions beyond §6.1's literal text (each marked at its code site):
- * - The grid is horizontally CENTERED between the margins (§6.1 promises
- *   "mirrored grid keeps them aligned"; col-index mirroring aligns front and
- *   back under a long-edge flip ONLY when the column x-positions are
- *   symmetric about the page's vertical center line — margin-anchoring would
- *   leave the columns offset by the leftover width). Vertically the grid is
- *   top-anchored at the margin (rows are unchanged by a long-edge flip, so
- *   alignment never depends on the vertical anchor). The margin option is
- *   thus the MINIMUM outer margin; the fit formula still uses it exactly.
  * - "Separate" appends ALL back pages after ALL front pages globally (across
  *   decks), backs in the same page order as the fronts, so a re-fed stack
  *   pairs sheet k with sheet k (§6.1 says "all back pages appended after all
@@ -262,9 +259,17 @@ export function computeCutLines(
 /**
  * §6.1: ~3 mm crop crosses at card corners only (never edge-to-edge). Shared
  * corners (spacing 0) are deduped — one cross per distinct corner point. Each
- * cross is two segments: horizontal then vertical.
+ * cross is two segments: horizontal then vertical. Arms are CLAMPED to the
+ * page box: at margins below CROSS_ARM_MM an unclamped arm would extend
+ * off-page (negative mm — outside the PDF page box and the preview viewBox).
  */
-export function computeCrossMarks(cards: readonly PlacedCard[]): GuideSegment[] {
+export function computeCrossMarks(
+  cards: readonly PlacedCard[],
+  pageWidthMm: number,
+  pageHeightMm: number,
+): GuideSegment[] {
+  const clampX = (v: number): number => Math.min(Math.max(v, 0), pageWidthMm);
+  const clampY = (v: number): number => Math.min(Math.max(v, 0), pageHeightMm);
   const seen = new Set<string>();
   const out: GuideSegment[] = [];
   for (const c of cards) {
@@ -281,8 +286,8 @@ export function computeCrossMarks(cards: readonly PlacedCard[]): GuideSegment[] 
       if (seen.has(key)) continue;
       seen.add(key);
       out.push(
-        { x1Mm: x - CROSS_ARM_MM, y1Mm: y, x2Mm: x + CROSS_ARM_MM, y2Mm: y },
-        { x1Mm: x, y1Mm: y - CROSS_ARM_MM, x2Mm: x, y2Mm: y + CROSS_ARM_MM },
+        { x1Mm: clampX(x - CROSS_ARM_MM), y1Mm: y, x2Mm: clampX(x + CROSS_ARM_MM), y2Mm: y },
+        { x1Mm: x, y1Mm: clampY(y - CROSS_ARM_MM), x2Mm: x, y2Mm: clampY(y + CROSS_ARM_MM) },
       );
     }
   }
@@ -366,7 +371,7 @@ export function layoutPdf(model: RenderModel, options: PdfExportOptions): PdfLay
         side: "front",
         cards: frontCards,
         cutLines: computeCutLines(frontCards, page.widthMm, page.heightMm),
-        crossMarks: computeCrossMarks(frontCards),
+        crossMarks: computeCrossMarks(frontCards, page.widthMm, page.heightMm),
       };
       fronts.push(frontPage);
       interleaved.push(frontPage);
@@ -390,7 +395,7 @@ export function layoutPdf(model: RenderModel, options: PdfExportOptions): PdfLay
           cards: backCards,
           // §6.1: guides render on back pages too, from the mirrored grid.
           cutLines: computeCutLines(backCards, page.widthMm, page.heightMm),
-          crossMarks: computeCrossMarks(backCards),
+          crossMarks: computeCrossMarks(backCards, page.widthMm, page.heightMm),
         };
         backs_.push(backPage);
         interleaved.push(backPage);

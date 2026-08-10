@@ -18,13 +18,16 @@ import {
   resetSessionPdfOptions,
 } from "@/app/editor/_components/pdfExportModal";
 
-/** The demo model; `broken` puts garbage in every `cost` cell so every card
- * becomes an error placeholder (D001) — the nothing-to-print state. */
-function demoModel(broken = false): RenderModel {
+/** The demo model; `breakRows` puts garbage in `cost` cells so those rows'
+ * cards become error placeholders (D001): "all" is the nothing-to-print
+ * state, "first" the some-skipped state (row 0 = Dragon → 6 of 9 cards). */
+function demoModel(breakRows: "none" | "first" | "all" = "none"): RenderModel {
   const rows = {
-    Monsters: DEMO_PROJECT_ROWS.map((row) => ({
+    Monsters: DEMO_PROJECT_ROWS.map((row, i) => ({
       ...row,
-      ...(broken ? { cost: "abc" } : {}),
+      ...(breakRows === "all" || (breakRows === "first" && i === 0)
+        ? { cost: "abc" }
+        : {}),
     })),
   };
   const result = compileProject(DEMO_PROJECT_SOURCE, rows, {
@@ -55,8 +58,36 @@ describe("PdfExportModal — page preview", () => {
     expect(markup).toContain('aria-label="Next page"');
   });
 
+  it("warns how many cards are skipped while keeping Export enabled (§6.1)", () => {
+    // Some-but-not-all skipped: the warning must show AND the export must
+    // still be possible — 3 printable cards remain.
+    const markup = render(demoModel("first"));
+    expect(markup).toContain("6 cards with errors will be skipped.");
+    // The rendered ATTRIBUTE is `disabled=""` — plain "disabled" would also
+    // match the Tailwind `disabled:` variant classes.
+    const exportButton = /<button[^>]*>Export<\/button>/.exec(markup)?.[0];
+    expect(exportButton).toBeDefined();
+    expect(exportButton).not.toContain('disabled=""');
+    // Contrast (guards the regex above against vacuous passes): with EVERY
+    // card skipped the same control is disabled.
+    const blocked = /<button[^>]*>Export<\/button>/.exec(render(demoModel("all")))?.[0];
+    expect(blocked).toContain('disabled=""');
+  });
+
+  it("is an accessible dialog: role, aria-modal, labelled title, focusable", () => {
+    // Static half of the a11y contract; focus/Escape/Tab behavior runs in
+    // effects and handlers that renderToStaticMarkup never executes (module
+    // note in pdfExportModal.tsx — manual browser checklist).
+    const markup = render(demoModel());
+    expect(markup).toContain('role="dialog"');
+    expect(markup).toContain('aria-modal="true"');
+    expect(markup).toContain('aria-labelledby="pdf-export-title"');
+    expect(markup).toContain('id="pdf-export-title"');
+    expect(markup).toContain('tabindex="-1"'); // dialog is focusable on open
+  });
+
   it("says there is nothing to lay out when every card is an error placeholder", () => {
-    const markup = render(demoModel(true));
+    const markup = render(demoModel("all"));
     expect(markup).toContain("No pages to lay out");
     expect(markup).toContain("Nothing to export — every card is an error placeholder.");
     // No empty page frame, and no stepper for zero pages.

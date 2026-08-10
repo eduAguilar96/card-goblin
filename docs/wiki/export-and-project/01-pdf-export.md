@@ -29,7 +29,7 @@ rasterization: on paper the cards are images, here they're live vector art.
 |---|---|---|
 | **Page size** | Letter (215.9 × 279.4 mm) | Or A4 (210 × 297 mm). |
 | **Backs** | Duplex | How back faces are laid out — see below. |
-| **Outer margin (mm)** | 10 | Blank border on every page. Most home printers can't print to the edge. |
+| **Outer margin (mm)** | 10 | Blank border on every page. Most home printers can't print to the edge. It's a minimum: the card grid is centred left-to-right (that centring is what keeps duplex backs aligned) and starts at the top margin, so the side margins are often a little wider than you asked for. |
 | **Card spacing (mm)** | 0 | Gap between cards. `0` means neighbours share a cut line — less cutting, no margin for error. |
 | **Cut lines** | Dotted | Lines running edge to edge across the page at every card boundary. Also: off, red, bold. |
 | **Cross marks** | Off | Small crop crosses at card corners only. Also: dotted, red, bold. |
