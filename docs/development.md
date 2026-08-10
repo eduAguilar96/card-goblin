@@ -42,7 +42,8 @@ src/app/editor/
                          bespoke grid
                          (windowSpreadsheet, gridModel), statusBar, panelLayout,
                          PDF export (pdfExportModal, pdfLayout, pdfPagePreview,
-                         pdfRaster, pdfAssemble), shared prev/next control (pager)
+                         pdfRaster, pdfAssemble), project file export/import
+                         (projectFile), shared prev/next control (pager)
   _lib/goblinLanguage.ts Monaco language registration (Monarch)
 src/lib/content/         frontmatter parsing shared by the wiki and the blog
 src/lib/docs/            the wiki content layer (pure + one fs module)

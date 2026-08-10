@@ -18,6 +18,8 @@ function renderState(state: EditorState): string {
       isStale={state.isStale}
       autosaveDisabled={state.autosaveDisabled}
       onReset={() => {}}
+      onExportProject={() => {}}
+      onImportProject={() => {}}
     />,
   );
 }
@@ -33,6 +35,13 @@ describe("StatusBarContent", () => {
     expect(text).toContain("0 pristine rows excluded");
     expect(text).not.toContain("stale");
     expect(text).not.toContain("autosave off"); // storage healthy → no indicator
+  });
+
+  it("carries the §7.1 project-file pair in the right-hand group", () => {
+    const text = stripTags(renderState(createEditorStore().getState()));
+    expect(text).toContain("Export project");
+    expect(text).toContain("Import project");
+    expect(text).toContain("Reset to demo"); // beside reset, per the spec
   });
 
   it("broken compile: problems counted red, cards hold the LAST GOOD count, stale indicator on", () => {
@@ -84,6 +93,8 @@ describe("StatusBarContent", () => {
           isStale={false}
           autosaveDisabled={false}
           onReset={() => {}}
+          onExportProject={() => {}}
+          onImportProject={() => {}}
         />,
       ),
     );

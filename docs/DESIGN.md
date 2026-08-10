@@ -615,6 +615,41 @@ exhaustive code list, custom card sizes, compile in a worker if needed.
 Projects & persistence (file export/import of `{code, sheets}`, then accounts/backend),
 uploaded assets, sharing, docs site.
 
+### 7.1 Project files — agreed spec (2026-08-10)
+
+- **Export** downloads the current project as JSON — the same versioned payload
+  autosave persists (`serializeProject`: version, code, sheets with rows +
+  editedRows), so one format serves both and the validation machinery is shared.
+  Filename: the single deck's name when there is exactly one Card block, else
+  `cardgoblin-project`, plus `.cardgoblin.json`.
+- **Import** opens a file picker, validates with the same `parsePersisted` rules
+  (unparseable/wrong-version/shape-invalid → error message, current project
+  untouched), then replaces the project via `replaceProject` with a two-step
+  confirm (it is destructive to the current project — same pattern as reset).
+  The imported project becomes the autosave slot's content through the normal
+  save debounce (~1 s after the confirm, no edit needed): unlike reset, the
+  import's `replaceProject` is deliberately NOT muted, so the attached autosave
+  subscription persists it like any other change.
+- **UI:** Export / Import join the status bar's right-hand group beside Reset.
+- Multi-project management stays file-based in v1 (the autosave slot remains
+  singular); accounts/cloud are later M3.
+
+### 7.2 Text wrapping (TextBox) — agreed direction (2026-08-10, spec §3.3 row TBD at implementation)
+
+- New **`TextBox`** element (Text stays single-line, ◆24 intact): x, y, width,
+  height, text, size, color, `align: left|middle|right`, `line_height`
+  (default ≈1.3×size), `overflow: clip|shrink` (default clip; shrink steps the
+  font size down to a 60% floor until the text fits).
+- **The compiler is the wrapping authority**: a Geist glyph-advance metrics
+  table generated at build time (the dicier-codes pattern) lets the evaluator
+  wrap deterministically in the pure layer with a small safety margin — the
+  model carries resolved lines, preview/PDF agree by construction, and overflow
+  is detected at generate time (preview badge on affected cards; NOT an error
+  placeholder).
+- v1 wraps plain text (one font/size/color per box; interpolation substitutes
+  before wrapping; breaks on spaces). Inline icons/bold (run-based layout) are
+  a deliberate later design round.
+
 ## 8. Open questions (explicitly deferred, not blocking the slice)
 
 - Text wrapping / multi-line text boxes (◆24) — needs a layout mini-engine; design in M2.

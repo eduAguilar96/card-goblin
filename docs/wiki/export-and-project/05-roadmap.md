@@ -36,10 +36,14 @@ plus pixel) via `style:` — see [Icons](icons.md).
 control and PDF embedding. See
 [Templates & shapes](templates-and-shapes.md).
 
+**Project files.** Export the project as a file and import it back — backup,
+moving between browsers, and keeping more than one project. See
+[Project files](project-files.md).
+
 ## Further out
 
-- **Projects and sharing** — export and import a project file, then accounts and
-  shared decks.
+- **Accounts and sharing** — projects that live in the cloud and decks you can
+  share by link, past today's [file-based story](project-files.md).
 - **Uploaded assets** — your own images and fonts, stored with the project.
 - **Text wrapping** — multi-line text boxes, which need a real layout engine.
 

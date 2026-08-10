@@ -31,13 +31,13 @@ your work.
 ## The limits
 
 - **One project, one browser.** A single save slot, tied to this browser profile.
-  Another browser, another device, or a private window starts from the demo. Project
-  files you can export and import are on the [roadmap](roadmap.md).
+  Another browser, another device, or a private window starts from the demo. To
+  move a project across, or to keep several, export and import
+  [project files](project-files.md).
 - **Two tabs fight.** With the editor open in two tabs, the tab that changed last
   wins; the other tab's changes are gone on its next load.
 - **It's browser storage, not a backup.** Clearing site data deletes the project.
-  For anything you'd mind losing, copy the code out and keep a
-  [PDF](pdf-export.md) of the deck.
+  For anything you'd mind losing, export a [project file](project-files.md).
 - **Private mode may turn it off.** If the browser refuses storage, the status bar
   shows a quiet **autosave off** and the editor works normally for the session — but
   nothing survives a reload.

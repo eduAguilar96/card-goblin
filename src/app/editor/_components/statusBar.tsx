@@ -23,10 +23,12 @@
  *   tabs are holding the last good state while the counts above track the
  *   live (broken) compile.
  *
- * The right side is the §6.2 autosave surface: a quiet "autosave off" note
- * when storage is unusable this session, and the destructive "Reset to demo"
- * affordance behind an inline two-step confirm (no browser confirm() — it
- * must live in the same dark chrome and be statically renderable for tests).
+ * The right side is the project-lifecycle surface: the §6.2 autosave notes (a
+ * quiet "autosave off" when storage is unusable this session) and reset, plus
+ * the §7.1 project-file pair (Export / Import, projectFile.tsx). Destructive
+ * actions (reset, import) sit behind inline two-step confirms (no browser
+ * confirm() — they must live in the same dark chrome and be statically
+ * renderable for tests).
  *
  * Split (same pattern as the other windows): `StatusBar` is the thin store
  * subscription; `StatusBarContent` (exported for tests) takes the store
@@ -35,10 +37,16 @@
 
 import { useState, type ReactElement } from "react";
 import { buildFlagIndex } from "@/app/editor/_components/gridModel";
+import {
+  exportEditorProject,
+  importEditorProject,
+  ProjectFileButtons,
+} from "@/app/editor/_components/projectFile";
 import { resetEditorToDemo } from "@/app/editor/_store/persistence";
 import {
   useEditorStore,
   type CompileState,
+  type EditorSeed,
   type LastGoodModel,
 } from "@/app/editor/_store/editorStore";
 
@@ -54,6 +62,8 @@ export default function StatusBar(): ReactElement {
       isStale={isStale}
       autosaveDisabled={autosaveDisabled}
       onReset={resetEditorToDemo}
+      onExportProject={exportEditorProject}
+      onImportProject={importEditorProject}
     />
   );
 }
@@ -64,6 +74,8 @@ export interface StatusBarContentProps {
   isStale: boolean;
   autosaveDisabled: boolean;
   onReset(): void;
+  onExportProject(): void;
+  onImportProject(seed: EditorSeed): void;
 }
 
 const plural = (n: number, noun: string): string => `${n} ${noun}${n === 1 ? "" : "s"}`;
@@ -74,6 +86,8 @@ export function StatusBarContent({
   isStale,
   autosaveDisabled,
   onReset,
+  onExportProject,
+  onImportProject,
 }: StatusBarContentProps): ReactElement {
   const cards = (lastGood?.model.decks ?? []).reduce((n, deck) => n + deck.cards.length, 0);
   const diagnostics = compile?.diagnostics ?? [];
@@ -116,6 +130,7 @@ export function StatusBarContent({
             autosave off
           </span>
         )}
+        <ProjectFileButtons onExport={onExportProject} onImport={onImportProject} />
         <ResetToDemoButton onReset={onReset} />
       </span>
     </div>
