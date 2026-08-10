@@ -200,8 +200,8 @@ const ELEMENT_KEYS: Record<ElementKind, { key: string; detail: string }[]> = {
   Image: [
     { key: "x", detail: "Number — units" },
     { key: "y", detail: "Number — units" },
-    { key: "width", detail: "Number — units" },
-    { key: "height", detail: "Number — units" },
+    { key: "width", detail: "Number — units (or auto)" },
+    { key: "height", detail: "Number — units (or auto)" },
     { key: "src", detail: "Text — image URL" },
     { key: "fit", detail: `${IMAGE_FITS.join(" | ")} (optional, default ${DEFAULT_IMAGE_FIT})` },
   ],
@@ -939,12 +939,31 @@ function valueSuggestions(
       ];
     }
     case "y":
-    case "width":
-    case "height":
       return [
         ...geometrySuggestions(false),
         ...expressionExtras(beforeWord, scope(), snapshot),
       ];
+    case "width":
+    case "height": {
+      // Image only (§3.3 auto dimension): `auto` must be the WHOLE value,
+      // like `x: middle`, so it is offered only as a bare value inside an
+      // Image block — Rectangle width and Text/Icon size never see it, and
+      // mid-expression positions don't either.
+      const out = geometrySuggestions(false);
+      if (
+        ancestors.elementKind === "Image" &&
+        /^[ \t]*[A-Za-z0-9_]*$/.test(afterColon)
+      ) {
+        out.push({
+          label: "auto",
+          insertText: "auto",
+          kind: "value",
+          detail: "derived from the art's aspect ratio (Image only)",
+          group: 0,
+        });
+      }
+      return [...out, ...expressionExtras(beforeWord, scope(), snapshot)];
+    }
     case "color":
       return [...colorSuggestions(), ...expressionExtras(beforeWord, scope(), snapshot)];
     case "anchor":

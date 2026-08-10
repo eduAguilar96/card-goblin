@@ -457,6 +457,63 @@ describe("Image flows to the shape (§3.3 M2)", () => {
   });
 });
 
+// -- Image auto dimension (§3.3, 2026-08-10) ----------------------------------
+
+describe("Image auto dimension flows to the shape (§3.3)", () => {
+  const autoProject = (dims: string[]): ProjectResult =>
+    compileProject(
+      src(
+        ...sheetLines(["t: Text"]),
+        "Template: T",
+        "  Image:",
+        "    x: 1",
+        "    y: 2",
+        ...dims.map((l) => `    ${l}`),
+        '    src: "img/[t].png"',
+        ...CARD_LINES,
+        "  Front: T",
+      ),
+      { Sh: [{ t: "x" }] },
+    );
+
+  it("the shape carries the KEYWORD — auto is the renderer's to resolve, never a number here", () => {
+    const result = autoProject(["width: full", "height: auto"]);
+    expect(result.diagnostics).toEqual([]);
+    const image = result.model.decks[0].cards[0].front[0] as ImageShape;
+    expect(image.width).toBe(20); // full on the X axis
+    expect(image.height).toBe("auto"); // verbatim keyword, not a resolved unit count
+  });
+
+  it("auto width mirrors: numeric height, keyword width", () => {
+    const result = autoProject(["width: auto", "height: 6"]);
+    expect(result.diagnostics).toEqual([]);
+    const image = result.model.decks[0].cards[0].front[0] as ImageShape;
+    expect(image.width).toBe("auto");
+    expect(image.height).toBe(6);
+  });
+
+  it("the hash distinguishes auto from any number — they are different visible content", () => {
+    // height: auto vs the number the same box might resolve to: the model
+    // cannot know the art's ratio, so the two must never collide.
+    const auto = autoProject(["width: 16", "height: auto"]).model.decks[0].cards[0];
+    const sixteen = autoProject(["width: 16", "height: 16"]).model.decks[0].cards[0];
+    const eight = autoProject(["width: 16", "height: 8"]).model.decks[0].cards[0];
+    expect(auto.contentHash).not.toBe(sixteen.contentHash);
+    expect(auto.contentHash).not.toBe(eight.contentHash);
+  });
+
+  it("BOTH auto: E008 owns the surface and the instance degrades to a D000 placeholder", () => {
+    const result = autoProject(["width: auto", "height: auto"]);
+    expect(result.diagnostics.map((d) => d.code)).toEqual(["E008"]);
+    // The deck still generates (essentials resolved); the poisoned element
+    // degrades exactly one instance to the compile-error placeholder — a
+    // model can never carry a two-auto shape.
+    const card = result.model.decks[0].cards[0];
+    expect(card.front).toEqual([]);
+    expect(card.error?.diagnostics[0].code).toBe("D000");
+  });
+});
+
 // -- cell validation: D001 / D002 -------------------------------------------
 
 describe("D001 — enum cell not a case", () => {

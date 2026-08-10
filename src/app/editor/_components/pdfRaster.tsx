@@ -37,6 +37,7 @@ import { createRoot } from "react-dom/client";
 import {
   CardFaceSvg,
   ICON_FONT_FAMILIES,
+  type ResolvedImage,
   type ResolvedImages,
 } from "@/app/editor/_components/cardSvg";
 import type { FaceRasterSpec } from "@/app/editor/_components/pdfLayout";
@@ -219,18 +220,23 @@ export function imageUrlsUsed(specs: ReadonlyMap<string, FaceRasterSpec>): strin
 }
 
 /** The pre-flight/embedding seam (injectable like RasterizeFaces): resolve
- * each URL to a data URI, or null when it cannot be embedded. */
-export type ResolveImages = (urls: readonly string[]) => Promise<Map<string, string | null>>;
+ * each URL to a data URI plus the art's natural size, or null when it cannot
+ * be embedded. */
+export type ResolveImages = (
+  urls: readonly string[],
+) => Promise<Map<string, ResolvedImage | null>>;
 
 /**
  * Load one image URL for embedding: `crossorigin=anonymous` (§3.3 — the
  * rasterized SVG lives in an `<img>` document that cannot fetch external
  * resources, AND the canvas must stay untainted), redrawn at natural size
- * onto a canvas and re-encoded as a PNG data URI. A load failure, a missing
- * CORS header, or a taint at toDataURL all resolve to null — the §3.3 marked
- * placeholder box, never a blocked export.
+ * onto a canvas and re-encoded as a PNG data URI. The natural size rides
+ * along (it is already in hand from this load) so `auto` dimensions resolve
+ * in the serialized SVG exactly as the live preview resolves them. A load
+ * failure, a missing CORS header, or a taint at toDataURL all resolve to
+ * null — the §3.3 marked placeholder box, never a blocked export.
  */
-async function loadImageData(url: string): Promise<string | null> {
+async function loadImageData(url: string): Promise<ResolvedImage | null> {
   const img = new Image();
   img.crossOrigin = "anonymous";
   const loaded = await new Promise<boolean>((resolve) => {
@@ -246,7 +252,11 @@ async function loadImageData(url: string): Promise<string | null> {
     const ctx = canvas.getContext("2d");
     if (!ctx) return null;
     ctx.drawImage(img, 0, 0);
-    return canvas.toDataURL("image/png");
+    return {
+      href: canvas.toDataURL("image/png"),
+      naturalWidth: img.naturalWidth,
+      naturalHeight: img.naturalHeight,
+    };
   } catch {
     return null; // tainted canvas or encoding failure — placeholder box
   }
@@ -256,9 +266,9 @@ async function loadImageData(url: string): Promise<string | null> {
  * stable for the session, like fonts); FAILURES are evicted on settle so the
  * next modal open / export retries — a fixed CORS header or a network blip
  * should not stay failed until reload. */
-const imageDataCache = new Map<string, Promise<string | null>>();
+const imageDataCache = new Map<string, Promise<ResolvedImage | null>>();
 
-function getImageData(url: string): Promise<string | null> {
+function getImageData(url: string): Promise<ResolvedImage | null> {
   let cached = imageDataCache.get(url);
   if (cached === undefined) {
     cached = loadImageData(url).then((data) => {
@@ -272,7 +282,7 @@ function getImageData(url: string): Promise<string | null> {
 
 /** The real (browser) ResolveImages — concurrent per URL, cache-backed. */
 export const resolveImageSources: ResolveImages = async (urls) => {
-  const out = new Map<string, string | null>();
+  const out = new Map<string, ResolvedImage | null>();
   await Promise.all(
     urls.map(async (url) => {
       out.set(url, await getImageData(url));

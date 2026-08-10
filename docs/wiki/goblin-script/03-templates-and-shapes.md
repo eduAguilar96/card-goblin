@@ -61,13 +61,50 @@ Image: "Portrait"
 sheet column (`src: [art_url]`) or be built with interpolation, and different rows get
 different art.
 
-`fit:` says how the image maps onto its box when the shapes don't match:
+### The box and the art are two different shapes
+
+`width:` and `height:` declare a **box** on the card — not the drawn size of the
+art. The art has its own proportions, and `fit:` says how the two are reconciled
+when they don't match:
 
 | `fit:` | What it does |
 |---|---|
 | `contain` | whole image visible, letterboxed inside the box — **the default** |
 | `cover` | box fully covered, overflow cropped |
 | `stretch` | image distorted to exactly fill the box |
+
+> **Why didn't my image stretch?** With the default `fit: contain`, `height: 12`
+> promises a 12-unit box, **not** 12 units of drawn art. The art keeps its own
+> ratio and letterboxes inside the box — a wide image draws shorter than 12,
+> centered, with empty space above and below. If you want the art deformed to fill
+> the box exactly, that's `fit: stretch`; if you want the box itself to follow the
+> art, give one dimension as `auto`.
+
+### `auto` — size the box from the art
+
+Write `auto` for exactly one of `width:`/`height:` and that dimension follows the
+art: the other dimension × the image's own ratio. It's the way to say "exactly as
+tall as the ratio demands" — no letterboxing, no cropping, no distortion:
+
+```goblin
+Image: "Banner"
+  x: 0
+  y: 0
+  width: full
+  height: auto     # exactly as tall as the art's ratio makes it
+  src: [banner_url]
+```
+
+`width: full` + `height: auto` is the idiom for full-bleed banner art at its
+natural proportions. A few things to know:
+
+- Exactly **one** of the pair can be `auto` — both is an error, since nothing
+  would be left to derive the ratio from.
+- The ratio is only known once the image loads, so until then (and if the load
+  fails) the box shows as a **square** placeholder.
+- `fit:` does nothing next to `auto` — the box already matches the art's ratio,
+  so all three modes draw the same picture. Writing it isn't an error; it's just
+  inert.
 
 While an image downloads, its box shows a subtle gray placeholder; if the URL fails to
 load, the box turns into an amber crossed-out placeholder instead. **Neither is a

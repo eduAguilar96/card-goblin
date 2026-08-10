@@ -91,7 +91,11 @@ export type Resolution =
   | { kind: "geometry"; keyword: "full" | "half" | "middle" }
   | { kind: "anchor"; keyword: "left" | "middle" | "right" }
   | { kind: "iconStyle"; style: IconStyle }
-  | { kind: "imageFit"; fit: ImageFit };
+  | { kind: "imageFit"; fit: ImageFit }
+  /** Bare `auto` as the ENTIRE width:/height: value of an Image (§3.3): the
+   * dimension derives from the art's intrinsic ratio at LOAD time, so the
+   * model carries the keyword and the renderer/exporter resolve it. */
+  | { kind: "autoDim" };
 
 /** AST nodes that get an entry in `CardBindings.resolutions`. */
 export type ResolvableNode = DataRef | IdentifierExpr | QualifiedName | StringRefPart;
@@ -884,6 +888,27 @@ class Checker {
         );
       }
     }
+    // §3.3 auto dimension: BOTH width: and height: as bare `auto` leaves no
+    // dimension to derive the ratio from — E008 once, at the later value.
+    // checkElementProperty records no autoDim resolution for either (the
+    // property-level guard mirrors this check), so evaluation degrades the
+    // instance to a D000 placeholder like any other compile-poisoned card.
+    if (el.element === "Image") {
+      const w = firstPropValue(el, "width");
+      const h = firstPropValue(el, "height");
+      if (isBareAuto(w) && isBareAuto(h)) {
+        const later =
+          w.range.startLine > h.range.startLine ||
+          (w.range.startLine === h.range.startLine && w.range.startCol > h.range.startCol)
+            ? w
+            : h;
+        this.error(
+          "E008",
+          `Image cannot use 'auto' for both width: and height: — give one dimension a number so the other can follow the art's ratio`,
+          later.range,
+        );
+      }
+    }
   }
 
   private checkElementProperty(el: ElementNode, prop: PropertyNode, ctx: Ctx): void {
@@ -906,9 +931,27 @@ class Checker {
         this.checkValue(value, EXP_NUMBER, ctx, true);
         return;
       }
-      case "y":
       case "width":
-      case "height":
+      case "height": {
+        // Image `auto` dimension (§3.3): the bare keyword as the ENTIRE
+        // width:/height: value of an Image derives that dimension from the
+        // art's intrinsic ratio at LOAD time. Like `x: middle`, the checker
+        // only blesses the position — the model carries the keyword. Only
+        // ONE of the pair may be auto: when the sibling dimension is auto
+        // too, checkElement already reported E008 and NO resolution is
+        // recorded here, so evaluation degrades to the D000 placeholder.
+        if (el.element === "Image" && isBareAuto(value)) {
+          const sibling = key === "width" ? "height" : "width";
+          if (!isBareAuto(firstPropValue(el, sibling))) {
+            this.recordResolution(ctx, value, { kind: "autoDim" });
+            this.recordType(ctx, value, NUMBER);
+          }
+          return;
+        }
+        this.checkValue(value, EXP_NUMBER, ctx, true);
+        return;
+      }
+      case "y":
       case "size":
         this.checkValue(value, EXP_NUMBER, ctx, true);
         return;
@@ -1387,7 +1430,7 @@ class Checker {
       name === "middle"
         ? `'middle' is only valid as the entire x: value of a Text or Icon element`
         : name === "auto"
-          ? `'auto' is only valid as the y_units: value of a Card`
+          ? `'auto' is only valid as a Card's y_units: value or as the entire width: or height: of an Image`
           : `'${name}' is only valid in geometry positions (x, y, width, height, or size of an element)`;
     this.error("E007", message, range);
     return UNKNOWN;
@@ -1469,6 +1512,20 @@ function isPositiveIntegerLiteral(expr: Expr): expr is NumberLit {
  * NumberLit is non-negative already; `> 0` only excludes zero. */
 function isPositiveNumberLiteral(expr: Expr): expr is NumberLit {
   return expr.kind === "Number" && expr.value > 0;
+}
+
+/** First property value with this key (the checker E005s duplicates and
+ * checks only the first — the same one the evaluator's findProp takes). */
+function firstPropValue(el: ElementNode, key: string): Expr | null {
+  for (const prop of el.properties) {
+    if (prop.key.name === key) return prop.value;
+  }
+  return null;
+}
+
+/** Bare `auto` as a whole property value (§3.3 Image auto dimension). */
+function isBareAuto(expr: Expr | null): expr is IdentifierExpr {
+  return expr !== null && expr.kind === "Identifier" && expr.name === "auto";
 }
 
 /** The literal value of a string with NO interpolation parts, else null. */

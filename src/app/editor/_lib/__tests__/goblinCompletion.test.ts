@@ -527,6 +527,29 @@ describe("value positions", () => {
     }
   });
 
+  it("Image width/height offer auto (§3.3 auto dimension); y does not", () => {
+    for (const key of ["width", "height"]) {
+      const l = labels(at(src("Template: T", "  Image:", `    ${key}: ¦`)));
+      expect(l, key).toContain("auto");
+      expect(l, key).toContain("full");
+      expect(l, key).toContain("half");
+    }
+    expect(labels(at(src("Template: T", "  Image:", "    y: ¦")))).not.toContain("auto");
+  });
+
+  it("auto stays Image-only: Rectangle width and Icon size never offer it", () => {
+    expect(
+      labels(at(src("Template: T", "  Rectangle:", "    width: ¦"))),
+    ).not.toContain("auto");
+    expect(labels(at(src("Template: T", "  Icon:", "    size: ¦")))).not.toContain("auto");
+  });
+
+  it("auto must be the whole value — not offered mid-expression", () => {
+    expect(
+      labels(at(src("Template: T", "  Image:", "    width: 1 + ¦"))),
+    ).not.toContain("auto");
+  });
+
   it("y_units: offers auto; x_units: offers nothing", () => {
     expect(labels(at(src("Card: M", "  y_units: ¦")))).toEqual(["auto"]);
     expect(at(src("Card: M", "  x_units: ¦")).suggestions).toEqual([]);

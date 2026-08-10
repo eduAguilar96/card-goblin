@@ -23,7 +23,9 @@ import {
   TEXT_ASCENT,
   cardSvgPropsEqual,
   imagePlaceholderStroke,
+  resolveImageBox,
   type CardSvgProps,
+  type ResolvedImages,
 } from "@/app/editor/_components/cardSvg";
 
 // -- fixtures ----------------------------------------------------------------
@@ -259,10 +261,7 @@ describe("CardFaceSvg: Image shapes (§3.3 M2)", () => {
     fit,
   });
 
-  const render = (
-    shape: ImageShape,
-    images?: ReadonlyMap<string, string | null>,
-  ): string =>
+  const render = (shape: ImageShape, images?: ResolvedImages): string =>
     renderToStaticMarkup(
       <CardFaceSvg xUnits={20} yUnits={28} face={[shape]} images={images} />,
     );
@@ -275,7 +274,12 @@ describe("CardFaceSvg: Image shapes (§3.3 M2)", () => {
     ] as const) {
       const markup = render(
         imageShape(fit),
-        new Map([["https://example.com/a.png", "data:image/png;base64,AAA"]]),
+        new Map([
+          [
+            "https://example.com/a.png",
+            { href: "data:image/png;base64,AAA", naturalWidth: 4, naturalHeight: 4 },
+          ],
+        ]),
       );
       const image = /<image\b[^>]*\/?>/.exec(markup)?.[0];
       expect(image, fit).toBeDefined();
@@ -301,7 +305,7 @@ describe("CardFaceSvg: Image shapes (§3.3 M2)", () => {
     expect(rect.width).toBe("10");
     expect(rect.fill).toBe("#f3f4f6");
     expect(Number(rect["stroke-width"])).toBeCloseTo(
-      imagePlaceholderStroke(imageShape("contain")),
+      imagePlaceholderStroke({ width: 10, height: 8 }),
     );
     // No diagonal cross while merely loading.
     expect(markup).not.toContain("<line");
@@ -326,6 +330,101 @@ describe("CardFaceSvg: Image shapes (§3.3 M2)", () => {
     const markup = render(imageShape("contain"), new Map());
     expect(markup).not.toContain("<image");
     expect(markup).toContain('data-image-placeholder="failed"');
+  });
+});
+
+// -- auto dimension (§3.3, 2026-08-10) ----------------------------------------
+
+describe("CardFaceSvg: auto dimension resolves at load time (§3.3)", () => {
+  /** width: 16, height: auto — the canonical banner-art shape. */
+  const autoHeight: ImageShape = {
+    kind: "image",
+    x: 2,
+    y: 3,
+    width: 16,
+    height: "auto",
+    src: "https://example.com/banner.png",
+    fit: "contain",
+  };
+
+  const render = (shape: ImageShape, images?: ResolvedImages): string =>
+    renderToStaticMarkup(
+      <CardFaceSvg xUnits={20} yUnits={28} face={[shape]} images={images} />,
+    );
+
+  it("resolveImageBox: 200×100 art in a width:16 auto-height box → height 8 exactly", () => {
+    expect(
+      resolveImageBox(autoHeight, { naturalWidth: 200, naturalHeight: 100 }),
+    ).toEqual({ width: 16, height: 8 });
+  });
+
+  it("resolveImageBox: auto WIDTH mirrors — height × w/h", () => {
+    const autoWidth: ImageShape = { ...autoHeight, width: "auto", height: 6 };
+    expect(
+      resolveImageBox(autoWidth, { naturalWidth: 200, naturalHeight: 100 }),
+    ).toEqual({ width: 12, height: 6 });
+  });
+
+  it("resolveImageBox: no natural size (loading/failed) or degenerate 0-px art → square", () => {
+    expect(resolveImageBox(autoHeight, null)).toEqual({ width: 16, height: 16 });
+    expect(
+      resolveImageBox(autoHeight, { naturalWidth: 0, naturalHeight: 100 }),
+    ).toEqual({ width: 16, height: 16 });
+  });
+
+  it("resolveImageBox: concrete dimensions pass through untouched, whatever the art says", () => {
+    const concrete: ImageShape = { ...autoHeight, height: 12 };
+    expect(
+      resolveImageBox(concrete, { naturalWidth: 200, naturalHeight: 100 }),
+    ).toEqual({ width: 16, height: 12 });
+  });
+
+  it("a loaded status carrying natural dims computes the auto dimension in the markup", () => {
+    // The static path shares renderImageTag + resolveImageBox with the live
+    // preview, so this markup IS what both the preview (post-load) and the
+    // rasterizer draw: 200×100 art in a width:16 box → height="8".
+    const markup = render(
+      autoHeight,
+      new Map([
+        [
+          "https://example.com/banner.png",
+          { href: "data:image/png;base64,AAA", naturalWidth: 200, naturalHeight: 100 },
+        ],
+      ]),
+    );
+    const image = /<image\b[^>]*\/?>/.exec(markup)?.[0];
+    expect(image).toBeDefined();
+    const attrs = parseAttrs(image!);
+    expect(attrs.width).toBe("16");
+    expect(attrs.height).toBe("8");
+    expect(attrs.x).toBe("2");
+    expect(attrs.y).toBe("3");
+  });
+
+  it("pre-load (static, no resolutions) the placeholder box is SQUARE", () => {
+    const markup = render(autoHeight);
+    expect(markup).toContain('data-image-placeholder="loading"');
+    const rect = rectTags(markup)[0];
+    expect(rect.width).toBe("16");
+    expect(rect.height).toBe("16"); // auto mirrors its sibling — square
+    expect(Number(rect["stroke-width"])).toBeCloseTo(
+      imagePlaceholderStroke({ width: 16, height: 16 }),
+    );
+  });
+
+  it("a failed load with auto renders the square warning box", () => {
+    const markup = render(
+      autoHeight,
+      new Map([["https://example.com/banner.png", null]]),
+    );
+    expect(markup).toContain('data-image-placeholder="failed"');
+    const rect = rectTags(markup)[0];
+    expect(rect.width).toBe("16");
+    expect(rect.height).toBe("16");
+    // The diagonal cross spans the square box.
+    const lines = [...markup.matchAll(/<line\b([^>]*)\/?>/g)].map((m) => parseAttrs(m[1]));
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toMatchObject({ x1: "2", y1: "3", x2: "18", y2: "19" });
   });
 });
 

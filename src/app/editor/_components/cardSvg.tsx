@@ -109,37 +109,90 @@ export const IMAGE_PRESERVE_ASPECT: Record<ImageFit, string> = {
   stretch: "none",
 };
 
+/** Intrinsic pixel size of loaded art — what `auto` dimensions resolve
+ * against (§3.3: intrinsic size is LOAD-time knowledge, so the model carries
+ * the keyword and this module resolves it). */
+export interface ImageNaturalSize {
+  naturalWidth: number;
+  naturalHeight: number;
+}
+
+/** One pre-resolved image source for STATIC rendering: a renderable href
+ * (the rasterizer supplies data URIs) plus the art's natural size, captured
+ * at the same load, so `auto` dimensions resolve identically here and in
+ * the live preview. */
+export interface ResolvedImage extends ImageNaturalSize {
+  href: string;
+}
+
 /**
- * Pre-resolved image sources for STATIC rendering: shape `src` → data URI,
- * or null when the load failed. Supplied by the PDF rasterizer (an SVG in an
- * `<img>` document cannot fetch external resources, so URLs must arrive as
- * data URIs) — and by tests. When absent, image shapes render through the
- * LIVE path below: placeholder first, real image swapped in client-side.
+ * Pre-resolved image sources for STATIC rendering: shape `src` → resolved
+ * source, or null when the load failed. Supplied by the PDF rasterizer (an
+ * SVG in an `<img>` document cannot fetch external resources, so URLs must
+ * arrive as data URIs) — and by tests. When absent, image shapes render
+ * through the LIVE path below: placeholder first, real image swapped in
+ * client-side.
  */
-export type ResolvedImages = ReadonlyMap<string, string | null>;
+export type ResolvedImages = ReadonlyMap<string, ResolvedImage | null>;
+
+/**
+ * The concrete drawing box of an image shape, in card units (§3.3 auto
+ * dimension). An `auto` dimension is the other dimension × the art's
+ * intrinsic ratio; before that ratio is known (loading), or when it never
+ * arrives (failed load, degenerate 0-px art), the box falls back to a
+ * SQUARE — the auto dimension mirrors its sibling, holding a sensible spot
+ * without pretending to know the ratio. Pure and exported for tests; the
+ * checker guarantees at most one dimension is "auto" (both = E008).
+ */
+export function resolveImageBox(
+  shape: ImageShape,
+  natural: ImageNaturalSize | null,
+): { width: number; height: number } {
+  const { width, height } = shape;
+  if (width !== "auto" && height !== "auto") return { width, height };
+  const known =
+    natural !== null && natural.naturalWidth > 0 && natural.naturalHeight > 0;
+  if (width === "auto") {
+    const h = height as number; // checker: at most one dimension is auto
+    return { width: known ? h * (natural.naturalWidth / natural.naturalHeight) : h, height: h };
+  }
+  const w = width as number;
+  return { width: w, height: known ? w * (natural.naturalHeight / natural.naturalWidth) : w };
+}
 
 /**
  * Loading/failure of an image URL is RENDERER state, never the model's
  * (§3.3: no D-code — the model stays pure). This module-level store tracks
- * one status per URL for the live preview; `useSyncExternalStore` in
- * LiveImage keeps SSR/static output on the "loading" placeholder and lets
- * the real image swap in after the browser probe settles.
+ * one status per URL for the live preview — including the natural size on
+ * success, which is what `auto` dimensions resolve against;
+ * `useSyncExternalStore` in LiveImage keeps SSR/static output on the
+ * "loading" placeholder and lets the real image swap in after the browser
+ * probe settles. Status objects are minted once per settle, so snapshots
+ * stay referentially stable.
  */
-export type ImageLoadStatus = "loading" | "loaded" | "failed";
+export type ImageLoadStatus =
+  | { state: "loading" }
+  | ({ state: "loaded" } & ImageNaturalSize)
+  | { state: "failed" };
 
 /** Probe seam: browser-only image loading stays OUT of vitest by injection
- * (same policy as the PDF rasterizer) — tests replace this with a stub. */
-export type ImageProbe = (src: string) => Promise<boolean>;
+ * (same policy as the PDF rasterizer) — tests replace this with a stub.
+ * Resolves the art's natural size, or null on failure. */
+export type ImageProbe = (src: string) => Promise<ImageNaturalSize | null>;
 
 const browserImageProbe: ImageProbe = (src) =>
   new Promise((resolve) => {
     const img = new Image();
-    img.onload = () => resolve(true);
-    img.onerror = () => resolve(false);
+    img.onload = () =>
+      resolve({ naturalWidth: img.naturalWidth, naturalHeight: img.naturalHeight });
+    img.onerror = () => resolve(null);
     img.src = src;
   });
 
 let imageProbe: ImageProbe = browserImageProbe;
+/** The one "loading" status — a singleton so getSnapshot is stable for URLs
+ * the store has not settled (or even seen) yet. */
+const LOADING_STATUS: ImageLoadStatus = { state: "loading" };
 const imageStatuses = new Map<string, ImageLoadStatus>();
 const imageListeners = new Map<string, Set<() => void>>();
 
@@ -155,7 +208,7 @@ export function resetImageStatusesForTests(): void {
 }
 
 function imageStatusOf(src: string): ImageLoadStatus {
-  return imageStatuses.get(src) ?? "loading";
+  return imageStatuses.get(src) ?? LOADING_STATUS;
 }
 
 /** Subscribe to one URL's status, kicking off the probe on first interest.
@@ -169,9 +222,12 @@ function subscribeImageStatus(src: string, onChange: () => void): () => void {
   }
   listeners.add(onChange);
   if (!imageStatuses.has(src)) {
-    imageStatuses.set(src, "loading");
-    void imageProbe(src).then((ok) => {
-      imageStatuses.set(src, ok ? "loaded" : "failed");
+    imageStatuses.set(src, LOADING_STATUS);
+    void imageProbe(src).then((natural) => {
+      imageStatuses.set(
+        src,
+        natural ? { state: "loaded", ...natural } : { state: "failed" },
+      );
       for (const cb of imageListeners.get(src) ?? []) cb();
     });
   }
@@ -182,22 +238,25 @@ function subscribeImageStatus(src: string, onChange: () => void): () => void {
 
 /** Placeholder stroke width, relative to the box so it reads the same at any
  * unit scale. Exported for the markup tests. */
-export function imagePlaceholderStroke(shape: ImageShape): number {
-  return Math.min(shape.width, shape.height) * 0.06;
+export function imagePlaceholderStroke(box: { width: number; height: number }): number {
+  return Math.min(box.width, box.height) * 0.06;
 }
 
 /**
  * The §3.3 placeholder box: subtle while loading, warning-styled (amber, with
  * a diagonal cross so the mark survives rasterization without any font) when
- * the load failed. Same geometry as the image would occupy, so layout never
- * shifts when the real art arrives.
+ * the load failed. `box` is the RESOLVED geometry — for concrete dimensions
+ * it is exactly what the image would occupy, so layout never shifts when the
+ * real art arrives; an `auto` dimension resolves square here (the ratio is
+ * unknown by definition while the placeholder shows).
  */
 function renderImagePlaceholder(
   shape: ImageShape,
   index: number,
   variant: "loading" | "failed",
+  box: { width: number; height: number },
 ): ReactElement {
-  const stroke = imagePlaceholderStroke(shape);
+  const stroke = imagePlaceholderStroke(box);
   const failed = variant === "failed";
   return (
     <g key={index} data-image-placeholder={variant}>
@@ -207,8 +266,8 @@ function renderImagePlaceholder(
       <rect
         x={shape.x}
         y={shape.y}
-        width={shape.width}
-        height={shape.height}
+        width={box.width}
+        height={box.height}
         fill={failed ? "#fef3c7" : "#f3f4f6"}
         stroke={failed ? "#b45309" : "#d1d5db"}
         strokeWidth={stroke}
@@ -218,16 +277,16 @@ function renderImagePlaceholder(
           <line
             x1={shape.x}
             y1={shape.y}
-            x2={shape.x + shape.width}
-            y2={shape.y + shape.height}
+            x2={shape.x + box.width}
+            y2={shape.y + box.height}
             stroke="#b45309"
             strokeWidth={stroke}
           />
           <line
-            x1={shape.x + shape.width}
+            x1={shape.x + box.width}
             y1={shape.y}
             x2={shape.x}
-            y2={shape.y + shape.height}
+            y2={shape.y + box.height}
             stroke="#b45309"
             strokeWidth={stroke}
           />
@@ -237,15 +296,20 @@ function renderImagePlaceholder(
   );
 }
 
-function renderImageTag(shape: ImageShape, index: number, href: string): ReactElement {
+function renderImageTag(
+  shape: ImageShape,
+  index: number,
+  href: string,
+  box: { width: number; height: number },
+): ReactElement {
   return (
     <image
       key={index}
       href={href}
       x={shape.x}
       y={shape.y}
-      width={shape.width}
-      height={shape.height}
+      width={box.width}
+      height={box.height}
       preserveAspectRatio={IMAGE_PRESERVE_ASPECT[shape.fit]}
     />
   );
@@ -254,15 +318,24 @@ function renderImageTag(shape: ImageShape, index: number, href: string): ReactEl
 /** Live image path (no ResolvedImages supplied): SSR/static output is the
  * loading placeholder — renderToStaticMarkup runs no effects, so this IS the
  * static default — and the client swaps in the real `<image>` (or the failed
- * placeholder) once the probe settles. */
+ * placeholder) once the probe settles. An `auto` dimension resolves against
+ * the natural size the probe captured; until it settles (and on failure) the
+ * placeholder box is square. */
 function LiveImage({ shape, index }: { shape: ImageShape; index: number }): ReactElement {
   const status = useSyncExternalStore(
     (onChange) => subscribeImageStatus(shape.src, onChange),
     () => imageStatusOf(shape.src),
-    () => "loading" as const,
+    () => LOADING_STATUS,
   );
-  if (status === "loaded") return renderImageTag(shape, index, shape.src);
-  return renderImagePlaceholder(shape, index, status === "failed" ? "failed" : "loading");
+  if (status.state === "loaded") {
+    return renderImageTag(shape, index, shape.src, resolveImageBox(shape, status));
+  }
+  return renderImagePlaceholder(
+    shape,
+    index,
+    status.state === "failed" ? "failed" : "loading",
+    resolveImageBox(shape, null),
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -325,14 +398,17 @@ function renderShape(shape: Shape, index: number, images?: ResolvedImages): Reac
   switch (shape.kind) {
     case "image": {
       if (images) {
-        // Static path (rasterizer/tests): the caller resolved every URL.
-        // A data URI renders directly; a failed (or unexpectedly missing)
-        // resolution renders the marked warning box — §3.3: failures export
-        // as marked placeholder boxes, the deck always exports.
-        const href = images.get(shape.src);
-        return typeof href === "string"
-          ? renderImageTag(shape, index, href)
-          : renderImagePlaceholder(shape, index, "failed");
+        // Static path (rasterizer/tests): the caller resolved every URL,
+        // capturing natural sizes so `auto` dimensions resolve exactly as
+        // the live preview resolves them. A resolved source renders
+        // directly; a failed (or unexpectedly missing) resolution renders
+        // the marked warning box — §3.3: failures export as marked
+        // placeholder boxes (square when a dimension is `auto`), the deck
+        // always exports.
+        const resolved = images.get(shape.src);
+        return resolved
+          ? renderImageTag(shape, index, resolved.href, resolveImageBox(shape, resolved))
+          : renderImagePlaceholder(shape, index, "failed", resolveImageBox(shape, null));
       }
       return <LiveImage key={index} shape={shape} index={index} />;
     }

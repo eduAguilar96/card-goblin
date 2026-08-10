@@ -506,12 +506,34 @@ function evalElement(el: ElementNode, ctx: EvalContext): Shape {
         kind: "image",
         x: numberProp(el, "x", ctx, ctx.xUnits),
         y: numberProp(el, "y", ctx, ctx.yUnits),
-        width: numberProp(el, "width", ctx, ctx.xUnits),
-        height: numberProp(el, "height", ctx, ctx.yUnits),
+        width: imageDimProp(el, "width", ctx, ctx.xUnits),
+        height: imageDimProp(el, "height", ctx, ctx.yUnits),
         src: toText(evalExpr(requireProp(el, "src"), ctx, null)),
         fit: fitOf(el, ctx),
       };
   }
+}
+
+/** Image `width:`/`height:` (§3.3 auto dimension): a checker-blessed bare
+ * `auto` flows through AS the keyword — intrinsic size is load-time
+ * knowledge, so the renderer/exporter resolve it, never the model. A bare
+ * `auto` WITHOUT the blessing (both dimensions auto — E008 already reported)
+ * falls through to evalExpr, whose missing resolution poisons the instance
+ * into a D000 placeholder. Everything else is ordinary per-axis geometry. */
+function imageDimProp(
+  el: ElementNode,
+  key: "width" | "height",
+  ctx: EvalContext,
+  axisUnits: number,
+): number | "auto" {
+  const expr = requireProp(el, key);
+  if (expr.kind === "Identifier") {
+    const res = ctx.card.resolutions.get(expr);
+    if (res?.kind === "autoDim") return "auto";
+  }
+  const v = evalExpr(expr, ctx, axisUnits);
+  if (v.kind !== "number") return poisoned();
+  return v.value;
 }
 
 /** First property with this key (the checker E005s duplicates and checked

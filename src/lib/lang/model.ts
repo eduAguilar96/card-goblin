@@ -162,8 +162,16 @@ export interface ImageShape {
   kind: "image";
   x: number;
   y: number;
-  width: number;
-  height: number;
+  /** Box width in units, or the keyword `"auto"` (§3.3): the dimension then
+   * derives from the other × the art's intrinsic aspect ratio. Intrinsic
+   * size is LOAD-time knowledge, so the pure model carries the keyword and
+   * the renderer/exporter resolve it (square placeholder until the art
+   * arrives). The checker guarantees at most ONE of width/height is "auto"
+   * (both = E008), and "auto" vs a number changes the contentHash like any
+   * other resolved content. */
+  width: number | "auto";
+  /** Box height in units, or `"auto"` — see `width`. */
+  height: number | "auto";
   /** Resolved Text expression — usually a URL, possibly from a sheet column. */
   src: string;
   /** How the image maps onto the box (§3.3); `contain` when omitted. */

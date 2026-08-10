@@ -751,6 +751,85 @@ describe("Image (§3.3 M2)", () => {
   });
 });
 
+// -- Image auto dimension (§3.3, 2026-08-10) ----------------------------------
+
+describe("Image auto dimension (§3.3)", () => {
+  const HEAD = ["x: 1", "y: 1"];
+  const SRC = 'src: "https://example.com/a.png"';
+
+  /** The autoDim resolution recorded for the given property of T's element. */
+  function autoDimOf(source: string, key: "width" | "height") {
+    const result = checkOf(source);
+    const tpl = result.bindings.templates.get("T") as TemplateDecl;
+    const prop = (tpl.children[0] as ElementNode).properties.find(
+      (p) => p.key.name === key,
+    )!;
+    return result.bindings.cards[0].resolutions.get(prop.value as never);
+  }
+
+  it("height: auto beside a numeric width is clean and records an autoDim resolution", () => {
+    const source = withElement("Image:", [...HEAD, "width: 16", "height: auto", SRC]);
+    expect(diagsOf(source)).toEqual([]);
+    expect(autoDimOf(source, "height")).toEqual({ kind: "autoDim" });
+  });
+
+  it("width: auto beside a numeric height is clean too — either dimension may derive", () => {
+    const source = withElement("Image:", [...HEAD, "width: auto", "height: 6", SRC]);
+    expect(diagsOf(source)).toEqual([]);
+    expect(autoDimOf(source, "width")).toEqual({ kind: "autoDim" });
+  });
+
+  it("the canonical banner idiom width: full + height: auto is clean", () => {
+    expect(
+      codesOf(withElement("Image:", [...HEAD, "width: full", "height: auto", SRC])),
+    ).toEqual([]);
+  });
+
+  it("BOTH auto is E008 — nothing left to derive the ratio from", () => {
+    const ds = diagsOf(
+      withElement("Image:", [...HEAD, "width: auto", "height: auto", SRC]),
+    );
+    expect(ds.map((d) => d.code)).toEqual(["E008"]);
+    expect(ds[0].message).toBe(
+      "Image cannot use 'auto' for both width: and height: — give one dimension a number so the other can follow the art's ratio",
+    );
+  });
+
+  it("fit: is inert beside auto — allowed, no diagnostic (the box matches the ratio anyway)", () => {
+    for (const fit of IMAGE_FITS) {
+      expect(
+        codesOf(withElement("Image:", [...HEAD, "width: 16", "height: auto", SRC, `fit: ${fit}`])),
+        fit,
+      ).toEqual([]);
+    }
+  });
+
+  it("auto must be the ENTIRE value — width: auto + 1 is E007", () => {
+    expect(
+      codesOf(withElement("Image:", [...HEAD, "width: auto + 1", "height: 6", SRC])),
+    ).toEqual(["E007"]);
+  });
+
+  it("width: auto on Rectangle stays E007, naming the two valid positions", () => {
+    const ds = diagsOf(
+      withElement("Rectangle:", ["x: 0", "y: 0", "width: auto", "height: 1", "color: teal"]),
+    );
+    expect(ds.map((d) => d.code)).toEqual(["E007"]);
+    expect(ds[0].message).toBe(
+      "'auto' is only valid as a Card's y_units: value or as the entire width: or height: of an Image",
+    );
+  });
+
+  it("size: auto on Text or Icon stays E007 — auto never joins the size vocabulary", () => {
+    expect(
+      codesOf(withElement("Text:", ["x: 1", "y: 1", "size: auto", 'text: "a"'])),
+    ).toEqual(["E007"]);
+    expect(
+      codesOf(withElement("Icon:", ["x: 1", "y: 1", "size: auto", 'code: "HEARTS"'])),
+    ).toEqual(["E007"]);
+  });
+});
+
 // -- custom card sizes (§3.4, M2) --------------------------------------------
 
 describe("custom card sizes (§3.4 M2)", () => {

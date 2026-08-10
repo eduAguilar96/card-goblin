@@ -72,6 +72,7 @@ import {
 } from "@/app/editor/_components/pdfLayout";
 import { assemblePdf } from "@/app/editor/_components/pdfAssemble";
 import { PdfPagePreview } from "@/app/editor/_components/pdfPagePreview";
+import type { ResolvedImage } from "@/app/editor/_components/cardSvg";
 import {
   imageUrlsUsed,
   rasterizeFaces,
@@ -256,7 +257,7 @@ export function PdfExportModal({
   );
   const [resolvedImages, setResolvedImages] = useState<{
     key: string;
-    images: Map<string, string | null>;
+    images: Map<string, ResolvedImage | null>;
   } | null>(null);
   useEffect(() => {
     const urls = JSON.parse(imageUrlsKey) as string[];
