@@ -655,6 +655,37 @@ uploaded assets, sharing, docs site.
 - Multi-project management stays file-based in v1 (the autosave slot remains
   singular); accounts/cloud are later M3.
 
+### 7.1a QR codes — scoped, HIGH PRIORITY (2026-08-10, not yet implemented)
+
+**Requirement (edu):** cards carry scannable codes from sheet data, enabling
+cross-media games (an app scans the card and acts). The app is out of scope;
+CardGoblin owns encoding + rendering. Canonical use: a Text column of codes,
+a QR on every card's back — which needs zero extra machinery: Back templates
+already evaluate per card (ambient bindings ⚑5), so `data: [code]` in a back
+template gives every card its own QR.
+
+- **Surface: a sixth drawable element, `Qr:`** — NOT the sketched `QR(...)`
+  call syntax (the language has no call grammar; deliberately rejected before
+  at custom sizes). Properties: `x y size data` required (`size` = the
+  square's side in units — QRs are square), optional `color` (default black),
+  `background` (default white), `level` (error correction `l|m|q|h`, default
+  `m`), `anchor` (nine-point, standard). `data:` is a Text expression with
+  standard coercions — `[column]`, interpolation, and conditionals all work.
+- **Encoding at EVAL time in the compiler** (pure, deterministic — the wrap
+  precedent): the shape carries the resolved module matrix; the renderer
+  draws one vector path (crisp at print scale; PDF inherits it). Encoder: a
+  zero-dependency MIT library (e.g. qrcode-generator) as the SECOND sanctioned
+  runtime dependency — Reed-Solomon + mask scoring is too intricate to
+  hand-roll responsibly. Known-answer tests cross-validate encodings.
+- **Semantics:** UTF-8 byte mode; the spec's 4-module quiet zone is drawn
+  INSIDE the declared box (white border; modules shrink accordingly) so
+  adjacent art can never break scanning. Empty referenced cell → D003 as
+  usual; data exceeding the level's capacity → new D-code (placeholder card,
+  cell provenance where derivable). Same data → same matrix, always.
+- **Estimate:** one executor session + adversarial review — the shape of the
+  Image-element batch (a new element through the practiced pipeline) plus
+  encoder wiring and scan-verification of fixture outputs.
+
 ### 7.2 Text wrapping (TextBox) — agreed direction (2026-08-10; shipped M3 2026-08-10 — normative spec in the §3.3 row and §3.1 escapes)
 
 - New **`TextBox`** element (Text stays single-line, ◆24 intact): x, y, width,
