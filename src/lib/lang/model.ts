@@ -76,7 +76,9 @@ export interface DataDiagnostic {
 // Shapes (§3.3, §3.4)
 // ---------------------------------------------------------------------------
 
-/** Horizontal anchor of Text/Icon (§3.4); default `left`. */
+/** The three horizontal words of TextBox `align:` (§3.3); default `left`.
+ * (Historically also Text/Icon `anchor:` — that property normalizes to the
+ * nine-point `Anchor` below since M3, with these words as top-row aliases.) */
 export type TextAnchor = "left" | "middle" | "right";
 
 /**
@@ -134,7 +136,96 @@ export const DEFAULT_TEXTBOX_OVERFLOW: TextBoxOverflow = "clip";
 /** §3.3: `line_height:` is optional; baseline advance = line_height × size. */
 export const DEFAULT_LINE_HEIGHT = 1.3;
 
-/** Anchored top-left (§3.3). */
+/**
+ * The nine canonical `anchor:` tokens (§3.4, M3), row-major top→bottom,
+ * vertical word first. Closed set like ICON_STYLES — this array is the
+ * single source of truth: the checker's E008 message, the autocomplete
+ * values, and the wiki's anchor table (docFacts) all pin to it. The full
+ * ACCEPTED spelling space is wider (reversed word orders, the `center`
+ * shorthand, the legacy aliases) and is owned by `parseAnchor` below.
+ */
+export const ANCHOR_TOKENS = [
+  "top_left",
+  "top_center",
+  "top_right",
+  "center_left",
+  "center_center",
+  "center_right",
+  "bottom_left",
+  "bottom_center",
+  "bottom_right",
+] as const;
+
+export type AnchorToken = (typeof ANCHOR_TOKENS)[number];
+
+/** Horizontal component of a normalized anchor (§3.4). */
+export type AnchorH = "left" | "center" | "right";
+
+/** Vertical component of a normalized anchor (§3.4). */
+export type AnchorV = "top" | "center" | "bottom";
+
+/**
+ * A NORMALIZED nine-point anchor (§3.4): which point of the element the
+ * shape's x/y refer to. Every spelling variant (either word order, `center`,
+ * the legacy aliases) collapses to this form at check time, so alias ≡
+ * canonical everywhere downstream — the contentHash included. Always
+ * construct as `{h, v}` in that key order: the hash serializes with
+ * JSON.stringify, which follows construction order.
+ */
+export interface Anchor {
+  h: AnchorH;
+  v: AnchorV;
+}
+
+/** §3.4: `anchor:` is optional; the default is the top-left point — for
+ * Text/Icon exactly the pre-M3 `anchor: left` behavior. Frozen because
+ * shapes share the instance (the model is immutable by contract). */
+export const DEFAULT_ANCHOR: Anchor = Object.freeze({ h: "left", v: "top" });
+
+/**
+ * Normalize one `anchor:` token (§3.4), or null when it is outside the
+ * vocabulary — the checker then E008s naming ANCHOR_TOKENS. Accepted, case-
+ * sensitively like every bare-identifier vocabulary (`Top_Left` is E008):
+ *
+ * - the nine canonical tokens in EITHER word order (`center_bottom` ≡
+ *   `bottom_center`): each `_`-joined word claims its axis, and a `center`
+ *   word fills whichever axis the other word leaves open;
+ * - `center` alone ≡ `center_center`;
+ * - the legacy Text/Icon words `left | middle | right` as aliases for the
+ *   top row — existing cards keep meaning exactly what they meant.
+ */
+export function parseAnchor(token: string): Anchor | null {
+  switch (token) {
+    case "left":
+      return { h: "left", v: "top" };
+    case "middle":
+      return { h: "center", v: "top" };
+    case "right":
+      return { h: "right", v: "top" };
+    case "center":
+      return { h: "center", v: "center" };
+  }
+  const words = token.split("_");
+  if (words.length !== 2) return null;
+  let h: AnchorH | null = null;
+  let v: AnchorV | null = null;
+  for (const word of words) {
+    if (word === "left" || word === "right") {
+      if (h !== null) return null; // two horizontal words (left_right)
+      h = word;
+    } else if (word === "top" || word === "bottom") {
+      if (v !== null) return null; // two vertical words (top_bottom)
+      v = word;
+    } else if (word !== "center") {
+      return null; // `middle` is only the standalone legacy alias
+    }
+  }
+  // Any `center` word fills the axis its sibling left open; two centers
+  // (center_center) fill both.
+  return { h: h ?? "center", v: v ?? "center" };
+}
+
+/** §3.3; x/y name the box's `anchor` point (§3.4, default top-left). */
 export interface RectShape {
   kind: "rect";
   x: number;
@@ -143,18 +234,24 @@ export interface RectShape {
   height: number;
   /** CSS color string (named color lower-cased, or `#hex` as written). */
   color: string;
+  /** Which point of the box x/y name (§3.4); top-left when omitted. */
+  anchor: Anchor;
 }
 
 export interface TextShape {
   kind: "text";
   x: number;
-  /** Top of the em box (§3.4; the renderer realizes this via an ascent constant). */
+  /** The `anchor.v` edge/center of the em box (§3.4): with `v: top` — the
+   * default — the TOP, exactly as before M3. The renderer realizes the
+   * baseline via an ascent constant. */
   y: number;
   /** Em height in card units. */
   size: number;
   color: string;
   text: string;
-  anchor: TextAnchor;
+  /** Nine-point (§3.4): `h` renders via text-anchor, `v` via em-box math.
+   * Default top-left ≡ the legacy `anchor: left`. */
+  anchor: Anchor;
 }
 
 export interface IconShape {
@@ -166,15 +263,16 @@ export interface IconShape {
   /** Dicier ligature code (⚑10). Emitted even when unknown (D005 §3.8 †) —
    * the failed ligature is its own visible indicator. */
   code: string;
-  anchor: TextAnchor;
+  /** Nine-point (§3.4), em-box semantics like TextShape's. */
+  anchor: Anchor;
   /** Which Dicier face draws the glyph (§3.3); `flat_dark` when omitted. */
   style: IconStyle;
 }
 
-/** Raster art from a URL (§3.3, M2). Anchored top-left like Rectangle. The
- * model carries only the resolved URL string — loading, failure, and
- * placeholder states are RENDERER-level (§3.3: not a D-code; the model stays
- * pure and per-card isolation is preserved). */
+/** Raster art from a URL (§3.3, M2). The model carries only the resolved URL
+ * string — loading, failure, and placeholder states are RENDERER-level
+ * (§3.3: not a D-code; the model stays pure and per-card isolation is
+ * preserved). */
 export interface ImageShape {
   kind: "image";
   x: number;
@@ -193,6 +291,10 @@ export interface ImageShape {
   src: string;
   /** How the image maps onto the box (§3.3); `contain` when omitted. */
   fit: ImageFit;
+  /** Which point of the box x/y name (§3.4). With an `auto` dimension the
+   * offset applies to the box the renderer RESOLVES at load time — the
+   * square fallback box anchors until the art's ratio is known. */
+  anchor: Anchor;
 }
 
 /**
@@ -204,7 +306,7 @@ export interface ImageShape {
  */
 export interface TextBoxShape {
   kind: "textbox";
-  /** Top-left of the box, like Rectangle. */
+  /** The box's `anchor` point (§3.4), like Rectangle. */
   x: number;
   y: number;
   width: number;
@@ -213,9 +315,13 @@ export interface TextBoxShape {
    * `shrunk`; the declared size is deliberately NOT carried, §7.2). */
   size: number;
   color: string;
-  /** How each line aligns within the box's width (§3.3: a box has `align`,
-   * never `anchor`); default `left`. */
+  /** How each line aligns within the box's WIDTH (§3.3); default `left`.
+   * Orthogonal to `anchor`: align places lines in the box, anchor places
+   * the box on the card. */
   align: TextAnchor;
+  /** Which point of the box x/y name (§3.4): the whole box moves; the
+   * interior line layout is unchanged. */
+  anchor: Anchor;
   /** Multiplier on `size` — baseline advance in units is lineHeight × size. */
   lineHeight: number;
   /** The resolved, wrapped lines, top to bottom. May contain empty strings

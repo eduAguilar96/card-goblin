@@ -8,6 +8,7 @@
  */
 import { describe, expect, it } from "vitest";
 import {
+  ANCHOR_TOKENS,
   compileSource,
   DEFAULT_ICON_STYLE,
   DEFAULT_IMAGE_FIT,
@@ -340,10 +341,11 @@ describe("bracket refs", () => {
 // ---------------------------------------------------------------------------
 
 describe("property keys", () => {
-  it("Rectangle keys with type-hint details", () => {
+  it("Rectangle keys with type-hint details (anchor included, §3.4 M3)", () => {
     const r = at(src("Template: T", "  Rectangle:", "    ¦"));
-    expect(labels(r)).toEqual(["x", "y", "width", "height", "color"]);
+    expect(labels(r)).toEqual(["x", "y", "width", "height", "color", "anchor"]);
     expect(byLabel(r, "color").detail).toBe("Color");
+    expect(byLabel(r, "anchor").detail).toContain("top_left");
     expect(byLabel(r, "x").insertText).toBe("x: ");
   });
 
@@ -358,7 +360,7 @@ describe("property keys", () => {
 
   it("Image keys include src and fit (§3.3 M2)", () => {
     const r = at(src("Template: T", "  Image:", "    ¦"));
-    expect(labels(r)).toEqual(["x", "y", "width", "height", "src", "fit"]);
+    expect(labels(r)).toEqual(["x", "y", "width", "height", "src", "fit", "anchor"]);
     expect(byLabel(r, "src").detail).toBe("Text — image URL");
     expect(byLabel(r, "fit").detail).toContain("contain | cover | stretch");
   });
@@ -367,6 +369,7 @@ describe("property keys", () => {
     const r = at(src("Template: T", "  TextBox:", "    ¦"));
     expect(labels(r)).toEqual([
       "x", "y", "width", "height", "text", "size", "color", "align", "line_height", "overflow",
+      "anchor",
     ]);
     expect(byLabel(r, "text").detail).toContain("hard break");
     expect(byLabel(r, "line_height").detail).toContain("1.3");
@@ -480,9 +483,26 @@ describe("value positions", () => {
     expect(labels(r)).toContain("if"); // expression still legal here
   });
 
-  it("anchor: offers exactly left/middle/right", () => {
-    expect(labels(at(src("Template: T", "  Text:", "    anchor: ¦")))).toEqual([
-      "left", "middle", "right",
+  it("anchor: offers the nine canonical tokens + center, default marked (§3.4 M3)", () => {
+    const r = at(src("Template: T", "  Text:", "    anchor: ¦"));
+    expect(labels(r)).toEqual([...ANCHOR_TOKENS, "center"]);
+    expect(byLabel(r, "top_left").detail).toBe("anchor point (the default)");
+    expect(byLabel(r, "bottom_right").detail).toContain("either word order");
+    expect(byLabel(r, "center").detail).toBe("shorthand for center_center");
+    // The legacy aliases and reversed spellings stay ACCEPTED by the
+    // checker but are deliberately not offered — one spelling per point.
+    expect(labels(r)).not.toContain("left");
+    expect(labels(r)).not.toContain("middle");
+    expect(labels(r)).not.toContain("center_bottom");
+    // Offered on the box elements too — anchor: is legal everywhere (§3.4).
+    expect(labels(at(src("Template: T", "  Rectangle:", "    anchor: ¦")))).toEqual([
+      ...ANCHOR_TOKENS, "center",
+    ]);
+    expect(labels(at(src("Template: T", "  Image:", "    anchor: ¦")))).toEqual([
+      ...ANCHOR_TOKENS, "center",
+    ]);
+    expect(labels(at(src("Template: T", "  TextBox:", "    anchor: ¦")))).toEqual([
+      ...ANCHOR_TOKENS, "center",
     ]);
   });
 
@@ -617,7 +637,7 @@ describe("value positions", () => {
     expect(labels(r)).toContain("red");
     // A same-indent sibling line is a KEY position, not a continuation.
     const sibling = at(src("Template: T", "  Rectangle:", "    color: red", "    ¦"));
-    expect(labels(sibling)).toEqual(["x", "y", "width", "height", "color"]);
+    expect(labels(sibling)).toEqual(["x", "y", "width", "height", "color", "anchor"]);
   });
 });
 
@@ -787,6 +807,7 @@ describe("compiler pins (E008 probes)", () => {
     "    width: full",
     "    height: half",
     "    color: navy",
+    "    anchor: bottom_right",
     "  Repeat: [cost] as i",
     "    Text:",
     "      x: middle",
@@ -810,6 +831,7 @@ describe("compiler pins (E008 probes)", () => {
     "    height: 12",
     '    src: "https://example.com/[name].png"',
     "    fit: cover",
+    "    anchor: center",
     "  TextBox:",
     "    x: 2",
     "    y: 17",
@@ -821,6 +843,7 @@ describe("compiler pins (E008 probes)", () => {
     "    align: middle",
     "    line_height: 1.3",
     "    overflow: shrink",
+    "    anchor: center_right",
     "Template: BackT",
     "  Rectangle:",
     "    x: 0",

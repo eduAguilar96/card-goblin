@@ -16,8 +16,9 @@
  * - `size:` uses the X axis for `full`/`half` (the axis of an em height is
  *   genuinely ambiguous; X keeps `size: half` independent of `y_units`) —
  *   on TextBox too, for consistency with Text.
- * - `x: middle` forces `anchor: middle` even when an explicit `anchor:` is
- *   also written — the sugar (§3.4: `x: half` + `anchor: middle`) wins.
+ * - `x: middle` forces the anchor's HORIZONTAL component to center even when
+ *   an explicit `anchor:` is also written — the sugar wins horizontally; the
+ *   anchor's vertical component still applies (§3.4, M3).
  * - D005 fires only for COMPUTED icon codes: literal codes were already
  *   W004-checked at compile time (§3.8); re-reporting would double-flag.
  * - Text cells pass through verbatim (no trimming); trimming applies only
@@ -34,6 +35,7 @@ import type {
 } from "./ast";
 import type { CardBindings, ResolvableNode, Resolution } from "./check";
 import type {
+  Anchor,
   DataDiagnostic,
   IconStyle,
   ImageFit,
@@ -43,6 +45,7 @@ import type {
   TextBoxOverflow,
 } from "./model";
 import {
+  DEFAULT_ANCHOR,
   DEFAULT_ICON_STYLE,
   DEFAULT_IMAGE_FIT,
   DEFAULT_LINE_HEIGHT,
@@ -465,6 +468,7 @@ function evalElement(el: ElementNode, ctx: EvalContext): Shape {
         width: numberProp(el, "width", ctx, ctx.xUnits),
         height: numberProp(el, "height", ctx, ctx.yUnits),
         color: colorProp(el, ctx, null), // required (§3.3) — no default
+        anchor: anchorOf(el, ctx),
       };
     case "Text": {
       const { x, anchor } = xAndAnchor(el, ctx);
@@ -511,6 +515,7 @@ function evalElement(el: ElementNode, ctx: EvalContext): Shape {
         size: layout.size,
         color: colorProp(el, ctx, "black"),
         align: alignOf(el, ctx),
+        anchor: anchorOf(el, ctx), // §3.4: moves the box; align lays lines in it
         lineHeight,
         lines: layout.lines,
         clipped: layout.clipped,
@@ -556,6 +561,7 @@ function evalElement(el: ElementNode, ctx: EvalContext): Shape {
         height: imageDimProp(el, "height", ctx, ctx.yUnits),
         src: toText(evalExpr(requireProp(el, "src"), ctx, null)),
         fit: fitOf(el, ctx),
+        anchor: anchorOf(el, ctx), // §3.4: applied to the RESOLVED box at render time
       };
   }
 }
@@ -611,16 +617,17 @@ function colorProp(el: ElementNode, ctx: EvalContext, fallback: string | null): 
 }
 
 /** Text/Icon `x` + anchor (§3.4): `x: middle` (whole-value, checker-blessed)
- * → x = xUnits/2 AND anchor middle — an explicit `anchor:` beside it loses
- * (documented decision: the sugar's whole point is centering; honoring the
- * stray anchor would silently un-center the element). Otherwise x evaluates
- * on the X axis and anchor comes from the property (default left). */
-function xAndAnchor(el: ElementNode, ctx: EvalContext): { x: number; anchor: TextAnchor } {
+ * → x = xUnits/2 AND a centered HORIZONTAL anchor component — an explicit
+ * `anchor:` beside it keeps only its vertical say (§3.4: the sugar forces
+ * the horizontal component to center; honoring a stray horizontal word
+ * would silently un-center the element). Otherwise x evaluates on the X
+ * axis and the full anchor comes from the property (default top-left). */
+function xAndAnchor(el: ElementNode, ctx: EvalContext): { x: number; anchor: Anchor } {
   const expr = requireProp(el, "x");
   if (expr.kind === "Identifier") {
     const res = ctx.card.resolutions.get(expr);
     if (res?.kind === "geometry" && res.keyword === "middle") {
-      return { x: ctx.xUnits / 2, anchor: "middle" };
+      return { x: ctx.xUnits / 2, anchor: { h: "center", v: anchorOf(el, ctx).v } };
     }
   }
   const v = evalExpr(expr, ctx, ctx.xUnits);
@@ -628,13 +635,21 @@ function xAndAnchor(el: ElementNode, ctx: EvalContext): { x: number; anchor: Tex
   return { x: v.value, anchor: anchorOf(el, ctx) };
 }
 
-function anchorOf(el: ElementNode, ctx: EvalContext): TextAnchor {
+/** Nine-point `anchor:` (§3.4, M3), on every drawable element: checker-
+ * blessed identifier or the top-left default. The checker already NORMALIZED
+ * the token (either word order, `center`, and the legacy aliases collapse to
+ * one {h, v}), so explicit-default ≡ omitted and alias ≡ canonical by
+ * construction — the shape, and therefore the contentHash, can't tell the
+ * spellings apart. Offsets are NOT baked into x/y here: an Image `auto`
+ * dimension resolves only at load time, so the RENDERER applies every
+ * anchor's offset (consistency across kinds beats a micro-optimization). */
+function anchorOf(el: ElementNode, ctx: EvalContext): Anchor {
   const expr = findProp(el, "anchor");
-  if (!expr) return "left"; // default (§3.3)
+  if (!expr) return DEFAULT_ANCHOR; // top-left (§3.4)
   if (expr.kind !== "Identifier") return poisoned();
   const res = ctx.card.resolutions.get(expr);
   if (res?.kind !== "anchor") return poisoned();
-  return res.keyword;
+  return res.anchor;
 }
 
 /** Icon `style:` (§3.3, M2): checker-blessed identifier or the flat_dark

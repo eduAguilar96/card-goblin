@@ -25,6 +25,8 @@ import { SIZE_PRESETS } from "@/lib/lang/check";
 import { CSS_COLOR_NAMES } from "@/lib/lang/css-colors";
 import { DICIER_CODES } from "@/lib/lang/dicier-codes";
 import {
+  ANCHOR_TOKENS,
+  DEFAULT_ANCHOR,
   DEFAULT_ICON_STYLE,
   DEFAULT_IMAGE_FIT,
   DEFAULT_LINE_HEIGHT,
@@ -32,6 +34,7 @@ import {
   ICON_STYLES,
   IMAGE_FITS,
   TEXTBOX_OVERFLOWS,
+  parseAnchor,
 } from "@/lib/lang/model";
 import { SHRINK_FLOOR, SHRINK_STEP } from "@/lib/lang/wrap";
 import { REPEAT_CAP } from "@/lib/lang/eval";
@@ -312,6 +315,45 @@ describe("the image-fit table matches IMAGE_FITS", () => {
         /default/i.test(what),
         `"${fit}" default marking must match DEFAULT_IMAGE_FIT (${DEFAULT_IMAGE_FIT})`,
       ).toBe(fit === DEFAULT_IMAGE_FIT);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Nine-point anchors
+// ---------------------------------------------------------------------------
+
+describe("the anchor table matches ANCHOR_TOKENS", () => {
+  const text = pageText("templates-and-shapes");
+  /** `top_left` → its point-description prose, from the anchor-header table. */
+  const documented = new Map(
+    tableWithHeader(text, "anchor").rows.map(
+      (cells) => [plain(cells[0]), plain(cells[1] ?? "")] as const,
+    ),
+  );
+
+  it("documents every canonical token — a new anchor can't ship undocumented", () => {
+    expect([...documented.keys()].sort()).toEqual([...ANCHOR_TOKENS].sort());
+  });
+
+  it("marks exactly the code's default anchor as the default", () => {
+    // The canonical spelling of the default is derived, not hard-coded, so a
+    // changed DEFAULT_ANCHOR moves this check with it.
+    const defaultToken = `${DEFAULT_ANCHOR.v}_${DEFAULT_ANCHOR.h}`;
+    expect(parseAnchor(defaultToken)).toEqual(DEFAULT_ANCHOR);
+    for (const [token, what] of documented) {
+      expect(
+        /default/i.test(what),
+        `"${token}" default marking must match DEFAULT_ANCHOR (${defaultToken})`,
+      ).toBe(token === defaultToken);
+    }
+  });
+
+  it("every documented token normalizes, in both word orders (the reversibility the page claims)", () => {
+    for (const token of documented.keys()) {
+      const reversed = token.split("_").reverse().join("_");
+      expect(parseAnchor(token), token).not.toBeNull();
+      expect(parseAnchor(reversed), reversed).toEqual(parseAnchor(token));
     }
   });
 });

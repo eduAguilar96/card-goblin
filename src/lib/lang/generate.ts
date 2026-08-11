@@ -59,6 +59,7 @@ import type {
   RenderModel,
   Shape,
 } from "./model";
+import { DEFAULT_ANCHOR } from "./model";
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -368,7 +369,17 @@ class Generator {
             // HERE so the renderer stays dumb.
             backShapes = card.back
               ? evalFace(card.back, ctx)
-              : [{ kind: "rect", x: 0, y: 0, width: xUnits, height: yUnits, color: "white" }];
+              : [
+                  {
+                    kind: "rect",
+                    x: 0,
+                    y: 0,
+                    width: xUnits,
+                    height: yUnits,
+                    color: "white",
+                    anchor: DEFAULT_ANCHOR,
+                  },
+                ];
           } catch (err) {
             if (!(err instanceof DataError)) throw err;
             error = err.diagnostics; // ⚑8: this combination only — siblings unaffected

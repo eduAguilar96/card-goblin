@@ -38,6 +38,8 @@ export { DICIER_CODES, DICIER_CODE_CATEGORIES } from "./dicier-codes";
 export { generateModel } from "./generate";
 export type { EditedRows, GenerateResult, SheetRows } from "./generate";
 export {
+  ANCHOR_TOKENS,
+  DEFAULT_ANCHOR,
   DEFAULT_ICON_STYLE,
   DEFAULT_IMAGE_FIT,
   DEFAULT_LINE_HEIGHT,
@@ -45,8 +47,13 @@ export {
   ICON_STYLES,
   IMAGE_FITS,
   TEXTBOX_OVERFLOWS,
+  parseAnchor,
 } from "./model";
 export type {
+  Anchor,
+  AnchorH,
+  AnchorToken,
+  AnchorV,
   CardInstance,
   CardMeta,
   CardRef,

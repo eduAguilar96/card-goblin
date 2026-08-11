@@ -22,7 +22,9 @@
 
 import type { Bindings } from "@/lib/lang";
 import {
+  ANCHOR_TOKENS,
   CSS_COLOR_NAMES,
+  DEFAULT_ANCHOR,
   DEFAULT_ICON_STYLE,
   DEFAULT_IMAGE_FIT,
   DEFAULT_LINE_HEIGHT,
@@ -176,6 +178,13 @@ type BlockKind = ElementKind | "Repeat" | "Card" | "Template" | "Sheet" | "Enum"
 
 /** §3.3 property tables — mirrors check.ts's private ELEMENT_SPECS (pinned by
  * a compiler-probe test). Order here is the suggestion order. */
+/** §3.4 nine-point anchor (M3): one key detail for every drawable element. */
+const DEFAULT_ANCHOR_TOKEN = `${DEFAULT_ANCHOR.v}_${DEFAULT_ANCHOR.h}`;
+const ANCHOR_KEY = {
+  key: "anchor",
+  detail: `which point x/y name (optional, default ${DEFAULT_ANCHOR_TOKEN})`,
+};
+
 const ELEMENT_KEYS: Record<ElementKind, { key: string; detail: string }[]> = {
   Rectangle: [
     { key: "x", detail: "Number — units" },
@@ -183,6 +192,7 @@ const ELEMENT_KEYS: Record<ElementKind, { key: string; detail: string }[]> = {
     { key: "width", detail: "Number — units" },
     { key: "height", detail: "Number — units" },
     { key: "color", detail: "Color" },
+    ANCHOR_KEY,
   ],
   Text: [
     { key: "x", detail: "Number — units (or middle)" },
@@ -190,7 +200,7 @@ const ELEMENT_KEYS: Record<ElementKind, { key: string; detail: string }[]> = {
     { key: "size", detail: "Number — em height in units" },
     { key: "text", detail: "Text" },
     { key: "color", detail: "Color (optional, default black)" },
-    { key: "anchor", detail: "left | middle | right (optional)" },
+    ANCHOR_KEY,
   ],
   TextBox: [
     { key: "x", detail: "Number — units" },
@@ -203,6 +213,7 @@ const ELEMENT_KEYS: Record<ElementKind, { key: string; detail: string }[]> = {
     { key: "align", detail: "left | middle | right (optional)" },
     { key: "line_height", detail: `number × size (optional, default ${DEFAULT_LINE_HEIGHT})` },
     { key: "overflow", detail: `${TEXTBOX_OVERFLOWS.join(" | ")} (optional, default ${DEFAULT_TEXTBOX_OVERFLOW})` },
+    ANCHOR_KEY,
   ],
   Icon: [
     { key: "x", detail: "Number — units (or middle)" },
@@ -210,7 +221,7 @@ const ELEMENT_KEYS: Record<ElementKind, { key: string; detail: string }[]> = {
     { key: "size", detail: "Number — em height in units" },
     { key: "code", detail: "Text — Dicier code" },
     { key: "color", detail: "Color (optional, default black)" },
-    { key: "anchor", detail: "left | middle | right (optional)" },
+    ANCHOR_KEY,
     { key: "style", detail: `Dicier face (optional, default ${DEFAULT_ICON_STYLE})` },
   ],
   Image: [
@@ -220,6 +231,7 @@ const ELEMENT_KEYS: Record<ElementKind, { key: string; detail: string }[]> = {
     { key: "height", detail: "Number — units (or auto)" },
     { key: "src", detail: "Text — image URL" },
     { key: "fit", detail: `${IMAGE_FITS.join(" | ")} (optional, default ${DEFAULT_IMAGE_FIT})` },
+    ANCHOR_KEY,
   ],
 };
 
@@ -994,14 +1006,32 @@ function valueSuggestions(
     }
     case "color":
       return [...colorSuggestions(), ...expressionExtras(beforeWord, scope(), snapshot)];
-    case "anchor":
-      return ["left", "middle", "right"].map((a) => ({
+    case "anchor": {
+      // Nine-point anchors (§3.4, M3): the nine canonical tokens plus the
+      // `center` shorthand, on every drawable element. Reversed word orders
+      // (`center_bottom` ≡ `bottom_center`) and the legacy Text/Icon words
+      // (left | middle | right — the top row) stay ACCEPTED by the checker
+      // but are not offered: one spelling per point keeps the menu
+      // scannable (documented decision).
+      const anchors: CompletionSuggestion[] = ANCHOR_TOKENS.map((a) => ({
         label: a,
         insertText: a,
         kind: "value" as const,
-        detail: "anchor",
+        detail:
+          a === DEFAULT_ANCHOR_TOKEN
+            ? "anchor point (the default)"
+            : "anchor point (either word order works)",
         group: 0 as const,
       }));
+      anchors.push({
+        label: "center",
+        insertText: "center",
+        kind: "value",
+        detail: "shorthand for center_center",
+        group: 0,
+      });
+      return anchors;
+    }
     case "align":
       // TextBox only (§3.3, M3): where lines sit within the box's width.
       return ["left", "middle", "right"].map((a) => ({

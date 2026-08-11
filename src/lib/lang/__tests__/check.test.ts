@@ -9,7 +9,15 @@ import { describe, expect, it } from "vitest";
 import type { DataRef, ElementNode, Program, RepeatNode, TemplateDecl } from "../ast";
 import type { CheckResult } from "../check";
 import { check } from "../check";
-import { compileSource, ICON_STYLES, IMAGE_FITS, TEXTBOX_OVERFLOWS } from "../index";
+import type { Anchor } from "../index";
+import {
+  ANCHOR_TOKENS,
+  compileSource,
+  ICON_STYLES,
+  IMAGE_FITS,
+  parseAnchor,
+  TEXTBOX_OVERFLOWS,
+} from "../index";
 import type { Diagnostic } from "../diagnostics";
 import { parse } from "../parser";
 
@@ -533,10 +541,11 @@ describe("E008 required properties", () => {
     expect(card.map((d) => d.code)).toEqual(["E008"]);
     expect(card[0].message).toBe("Unknown property 'foo:' on Card");
 
-    // anchor exists on Text/Icon but NOT on Rectangle (§3.3).
+    // style exists on Icon but NOT on Rectangle (§3.3) — anchor no longer
+    // serves as the probe here: since M3 it is legal on EVERY drawable (§3.4).
     expect(
       codesOf(
-        withElement("Rectangle:", ["x: 0", "y: 0", "width: 1", "height: 1", "color: teal", "anchor: left"]),
+        withElement("Rectangle:", ["x: 0", "y: 0", "width: 1", "height: 1", "color: teal", "style: pixel"]),
       ),
     ).toEqual(["E008"]);
   });
@@ -551,7 +560,7 @@ describe("E008 required properties", () => {
     expect(noColor[0].message).toContain("'color:'");
   });
 
-  it("anchor must be left, middle, or right", () => {
+  it("anchor must be in the nine-point vocabulary (§3.4) — full coverage in its own suite", () => {
     expect(codesOf(withElement("Text:", [...TEXT_BASE, 'text: "a"', "anchor: up"]))).toEqual([
       "E008",
     ]);
@@ -608,6 +617,152 @@ describe("Icon style: (§3.3 M2)", () => {
     const ds = diagsOf(withElement("Text:", [...TEXT_BASE, 'text: "a"', "style: pixel"]));
     expect(ds.map((d) => d.code)).toEqual(["E008"]);
     expect(ds[0].message).toBe("Unknown property 'style:' on Text");
+  });
+});
+
+// -- nine-point anchors (§3.4, M3) -------------------------------------------
+
+describe("nine-point anchor normalization (parseAnchor, §3.4)", () => {
+  /** The canonical grid, row-major — kept in ANCHOR_TOKENS order so the
+   * token array and the normalization can never drift apart. */
+  const GRID: [string, Anchor][] = [
+    ["top_left", { h: "left", v: "top" }],
+    ["top_center", { h: "center", v: "top" }],
+    ["top_right", { h: "right", v: "top" }],
+    ["center_left", { h: "left", v: "center" }],
+    ["center_center", { h: "center", v: "center" }],
+    ["center_right", { h: "right", v: "center" }],
+    ["bottom_left", { h: "left", v: "bottom" }],
+    ["bottom_center", { h: "center", v: "bottom" }],
+    ["bottom_right", { h: "right", v: "bottom" }],
+  ];
+
+  it("normalizes all nine canonical tokens (and GRID covers exactly ANCHOR_TOKENS)", () => {
+    expect(GRID.map(([token]) => token)).toEqual([...ANCHOR_TOKENS]);
+    for (const [token, anchor] of GRID) {
+      expect(parseAnchor(token), token).toEqual(anchor);
+    }
+  });
+
+  it("accepts either word order — every reversed spelling hits the same point", () => {
+    for (const [token, anchor] of GRID) {
+      const reversed = token.split("_").reverse().join("_");
+      expect(parseAnchor(reversed), reversed).toEqual(anchor);
+    }
+  });
+
+  it("`center` alone is center_center", () => {
+    expect(parseAnchor("center")).toEqual({ h: "center", v: "center" });
+  });
+
+  it("legacy left/middle/right alias the top row (existing cards unchanged)", () => {
+    expect(parseAnchor("left")).toEqual({ h: "left", v: "top" });
+    expect(parseAnchor("middle")).toEqual({ h: "center", v: "top" });
+    expect(parseAnchor("right")).toEqual({ h: "right", v: "top" });
+  });
+
+  it("rejects unknowns, lone axis words, doubled axes, and any non-lowercase spelling", () => {
+    // Case-sensitive like every bare-identifier vocabulary (icon styles,
+    // fits): only exact lowercase resolves.
+    for (const bad of [
+      "up",
+      "top",
+      "bottom",
+      "left_right",
+      "top_bottom",
+      "left_left",
+      "middle_center", // `middle` is only the standalone legacy alias
+      "center_middle",
+      "top_left_x",
+      "top_",
+      "_left",
+      "Top_Left",
+      "CENTER",
+      "Left",
+      "",
+    ]) {
+      expect(parseAnchor(bad), JSON.stringify(bad)).toBeNull();
+    }
+  });
+});
+
+describe("anchor: on every drawable element (§3.4 M3)", () => {
+  /** One valid spelling per element kind — canonical, reversed, shorthand,
+   * and legacy all mixed on purpose. */
+  const CASES: { header: string; props: string[]; expected: Anchor }[] = [
+    {
+      header: "Rectangle:",
+      props: ["x: 0", "y: 0", "width: 1", "height: 1", "color: teal", "anchor: bottom_right"],
+      expected: { h: "right", v: "bottom" },
+    },
+    {
+      header: "Text:",
+      props: [...TEXT_BASE, 'text: "a"', "anchor: center"],
+      expected: { h: "center", v: "center" },
+    },
+    {
+      header: "TextBox:",
+      props: [
+        "x: 1",
+        "y: 1",
+        "width: 10",
+        "height: 6",
+        'text: "t"',
+        "size: 1",
+        "anchor: center_bottom", // reversed spelling of bottom_center
+      ],
+      expected: { h: "center", v: "bottom" },
+    },
+    {
+      header: "Icon:",
+      props: ["x: 1", "y: 1", "size: 1", 'code: "HEARTS"', "anchor: left_center"],
+      expected: { h: "left", v: "center" },
+    },
+    {
+      header: "Image:",
+      props: ["x: 1", "y: 1", "width: 5", "height: 5", 'src: "a.png"', "anchor: middle"],
+      expected: { h: "center", v: "top" }, // legacy alias, now on Image too
+    },
+  ];
+
+  it("checks clean and records the NORMALIZED {h, v} resolution", () => {
+    for (const { header, props, expected } of CASES) {
+      const result = checkOf(withElement(header, props));
+      expect(result.diagnostics, header).toEqual([]);
+      const tpl = result.bindings.templates.get("T") as TemplateDecl;
+      const prop = (tpl.children[0] as ElementNode).properties.find(
+        (p) => p.key.name === "anchor",
+      )!;
+      expect(result.bindings.cards[0].resolutions.get(prop.value as never), header).toEqual({
+        kind: "anchor",
+        anchor: expected,
+      });
+    }
+  });
+
+  it("an unknown value is E008 listing the canonical vocabulary", () => {
+    const ds = diagsOf(withElement("Rectangle:", [
+      "x: 0", "y: 0", "width: 1", "height: 1", "color: teal", "anchor: up",
+    ]));
+    expect(ds.map((d) => d.code)).toEqual(["E008"]);
+    for (const token of ANCHOR_TOKENS) expect(ds[0].message).toContain(token);
+    expect(ds[0].message).toContain("center");
+    expect(ds[0].message).toContain("either word order");
+  });
+
+  it("anchor is case-sensitive — Top_Left is E008 like any vocabulary", () => {
+    expect(
+      codesOf(withElement("Icon:", ["x: 1", "y: 1", "size: 1", 'code: "HEARTS"', "anchor: Top_Left"])),
+    ).toEqual(["E008"]);
+  });
+
+  it("strings and expressions are E008 — a bare identifier is required", () => {
+    for (const bad of ['anchor: "top_left"', "anchor: 1", "anchor: 1 + 1"]) {
+      expect(
+        codesOf(withElement("Text:", [...TEXT_BASE, 'text: "a"', bad])),
+        bad,
+      ).toEqual(["E008"]);
+    }
   });
 });
 
@@ -941,10 +1096,8 @@ describe("TextBox (§3.3 M3)", () => {
     expect(ds[0].message).toContain("Image");
   });
 
-  it("anchor on TextBox and align on Text are unknown properties (E008)", () => {
-    const anchored = diagsOf(withElement("TextBox:", [...BOX_BASE, "anchor: middle"]));
-    expect(anchored.map((d) => d.code)).toEqual(["E008"]);
-    expect(anchored[0].message).toBe("Unknown property 'anchor:' on TextBox");
+  it("align on Text is an unknown property (E008); anchor on TextBox is legal since §3.4", () => {
+    expect(codesOf(withElement("TextBox:", [...BOX_BASE, "anchor: middle"]))).toEqual([]);
     const aligned = diagsOf(
       withElement("Text:", [...TEXT_BASE, 'text: "t"', "align: middle"]),
     );

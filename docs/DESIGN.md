@@ -150,11 +150,11 @@ never referenced (⚑11).
 
 | Element | Properties | Notes |
 |---|---|---|
-| `Rectangle` | `x y width height color` | anchor: top-left |
-| `Text` | `x y size color text anchor` | single line (◆24); `size` = em height in units; default color `black`, default `anchor: left`. Newline characters in the resolved text render as spaces (M3 2026-08-10 — hard breaks belong to `TextBox`) |
-| `TextBox` | `x y width height text size color align line_height overflow` | (M3, agreed 2026-08-10 — §7.2) wrapped multi-line text in a box; ◆24 stays intact for `Text`. `x y width height text size` required; `color` (default `black`), `align: left \| middle \| right` (default `left` — a box aligns within its width, so it has `align`, never `anchor`, and `x: middle` stays Text/Icon-only, E007), `line_height` (positive number LITERAL, default 1.3, meaning × `size` — baseline advance in units is `line_height × size`), `overflow: clip \| shrink` (default `clip`) optional. **The compiler is the wrapping authority**: the evaluator wraps deterministically against a generated Geist advance-widths table (`geist-metrics.ts`, the dicier-codes pattern) with a 2% measurement safety margin, and the model carries the resolved `lines` — preview and PDF agree by construction. Wrap semantics: split on hard breaks (real `\n` in the resolved text — from the §3.1 escapes or from cell data) first; within a segment, greedy word-wrap on spaces (runs of spaces collapse at break points only; interior spacing is preserved); a single word wider than the box breaks mid-word rather than overflow horizontally. Vertical fit is `lines × line_height × size ≤ height`: `clip` keeps the last fully-fitting line and marks the box clipped; `shrink` retries at 5%-of-`size` steps down to a 60% floor, then clips at the floor — the shape carries the FINAL size. Clipped/shrunk boxes get a subtle per-card preview badge, never an error placeholder (⚑8) |
+| `Rectangle` | `x y width height color anchor` | default `anchor: top_left` (nine-point, §3.4 — M3 2026-08-10) |
+| `Text` | `x y size color text anchor` | single line (◆24); `size` = em height in units; default color `black`, default `anchor: top_left` (nine-point §3.4; the legacy `left \| middle \| right` alias the top row). Newline characters in the resolved text render as spaces (M3 2026-08-10 — hard breaks belong to `TextBox`) |
+| `TextBox` | `x y width height text size color align line_height overflow anchor` | (M3, agreed 2026-08-10 — §7.2) wrapped multi-line text in a box; ◆24 stays intact for `Text`. `x y width height text size` required; `color` (default `black`), `align: left \| middle \| right` (default `left` — align lays lines within the box's width; the nine-point `anchor:` of §3.4 moves the box itself, and `x: middle` stays Text/Icon-only, E007), `line_height` (positive number LITERAL, default 1.3, meaning × `size` — baseline advance in units is `line_height × size`), `overflow: clip \| shrink` (default `clip`) optional. **The compiler is the wrapping authority**: the evaluator wraps deterministically against a generated Geist advance-widths table (`geist-metrics.ts`, the dicier-codes pattern) with a 2% measurement safety margin, and the model carries the resolved `lines` — preview and PDF agree by construction. Wrap semantics: split on hard breaks (real `\n` in the resolved text — from the §3.1 escapes or from cell data) first; within a segment, greedy word-wrap on spaces (runs of spaces collapse at break points only; interior spacing is preserved); a single word wider than the box breaks mid-word rather than overflow horizontally. Vertical fit is `lines × line_height × size ≤ height`: `clip` keeps the last fully-fitting line and marks the box clipped; `shrink` retries at 5%-of-`size` steps down to a 60% floor, then clips at the floor — the shape carries the FINAL size. Clipped/shrunk boxes get a subtle per-card preview badge, never an error placeholder (⚑8) |
 | `Icon` | `x y size color code anchor style` | Dicier glyph; `code` is a Text expression; literal codes checked against the curated list — unknown literal = **W004 warning**, since the list is non-exhaustive (⚑10†). `style:` (M2, agreed 2026-08-09) is an optional bare identifier — `flat_dark` (default), `flat_light`, `flat_heavy`, `block_dark`, `block_light`, `block_heavy`, `round_dark`, `round_light`, `round_heavy`, `pixel` — resolved by expected type like `anchor:`; unknown value = E008. All ten faces are declared as `@font-face`; browsers fetch only the ones actually used |
-| `Image` | `x y width height src fit` | (M2, agreed 2026-08-09) raster art from a URL. `src:` is a Text expression (URLs may come from a sheet column); `fit:` optional bare identifier `contain` (default) \| `cover` \| `stretch`, realized via SVG `preserveAspectRatio`. **`auto` dimension (2026-08-10):** exactly one of `width:`/`height:` may be the bare keyword `auto` — that dimension derives from the other × the art's intrinsic aspect ratio (`width: full` + `height: auto` is the canonical "banner art" idiom). Both `auto` = E008. `auto` is resolved by the renderer/exporter at load time (intrinsic size is load-time knowledge — the pure model carries the keyword); pre-load placeholders use a square box, and `fit:` is inert alongside `auto` (the box matches the ratio by construction — allowed, documented, no diagnostic). Loading → subtle placeholder box; failed load → placeholder with warning styling (renderer-level state, **not** a D-code — the model stays pure, per-card isolation preserved). At PDF export, images load with `crossorigin=anonymous`; a load failure or canvas taint exports that image as a marked placeholder box and the modal warns "N images could not be embedded" before export — the deck always exports (⚑8 philosophy) |
+| `Image` | `x y width height src fit anchor` | (M2, agreed 2026-08-09) raster art from a URL. `src:` is a Text expression (URLs may come from a sheet column); `fit:` optional bare identifier `contain` (default) \| `cover` \| `stretch`, realized via SVG `preserveAspectRatio`. **`auto` dimension (2026-08-10):** exactly one of `width:`/`height:` may be the bare keyword `auto` — that dimension derives from the other × the art's intrinsic aspect ratio (`width: full` + `height: auto` is the canonical "banner art" idiom). Both `auto` = E008. `auto` is resolved by the renderer/exporter at load time (intrinsic size is load-time knowledge — the pure model carries the keyword); pre-load placeholders use a square box, and `fit:` is inert alongside `auto` (the box matches the ratio by construction — allowed, documented, no diagnostic). Loading → subtle placeholder box; failed load → placeholder with warning styling (renderer-level state, **not** a D-code — the model stays pure, per-card isolation preserved). At PDF export, images load with `crossorigin=anonymous`; a load failure or canvas taint exports that image as a marked placeholder box and the modal warns "N images could not be embedded" before export — the deck always exports (⚑8 philosophy) |
 | `Repeat` | `Repeat: <Number expr> as <var>` (single line, ◆23†) | children emitted N times; `[var]` is the 0-based index (◆18), usable in any child expression; nests; cap 500/card (◆27) |
 
 **The showcase** — one number in the sheet becomes a row of hearts (⚑6, ⚑9, ⚑10):
@@ -192,10 +192,25 @@ Repeat: [health] as i
   unit count, `half` = half of it, `middle` (**x-position of Text/Icon only**, ◆ —
   `y: middle` is E007) = horizontally centered (sugar for `x: half` +
   `anchor: middle`).
-- Anchors: rectangles anchor top-left. Text/Icon: `anchor: left | middle | right`
-  horizontally (default `left`); `y` is the top of the em box. (Renderer realizes
-  this with a per-font ascent constant — `dy = ascent/em × size` — not
-  `dominant-baseline`, which is inconsistent across browsers; §4.2.)
+- **Nine-point anchors (M3, 2026-08-10, user requirement):** every drawable
+  element accepts `anchor:`, naming which point of the element `x`/`y` refer
+  to. Canonical values: `top_left` (default), `top_center`, `top_right`,
+  `center_left`, `center_center`, `center_right`, `bottom_left`,
+  `bottom_center`, `bottom_right` — **either word order** is accepted
+  (`center_bottom` ≡ `bottom_center`), `center` alone ≡ `center_center`, and
+  the legacy Text/Icon values `left | middle | right` remain as aliases for
+  the top row (existing cards unchanged). Underscores, not hyphens — `-` is
+  the minus operator. Unknown value → E008 naming the vocabulary.
+  Semantics: box elements (Rectangle, Image, TextBox) offset by
+  `(width·fx, height·fy)`, fx/fy ∈ {0, ½, 1}; Text/Icon anchor horizontally
+  via `text-anchor` on the intrinsic line and vertically by the em box
+  (top = today's behavior; `y` names the anchored edge/center of the em).
+  An Image with an `auto` dimension applies its offset at render time once
+  the natural size is known (same load-time rule as `auto` itself).
+  `x: middle` sugar is unchanged: it forces the horizontal component to
+  center; the vertical component still comes from `anchor:`. (Renderer keeps
+  the per-font ascent realization — `dy = ascent/em × size`, not
+  `dominant-baseline`; §4.2.)
 
 ### 3.5 Expressions and types (⚑6)
 
@@ -603,7 +618,8 @@ exhaustive code list, custom card sizes, compile in a worker if needed.
   (the tables mirror check.ts's private CARD_PROPERTY_KEYS/ELEMENT_SPECS — the test
   suite pins them to the checker with E008 probes); value positions by expected
   type — size presets, sheet names, template names on `Front:`/`Back:`, enum names
-  on `loop:`, CSS color names (◆21), left/middle/right on `anchor:`, full/half
+  on `loop:`, CSS color names (◆21), the nine canonical tokens + `center` on
+  `anchor:` (M3 — aliases stay accepted, one spelling per point offered), full/half
   (+ middle for x on Text/Icon) on geometry; `code:` strings → the full Dicier list
   with each code's source-list section header as detail (`DICIER_CODE_CATEGORIES`,
   generated alongside `DICIER_CODES`); `Enum.` → that enum's cases; bare cases where

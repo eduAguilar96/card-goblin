@@ -48,8 +48,8 @@ import type {
   TemplateNode,
 } from "./ast";
 import type { Diagnostic, Range, Severity } from "./diagnostics";
-import type { IconStyle, ImageFit, TextBoxOverflow } from "./model";
-import { ICON_STYLES, IMAGE_FITS, TEXTBOX_OVERFLOWS } from "./model";
+import type { Anchor, IconStyle, ImageFit, TextBoxOverflow } from "./model";
+import { ANCHOR_TOKENS, ICON_STYLES, IMAGE_FITS, TEXTBOX_OVERFLOWS, parseAnchor } from "./model";
 import { CSS_COLOR_NAMES } from "./css-colors";
 import { DICIER_CODES } from "./dicier-codes";
 
@@ -89,7 +89,10 @@ export type Resolution =
   | { kind: "enumCase"; enumName: string; caseName: string }
   | { kind: "colorName"; name: string }
   | { kind: "geometry"; keyword: "full" | "half" | "middle" }
-  | { kind: "anchor"; keyword: "left" | "middle" | "right" }
+  /** Nine-point `anchor:` (§3.4, M3): carries the NORMALIZED {h, v} — every
+   * spelling variant (either word order, `center`, the legacy aliases) is
+   * indistinguishable downstream, contentHash included. */
+  | { kind: "anchor"; anchor: Anchor }
   /** TextBox `align:` (§3.3, M3): same three words as anchor, but a box
    * aligns lines within its own width — a distinct kind so the evaluator
    * can never confuse the two vocabularies. */
@@ -281,18 +284,20 @@ interface ElementSpec {
   optional: readonly string[];
 }
 
-/** §3.3 property tables. Text/Icon color defaults to black, anchor to left;
- * Icon style defaults to flat_dark, Image fit to contain (M2); TextBox
- * align defaults to left, line_height to 1.3 × size, overflow to clip (M3). */
+/** §3.3 property tables. Text/Icon color defaults to black; Icon style
+ * defaults to flat_dark, Image fit to contain (M2); TextBox align defaults
+ * to left, line_height to 1.3 × size, overflow to clip (M3). EVERY drawable
+ * element takes an optional nine-point `anchor:` (§3.4, M3; default
+ * top_left). */
 const ELEMENT_SPECS: Record<ElementNode["element"], ElementSpec> = {
-  Rectangle: { required: ["x", "y", "width", "height", "color"], optional: [] },
+  Rectangle: { required: ["x", "y", "width", "height", "color"], optional: ["anchor"] },
   Text: { required: ["x", "y", "size", "text"], optional: ["color", "anchor"] },
   TextBox: {
     required: ["x", "y", "width", "height", "text", "size"],
-    optional: ["color", "align", "line_height", "overflow"],
+    optional: ["color", "align", "line_height", "overflow", "anchor"],
   },
   Icon: { required: ["x", "y", "size", "code"], optional: ["color", "anchor", "style"] },
-  Image: { required: ["x", "y", "width", "height", "src"], optional: ["fit"] },
+  Image: { required: ["x", "y", "width", "height", "src"], optional: ["fit", "anchor"] },
 };
 
 /** Mutable recording target while checking in one Card's context; null during
@@ -996,18 +1001,27 @@ class Checker {
         return;
       }
       case "anchor": {
+        // Nine-point anchors (§3.4, M3): every drawable element names which
+        // point of it x/y refer to. parseAnchor (model.ts) owns the accepted
+        // vocabulary — the canonical tokens in either word order, the
+        // `center` shorthand, and the legacy Text/Icon words as top-row
+        // aliases — and the recorded resolution carries the NORMALIZED
+        // {h, v}, so every spelling of one point is identical downstream.
+        // The E008 names the canonical vocabulary only: aliases are
+        // compatibility, not the language.
         if (value.kind === "Error") return;
-        if (
-          value.kind === "Identifier" &&
-          (value.name === "left" || value.name === "middle" || value.name === "right")
-        ) {
-          this.recordResolution(ctx, value, {
-            kind: "anchor",
-            keyword: value.name,
-          });
-          return;
+        if (value.kind === "Identifier") {
+          const anchor = parseAnchor(value.name);
+          if (anchor) {
+            this.recordResolution(ctx, value, { kind: "anchor", anchor });
+            return;
+          }
         }
-        this.error("E008", `anchor: must be left, middle, or right`, value.range);
+        this.error(
+          "E008",
+          `anchor: must be one of ${ANCHOR_TOKENS.join(", ")} (either word order), or center`,
+          value.range,
+        );
         return;
       }
       case "align": {

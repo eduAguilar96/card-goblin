@@ -148,7 +148,15 @@ describe("demo fixture end to end (§3.9)", () => {
     expect(bannerColor(2)).toBe("gold");
     expect(bannerColor(4)).toBe("mediumpurple");
     const banner = deck.cards[0].front[0] as RectShape;
-    expect(banner).toEqual({ kind: "rect", x: 0, y: 0, width: 20, height: 3, color: "grey" });
+    expect(banner).toEqual({
+      kind: "rect",
+      x: 0,
+      y: 0,
+      width: 20,
+      height: 3,
+      color: "grey",
+      anchor: { h: "left", v: "top" }, // §3.4 default, materialized
+    });
   });
 
   it("title: `x: middle` centers at x=10 and forces anchor middle", () => {
@@ -160,7 +168,7 @@ describe("demo fixture end to end (§3.9)", () => {
       size: 1.6,
       color: "black",
       text: "Dragon",
-      anchor: "middle",
+      anchor: { h: "center", v: "top" }, // the sugar centers horizontally (§3.4)
     });
   });
 
@@ -168,7 +176,7 @@ describe("demo fixture end to end (§3.9)", () => {
     const cost = deck.cards[0].front[2] as TextShape;
     expect(cost.text).toBe("Cost: 5");
     expect(cost.x).toBe(19);
-    expect(cost.anchor).toBe("right");
+    expect(cost.anchor).toEqual({ h: "right", v: "top" }); // legacy alias ≡ top_right
     expect((deck.cards[6].front[2] as TextShape).text).toBe("Cost: 1");
   });
 
@@ -181,7 +189,7 @@ describe("demo fixture end to end (§3.9)", () => {
       size: 1.6,
       color: "white",
       code: "SWORDS",
-      anchor: "left",
+      anchor: { h: "left", v: "top" },
       style: "flat_dark", // no style: in the demo → the §3.3 default
     });
   });
@@ -198,7 +206,7 @@ describe("demo fixture end to end (§3.9)", () => {
 
   it("PlainBack: one full-card teal rect using the exact 28-unit height", () => {
     expect(deck.cards[0].back).toEqual([
-      { kind: "rect", x: 0, y: 0, width: 20, height: 28, color: "teal" },
+      { kind: "rect", x: 0, y: 0, width: 20, height: 28, color: "teal", anchor: { h: "left", v: "top" } },
     ]);
   });
 
@@ -257,10 +265,12 @@ describe("geometry resolution: full / half / middle, fractional y (⚑7†)", ()
     expect(text.size).toBe(10);
   });
 
-  it("`x: middle` wins over an explicit anchor (documented decision)", () => {
+  it("`x: middle` wins over an explicit anchor's horizontal word (documented decision)", () => {
     const text = geoProject().model.decks[0].cards[0].front[1] as TextShape;
     expect(text.x).toBe(10);
-    expect(text.anchor).toBe("middle"); // the written `anchor: right` loses
+    // The written `anchor: right` loses its horizontal say; its vertical
+    // component (top, from the legacy alias) stands (§3.4).
+    expect(text.anchor).toEqual({ h: "center", v: "top" });
   });
 
   it("an explicit integer y_units flows through (W003 warning, not an error)", () => {
@@ -311,7 +321,7 @@ describe("geometry resolution: full / half / middle, fractional y (⚑7†)", ()
   it("absent Back (◆16) → a single full-card white rect generated here", () => {
     const p = textProject("[t]", ["t: Text"], [{ t: "x" }]);
     expect(p.model.decks[0].cards[0].back).toEqual([
-      { kind: "rect", x: 0, y: 0, width: 20, height: 28, color: "white" },
+      { kind: "rect", x: 0, y: 0, width: 20, height: 28, color: "white", anchor: { h: "left", v: "top" } },
     ]);
   });
 });
@@ -341,7 +351,7 @@ describe("custom card sizes flow to the RenderModel (§3.4 M2)", () => {
     expect(deck.yUnits).toBe(30);
     // The synthetic default back spans the custom grid exactly (◆16).
     expect(deck.cards[0].back).toEqual([
-      { kind: "rect", x: 0, y: 0, width: 20, height: 30, color: "white" },
+      { kind: "rect", x: 0, y: 0, width: 20, height: 30, color: "white", anchor: { h: "left", v: "top" } },
     ]);
   });
 
@@ -435,6 +445,7 @@ describe("Image flows to the shape (§3.3 M2)", () => {
       height: 28,
       src: "img/dragon.png",
       fit: "contain",
+      anchor: { h: "left", v: "top" },
     });
   });
 
@@ -515,6 +526,134 @@ describe("Image auto dimension flows to the shape (§3.3)", () => {
   });
 });
 
+// -- nine-point anchors (§3.4, M3) --------------------------------------------
+
+describe("nine-point anchor flows to the shape (§3.4 M3)", () => {
+  const rectProject = (extra: string[]): ProjectResult =>
+    projectOf(
+      src(
+        ...sheetLines(["t: Text"]),
+        "Template: T",
+        "  Rectangle:",
+        "    x: 10",
+        "    y: 10",
+        "    width: 4",
+        "    height: 2",
+        "    color: teal",
+        ...extra.map((l) => `    ${l}`),
+        ...CARD_LINES,
+        "  Front: T",
+      ),
+      { Sh: [{ t: "x" }] },
+    );
+  const rectCard = (extra: string[]) => rectProject(extra).model.decks[0].cards[0];
+
+  it("a declared anchor reaches the shape NORMALIZED — x/y stay as authored (no baked offset)", () => {
+    const rect = rectCard(["anchor: bottom_right"]).front[0] as RectShape;
+    expect(rect.anchor).toEqual({ h: "right", v: "bottom" });
+    // Eval does NOT bake the offset: the renderer applies it (§3.4 — an
+    // Image `auto` box only resolves at load time, and every kind follows
+    // the same rule for consistency).
+    expect(rect.x).toBe(10);
+    expect(rect.y).toBe(10);
+  });
+
+  it("every shape kind materializes the top-left default when anchor: is omitted", () => {
+    const p = projectOf(
+      src(
+        ...sheetLines(["t: Text"]),
+        "Template: T",
+        "  Rectangle:",
+        "    x: 0",
+        "    y: 0",
+        "    width: 1",
+        "    height: 1",
+        "    color: teal",
+        "  Text:",
+        "    x: 0",
+        "    y: 2",
+        "    size: 1",
+        '    text: "a"',
+        "  TextBox:",
+        "    x: 0",
+        "    y: 4",
+        "    width: 5",
+        "    height: 2",
+        '    text: "b"',
+        "    size: 1",
+        "  Icon:",
+        "    x: 0",
+        "    y: 7",
+        "    size: 1",
+        '    code: "HEARTS"',
+        "  Image:",
+        "    x: 0",
+        "    y: 9",
+        "    width: 2",
+        "    height: 2",
+        '    src: "a.png"',
+        ...CARD_LINES,
+        "  Front: T",
+      ),
+      { Sh: [{ t: "x" }] },
+    );
+    const front = p.model.decks[0].cards[0].front;
+    expect(front).toHaveLength(5);
+    for (const shape of front) {
+      expect(shape.anchor, shape.kind).toEqual({ h: "left", v: "top" });
+    }
+  });
+
+  it("explicit default ≡ omitted — same contentHash (the fit/style precedent)", () => {
+    const omitted = rectCard([]).contentHash;
+    expect(rectCard(["anchor: top_left"]).contentHash).toBe(omitted);
+    // Reversed spelling of the same point too: normalization runs at check
+    // time, so the model (and the hash) can't tell spellings apart.
+    expect(rectCard(["anchor: left_top"]).contentHash).toBe(omitted);
+  });
+
+  it("bottom_right ≠ the default — anchors are visible content", () => {
+    expect(rectCard(["anchor: bottom_right"]).contentHash).not.toBe(rectCard([]).contentHash);
+  });
+
+  it("alias ≡ canonical on the DEMO: right ↔ top_right ↔ right_top give deep-equal models", () => {
+    // The demo fixture itself is untouched by M3 (byte-identical, `anchor:
+    // right` and all); respelling its one anchor canonically must change
+    // NOTHING — hashes included.
+    const base = compileProject(demoSource, demoRows());
+    expect(base.diagnostics).toEqual([]);
+    for (const spelling of ["top_right", "right_top"]) {
+      const variant = compileProject(
+        demoSource.replace("anchor: right", `anchor: ${spelling}`),
+        demoRows(),
+      );
+      expect(variant.diagnostics, spelling).toEqual([]);
+      expect(variant.model, spelling).toEqual(base.model);
+    }
+  });
+
+  it("x: middle + anchor: bottom_left → h center (sugar wins), v bottom (anchor's say)", () => {
+    const p = projectOf(
+      src(
+        ...sheetLines(["t: Text"]),
+        "Template: T",
+        "  Text:",
+        "    x: middle",
+        "    y: 26",
+        "    size: 1",
+        '    text: "footer"',
+        "    anchor: bottom_left",
+        ...CARD_LINES,
+        "  Front: T",
+      ),
+      { Sh: [{ t: "x" }] },
+    );
+    const text = p.model.decks[0].cards[0].front[0] as TextShape;
+    expect(text.x).toBe(10); // half of 20 X units
+    expect(text.anchor).toEqual({ h: "center", v: "bottom" });
+  });
+});
+
 // -- TextBox (§3.3, M3): the compiler is the wrapping authority --------------
 
 describe("TextBox evaluates to a wrapped TextBoxShape (§3.3 M3)", () => {
@@ -560,6 +699,7 @@ describe("TextBox evaluates to a wrapped TextBoxShape (§3.3 M3)", () => {
       size: 1,
       color: "black",
       align: "left",
+      anchor: { h: "left", v: "top" },
       lineHeight: 1.3,
       lines: ["aaa aaa aaa"], // fits an 18-unit box on one line
       clipped: false,
