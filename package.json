@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "next lint",
     "test": "vitest run",
-    "generate:dicier": "node scripts/generate-dicier-codes.mjs"
+    "generate:dicier": "node scripts/generate-dicier-codes.mjs",
+    "generate:geist-metrics": "node scripts/generate-geist-metrics.mjs"
   },
   "dependencies": {
     "@monaco-editor/react": "^4.6.0",

@@ -51,6 +51,85 @@ describe("string literals and interpolation (§3.5 ◆)", () => {
   });
 });
 
+describe("string escapes (§3.1 M3 — \\n and \\\\ only)", () => {
+  const partValues = (source: string): string[] =>
+    firstString(source).parts.map((p) => (p.kind === "text" ? p.value : `<${p.name}>`));
+
+  it("\\n lexes as a real newline character inside the text part", () => {
+    expect(partValues('x: "a\\nb"')).toEqual(["a\nb"]);
+    expect(lex('x: "a\\nb"').diagnostics).toEqual([]);
+  });
+
+  it("\\\\ lexes as one literal backslash", () => {
+    expect(partValues('x: "a\\\\b"')).toEqual(["a\\b"]);
+    expect(lex('x: "a\\\\b"').diagnostics).toEqual([]);
+  });
+
+  it("\\\\n is a literal backslash then the letter n — NOT a newline", () => {
+    expect(partValues('x: "a\\\\nb"')).toEqual(["a\\nb"]);
+    expect(lex('x: "a\\\\nb"').diagnostics).toEqual([]);
+  });
+
+  it("any other \\-sequence is E001 hinting the two valid escapes, kept literally", () => {
+    const { tokens, diagnostics } = lex('x: "a\\tb"');
+    expect(diagnostics).toHaveLength(1);
+    expect(diagnostics[0].code).toBe("E001");
+    expect(diagnostics[0].message).toContain('"\\t"');
+    expect(diagnostics[0].message).toContain("\\n");
+    expect(diagnostics[0].message).toContain("\\\\");
+    expect(diagnostics[0].range).toEqual({ startLine: 0, startCol: 5, endLine: 0, endCol: 7 });
+    const t = tokens.find((x) => x.kind === "string");
+    expect(t && t.kind === "string" && t.parts).toEqual([
+      { kind: "text", value: "a\\tb", range: expect.anything() },
+    ]);
+  });
+
+  it('\\" is E001 too — recovery keeps the backslash and the quote still closes', () => {
+    const { tokens, diagnostics } = lex('x: "a\\"');
+    expect(diagnostics).toHaveLength(1);
+    expect(diagnostics[0].message).toContain("only escapes");
+    const t = tokens.find((x) => x.kind === "string");
+    expect(t && t.kind === "string" && t.parts.map((p) => (p.kind === "text" ? p.value : ""))).toEqual(["a\\"]);
+  });
+
+  it("escapes interact with interpolation: text around a [ref] keeps its newline", () => {
+    expect(partValues('x: "Cost:\\n[cost] gold"')).toEqual(["Cost:\n", "<cost>", " gold"]);
+  });
+
+  it("\\[ does NOT escape a bracket — E001 for the escape, then [[ still works", () => {
+    // The only literal-[ escape is doubling (§3.5); a backslash before [ is
+    // an unknown escape AND the [ goes on to open a ref as usual.
+    const one = lex('x: "a\\[cost]"');
+    expect(one.diagnostics).toHaveLength(1);
+    expect(one.diagnostics[0].message).toContain("only escapes");
+    const t = one.tokens.find((x) => x.kind === "string");
+    expect(
+      t && t.kind === "string" && t.parts.map((p) => (p.kind === "text" ? p.value : `<${p.name}>`)),
+    ).toEqual(["a\\", "<cost>"]);
+    expect(partValues('x: "a\\n[[b"')).toEqual(["a\n[b"]);
+    expect(lex('x: "a\\n[[b"').diagnostics).toEqual([]);
+  });
+
+  it("consecutive escapes compose: \\n\\n is two newlines, \\\\\\n is backslash + newline", () => {
+    expect(partValues('x: "a\\n\\nb"')).toEqual(["a\n\nb"]);
+    expect(partValues('x: "a\\\\\\nb"')).toEqual(["a\\\nb"]);
+  });
+
+  it("a trailing backslash at end of line reports ONLY the unterminated string", () => {
+    const { tokens, diagnostics } = lex('x: "abc\\');
+    expect(diagnostics).toHaveLength(1);
+    expect(diagnostics[0].message.toLowerCase()).toContain("unterminated");
+    const t = tokens.find((x) => x.kind === "string");
+    expect(t && t.kind === "string" && t.parts.map((p) => (p.kind === "text" ? p.value : ""))).toEqual(["abc\\"]);
+  });
+
+  it("backslashes outside strings are unchanged: still an unexpected character", () => {
+    const { diagnostics } = lex("x: \\n");
+    expect(diagnostics).toHaveLength(1);
+    expect(diagnostics[0].message).toContain("Unexpected character");
+  });
+});
+
 describe("data references outside strings", () => {
   it("[count] is a single ref token — brackets always mean data refs (◆30)", () => {
     const { tokens, diagnostics } = lex("x: [count]");

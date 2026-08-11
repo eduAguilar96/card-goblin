@@ -117,6 +117,23 @@ export type ImageFit = (typeof IMAGE_FITS)[number];
 /** §3.3: `fit:` is optional; the default keeps the whole image visible. */
 export const DEFAULT_IMAGE_FIT: ImageFit = "contain";
 
+/**
+ * TextBox `overflow:` vocabulary (§3.3, M3): what happens when the wrapped
+ * text is taller than the box. Closed set like IMAGE_FITS — the checker's
+ * vocabulary, the completion values, and the wiki's overflow table (docFacts)
+ * all pin to this array.
+ */
+export const TEXTBOX_OVERFLOWS = ["clip", "shrink"] as const;
+
+export type TextBoxOverflow = (typeof TEXTBOX_OVERFLOWS)[number];
+
+/** §3.3: `overflow:` is optional; the default keeps the declared size and
+ * drops lines that don't fit. */
+export const DEFAULT_TEXTBOX_OVERFLOW: TextBoxOverflow = "clip";
+
+/** §3.3: `line_height:` is optional; baseline advance = line_height × size. */
+export const DEFAULT_LINE_HEIGHT = 1.3;
+
 /** Anchored top-left (§3.3). */
 export interface RectShape {
   kind: "rect";
@@ -178,8 +195,43 @@ export interface ImageShape {
   fit: ImageFit;
 }
 
+/**
+ * Wrapped multi-line text in a box (§3.3, M3 — §7.2). THE COMPILER IS THE
+ * WRAPPING AUTHORITY: the evaluator wraps against the generated Geist
+ * advance-widths table (wrap.ts / geist-metrics.ts) and the model carries the
+ * RESOLVED lines — the renderer never re-wraps, so preview and PDF agree by
+ * construction. `size` is the FINAL size after any `overflow: shrink` steps.
+ */
+export interface TextBoxShape {
+  kind: "textbox";
+  /** Top-left of the box, like Rectangle. */
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  /** Em height in card units — the final size (≤ the declared size when
+   * `shrunk`; the declared size is deliberately NOT carried, §7.2). */
+  size: number;
+  color: string;
+  /** How each line aligns within the box's width (§3.3: a box has `align`,
+   * never `anchor`); default `left`. */
+  align: TextAnchor;
+  /** Multiplier on `size` — baseline advance in units is lineHeight × size. */
+  lineHeight: number;
+  /** The resolved, wrapped lines, top to bottom. May contain empty strings
+   * (blank lines from consecutive hard breaks). */
+  lines: readonly string[];
+  /** True when lines were dropped to fit the box's height (§3.3 clip — also
+   * set after `shrink` exhausted its floor). Feeds the preview badge. */
+  clipped: boolean;
+  /** True when `overflow: shrink` reduced the size below the declared one.
+   * Carried explicitly because the badge must fire for shrink-that-fits and
+   * the shape does not carry the declared size to derive it from. */
+  shrunk: boolean;
+}
+
 /** In declaration order — later shapes draw on top (◆15). */
-export type Shape = RectShape | TextShape | IconShape | ImageShape;
+export type Shape = RectShape | TextShape | TextBoxShape | IconShape | ImageShape;
 
 // ---------------------------------------------------------------------------
 // Cards and decks (§3.7, §4.1)

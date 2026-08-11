@@ -6,7 +6,8 @@
  *   further identifier character — then it is a `#RRGGBB` color literal
  *   (matches the lexer's disambiguation exactly, §3.1).
  * - Strings are single-line with `[ref]` interpolation highlighted inside
- *   (`[[` is the literal-`[` escape, §3.5).
+ *   (`[[` is the literal-`[` escape, §3.5; `\n` and `\\` are the M3 §3.1
+ *   escapes — anything else after `\` paints invalid, matching E001).
  * - Block openers (`Enum: … Repeat: Front: Back:`) and expression keywords
  *   (`if then else and or not as case column`) are keywords; lowercase
  *   `key:` lines are property keys; other capitalized identifiers (enum
@@ -33,6 +34,7 @@ const BLOCK_OPENERS = [
   "Card",
   "Rectangle",
   "Text",
+  "TextBox",
   "Icon",
   "Image",
   "Repeat",
@@ -80,8 +82,13 @@ const monarchLanguage: languages.IMonarchLanguage = {
     ],
     string: [
       [/\[\[/, "string.escape"],
+      // `\n` and `\\` are the only backslash escapes (§3.1 M3); any other
+      // `\`-sequence is E001 in the lexer, painted invalid here to match.
+      [/\\[n\\]/, "string.escape"],
+      [/\\./, "string.invalid"],
+      [/\\/, "string.invalid"],
       [/\[[A-Za-z][A-Za-z0-9_]*\]/, "variable"],
-      [/[^"[]+/, "string"],
+      [/[^"[\\]+/, "string"],
       [/"/, { token: "string.quote", bracket: "@close", next: "@pop" }],
       [/\[/, "string"],
     ],

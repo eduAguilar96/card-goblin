@@ -22,6 +22,7 @@ npm install
 | `npm run lint` | ESLint (prints a `next lint` deprecation notice — needs migration before Next 16) |
 | `npm run build` | production build — must stay green with `/editor` static |
 | `npm run generate:dicier` | regenerate `src/lib/lang/dicier-codes.ts` from the vendored codes file |
+| `npm run generate:geist-metrics` | regenerate `src/lib/lang/geist-metrics.ts` from `src/app/fonts/GeistVF.woff` |
 
 ## Code map
 
@@ -31,6 +32,8 @@ src/lib/lang/            the compiler (pure, no React)
   parser.ts              error-tolerant recursive descent + Pratt expressions → AST
   check.ts               binder + type checker → diagnostics + Bindings
   eval.ts, generate.ts   evaluator + card-set generator → RenderModel
+  wrap.ts                TextBox wrap engine (pure; measures against geist-metrics.ts)
+  geist-metrics.ts       GENERATED Geist advance widths (npm run generate:geist-metrics)
   model.ts               RenderModel types (the renderer's entire input)
   index.ts               compileSource / compileProject entry points
   demoProject.ts         the seeded demo (kept byte-identical to DESIGN.md §3.9)

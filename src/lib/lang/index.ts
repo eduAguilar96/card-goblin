@@ -37,7 +37,15 @@ export { CSS_COLOR_NAMES } from "./css-colors";
 export { DICIER_CODES, DICIER_CODE_CATEGORIES } from "./dicier-codes";
 export { generateModel } from "./generate";
 export type { EditedRows, GenerateResult, SheetRows } from "./generate";
-export { DEFAULT_ICON_STYLE, DEFAULT_IMAGE_FIT, ICON_STYLES, IMAGE_FITS } from "./model";
+export {
+  DEFAULT_ICON_STYLE,
+  DEFAULT_IMAGE_FIT,
+  DEFAULT_LINE_HEIGHT,
+  DEFAULT_TEXTBOX_OVERFLOW,
+  ICON_STYLES,
+  IMAGE_FITS,
+  TEXTBOX_OVERFLOWS,
+} from "./model";
 export type {
   CardInstance,
   CardMeta,
@@ -55,8 +63,20 @@ export type {
   RenderModel,
   Shape,
   TextAnchor,
+  TextBoxOverflow,
+  TextBoxShape,
   TextShape,
 } from "./model";
+export {
+  GEIST_METRICS,
+  SHRINK_FLOOR,
+  SHRINK_STEP,
+  WIDTH_SAFETY_MARGIN,
+  layoutTextBox,
+  measureText,
+  wrapText,
+} from "./wrap";
+export type { FontMetrics, TextBoxLayout, TextBoxLayoutInput } from "./wrap";
 
 export interface CompileResult {
   program: Program;

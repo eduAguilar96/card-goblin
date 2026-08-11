@@ -27,9 +27,13 @@ import { DICIER_CODES } from "@/lib/lang/dicier-codes";
 import {
   DEFAULT_ICON_STYLE,
   DEFAULT_IMAGE_FIT,
+  DEFAULT_LINE_HEIGHT,
+  DEFAULT_TEXTBOX_OVERFLOW,
   ICON_STYLES,
   IMAGE_FITS,
+  TEXTBOX_OVERFLOWS,
 } from "@/lib/lang/model";
+import { SHRINK_FLOOR, SHRINK_STEP } from "@/lib/lang/wrap";
 import { REPEAT_CAP } from "@/lib/lang/eval";
 import { CARD_CAP } from "@/lib/lang/generate";
 import { KEYWORDS } from "@/lib/lang/lexer";
@@ -172,6 +176,21 @@ const NUMERIC_CLAIMS: {
     patterns: [/(\d[\d,]*)\s*DPI/g],
     expected: RASTER_DPI,
   },
+  {
+    label: "TextBox default line_height (× size)",
+    patterns: [/default is \*\*([\d.]+)\*\* × size/g],
+    expected: DEFAULT_LINE_HEIGHT,
+  },
+  {
+    label: "TextBox shrink floor (percent of the declared size)",
+    patterns: [/floor of \*\*(\d+)%\*\*/g],
+    expected: Math.round(SHRINK_FLOOR * 100),
+  },
+  {
+    label: "TextBox shrink step (percent)",
+    patterns: [/in (\d+)% steps/g],
+    expected: Math.round(SHRINK_STEP * 100),
+  },
 ];
 
 describe("numeric claims match their constants", () => {
@@ -293,6 +312,33 @@ describe("the image-fit table matches IMAGE_FITS", () => {
         /default/i.test(what),
         `"${fit}" default marking must match DEFAULT_IMAGE_FIT (${DEFAULT_IMAGE_FIT})`,
       ).toBe(fit === DEFAULT_IMAGE_FIT);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// TextBox overflow modes
+// ---------------------------------------------------------------------------
+
+describe("the overflow table matches TEXTBOX_OVERFLOWS", () => {
+  const text = pageText("templates-and-shapes");
+  /** `clip` → its What-it-does prose, from the table with an "overflow" header. */
+  const documented = new Map(
+    tableWithHeader(text, "overflow").rows.map(
+      (cells) => [plain(cells[0]), plain(cells[1] ?? "")] as const,
+    ),
+  );
+
+  it("documents every mode — a new mode can't ship undocumented", () => {
+    expect([...documented.keys()].sort()).toEqual([...TEXTBOX_OVERFLOWS].sort());
+  });
+
+  it("marks exactly the code's default mode as the default", () => {
+    for (const [mode, what] of documented) {
+      expect(
+        /default/i.test(what),
+        `"${mode}" default marking must match DEFAULT_TEXTBOX_OVERFLOW (${DEFAULT_TEXTBOX_OVERFLOW})`,
+      ).toBe(mode === DEFAULT_TEXTBOX_OVERFLOW);
     }
   });
 });

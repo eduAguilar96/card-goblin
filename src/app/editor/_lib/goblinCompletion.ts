@@ -25,11 +25,15 @@ import {
   CSS_COLOR_NAMES,
   DEFAULT_ICON_STYLE,
   DEFAULT_IMAGE_FIT,
+  DEFAULT_LINE_HEIGHT,
+  DEFAULT_TEXTBOX_OVERFLOW,
   DICIER_CODES,
   DICIER_CODE_CATEGORIES,
   ICON_STYLES,
   IMAGE_FITS,
+  SHRINK_FLOOR,
   SIZE_PRESETS,
+  TEXTBOX_OVERFLOWS,
   typeName,
 } from "@/lib/lang";
 import type { SchemaSnapshot } from "@/app/editor/_store/editorStore";
@@ -167,7 +171,7 @@ export interface CompletionResult {
  * position-specific (loop:) and handled where it is legal. */
 const EXPRESSION_KEYWORDS = ["if", "then", "else", "and", "or", "not"] as const;
 
-type ElementKind = "Rectangle" | "Text" | "Icon" | "Image";
+type ElementKind = "Rectangle" | "Text" | "TextBox" | "Icon" | "Image";
 type BlockKind = ElementKind | "Repeat" | "Card" | "Template" | "Sheet" | "Enum";
 
 /** §3.3 property tables — mirrors check.ts's private ELEMENT_SPECS (pinned by
@@ -187,6 +191,18 @@ const ELEMENT_KEYS: Record<ElementKind, { key: string; detail: string }[]> = {
     { key: "text", detail: "Text" },
     { key: "color", detail: "Color (optional, default black)" },
     { key: "anchor", detail: "left | middle | right (optional)" },
+  ],
+  TextBox: [
+    { key: "x", detail: "Number — units" },
+    { key: "y", detail: "Number — units" },
+    { key: "width", detail: "Number — units" },
+    { key: "height", detail: "Number — units" },
+    { key: "text", detail: "Text — wraps; \\n is a hard break" },
+    { key: "size", detail: "Number — em height in units" },
+    { key: "color", detail: "Color (optional, default black)" },
+    { key: "align", detail: "left | middle | right (optional)" },
+    { key: "line_height", detail: `number × size (optional, default ${DEFAULT_LINE_HEIGHT})` },
+    { key: "overflow", detail: `${TEXTBOX_OVERFLOWS.join(" | ")} (optional, default ${DEFAULT_TEXTBOX_OVERFLOW})` },
   ],
   Icon: [
     { key: "x", detail: "Number — units (or middle)" },
@@ -225,6 +241,7 @@ const CARD_KEYS: { key: string; detail: string }[] = [
 const ELEMENT_OPENERS: { key: string; detail: string }[] = [
   { key: "Rectangle", detail: "x y width height color" },
   { key: "Text", detail: "x y size text (color anchor)" },
+  { key: "TextBox", detail: "x y width height text size (color align line_height overflow)" },
   { key: "Icon", detail: "x y size code (color anchor)" },
   { key: "Image", detail: "x y width height src (fit)" },
   { key: "Repeat", detail: "<count expr> as <variable>" },
@@ -238,7 +255,7 @@ const TOP_LEVEL_OPENERS: { key: string; detail: string }[] = [
 ];
 
 const BLOCK_HEADER_RE =
-  /^(Enum|Sheet|Template|Card|Rectangle|Text|Icon|Image|Repeat|Front|Back)[ \t]*:[ \t]*(.*)$/;
+  /^(Enum|Sheet|Template|Card|Rectangle|TextBox|Text|Icon|Image|Repeat|Front|Back)[ \t]*:[ \t]*(.*)$/;
 const WORD_CHAR = /[A-Za-z0-9_]/;
 
 // ---------------------------------------------------------------------------
@@ -349,7 +366,13 @@ function scanAncestors(lines: string[], lineIndex: number, startIndent: number):
         if (asMatch) out.repeatVars.push(asMatch[1]);
         continue;
       }
-      if (kind === "Rectangle" || kind === "Text" || kind === "Icon" || kind === "Image") {
+      if (
+        kind === "Rectangle" ||
+        kind === "Text" ||
+        kind === "TextBox" ||
+        kind === "Icon" ||
+        kind === "Image"
+      ) {
         if (out.elementKind === null) out.elementKind = kind;
         continue;
       }
@@ -786,6 +809,7 @@ export function computeCompletions(
     switch (ancestors.innermost) {
       case "Rectangle":
       case "Text":
+      case "TextBox":
       case "Icon":
       case "Image":
         return result(keySuggestions(ELEMENT_KEYS[ancestors.innermost], colonFollows, false));
@@ -850,6 +874,7 @@ function valueSuggestions(
     case "Card":
     case "Rectangle":
     case "Text":
+    case "TextBox":
     case "Icon":
     case "Image":
       return NO_SUGGESTIONS;
@@ -927,12 +952,15 @@ function valueSuggestions(
     // ---- element properties ------------------------------------------------
     case "x": {
       // `middle` must be the WHOLE value (E007), and only Text/Icon have the
-      // anchor sugar (§3.4) — Rectangle and Image get plain geometry. An
-      // unknown block (broken code) keeps offering it. full/half are Numbers
-      // and stay legal mid-expression.
+      // anchor sugar (§3.4) — Rectangle, Image, and TextBox (which has
+      // align:, §3.3 M3) get plain geometry. An unknown block (broken code)
+      // keeps offering it. full/half are Numbers and stay legal
+      // mid-expression.
       const bareValue = /^[ \t]*[A-Za-z0-9_]*$/.test(afterColon);
       const middleOk =
-        ancestors.elementKind !== "Rectangle" && ancestors.elementKind !== "Image";
+        ancestors.elementKind !== "Rectangle" &&
+        ancestors.elementKind !== "Image" &&
+        ancestors.elementKind !== "TextBox";
       return [
         ...geometrySuggestions(middleOk && bareValue),
         ...expressionExtras(beforeWord, scope(), snapshot),
@@ -974,6 +1002,29 @@ function valueSuggestions(
         detail: "anchor",
         group: 0 as const,
       }));
+    case "align":
+      // TextBox only (§3.3, M3): where lines sit within the box's width.
+      return ["left", "middle", "right"].map((a) => ({
+        label: a,
+        insertText: a,
+        kind: "value" as const,
+        detail: a === "left" ? "align (the default)" : "align",
+        group: 0 as const,
+      }));
+    case "overflow":
+      // TextBox only (§3.3, M3): two modes, closed vocabulary.
+      return TEXTBOX_OVERFLOWS.map((o) => ({
+        label: o,
+        insertText: o,
+        kind: "value" as const,
+        detail:
+          o === DEFAULT_TEXTBOX_OVERFLOW
+            ? "drop lines that don't fit (the default)"
+            : `shrink the size (to a ${Math.round(SHRINK_FLOOR * 100)}% floor) until the text fits`,
+        group: 0 as const,
+      }));
+    case "line_height":
+      return NO_SUGGESTIONS; // positive number literal (× size)
     case "style":
       // Icon only (§3.3): the ten Dicier faces, closed vocabulary.
       return ICON_STYLES.map((s) => ({

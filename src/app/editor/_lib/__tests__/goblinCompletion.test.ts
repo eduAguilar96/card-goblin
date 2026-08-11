@@ -363,6 +363,16 @@ describe("property keys", () => {
     expect(byLabel(r, "fit").detail).toContain("contain | cover | stretch");
   });
 
+  it("TextBox keys include text/align/line_height/overflow (§3.3 M3)", () => {
+    const r = at(src("Template: T", "  TextBox:", "    ¦"));
+    expect(labels(r)).toEqual([
+      "x", "y", "width", "height", "text", "size", "color", "align", "line_height", "overflow",
+    ]);
+    expect(byLabel(r, "text").detail).toContain("hard break");
+    expect(byLabel(r, "line_height").detail).toContain("1.3");
+    expect(byLabel(r, "overflow").detail).toContain("clip | shrink");
+  });
+
   it("Card keys include properties (custom-size pair too) and Front/Back face lines", () => {
     const r = at(src("Card: M", "  ¦"));
     expect(labels(r)).toEqual([
@@ -378,7 +388,7 @@ describe("property keys", () => {
       src("Template: T", "  Repeat: 3 as i", "    ¦"),
     ]) {
       const r = at(doc);
-      expect(labels(r)).toEqual(["Rectangle", "Text", "Icon", "Image", "Repeat"]);
+      expect(labels(r)).toEqual(["Rectangle", "Text", "TextBox", "Icon", "Image", "Repeat"]);
       expect(byLabel(r, "Rectangle").insertText).toBe("Rectangle: ");
     }
   });
@@ -489,6 +499,24 @@ describe("value positions", () => {
     expect(byLabel(r, "cover").detail).toBe("image fit");
   });
 
+  it("align: offers exactly left/middle/right, default marked (§3.3 M3)", () => {
+    const r = at(src("Template: T", "  TextBox:", "    align: ¦"));
+    expect(labels(r)).toEqual(["left", "middle", "right"]);
+    expect(byLabel(r, "left").detail).toBe("align (the default)");
+    expect(byLabel(r, "middle").detail).toBe("align");
+  });
+
+  it("overflow: offers exactly clip/shrink, default marked (§3.3 M3)", () => {
+    const r = at(src("Template: T", "  TextBox:", "    overflow: ¦"));
+    expect(labels(r)).toEqual(["clip", "shrink"]);
+    expect(byLabel(r, "clip").detail).toContain("default");
+    expect(byLabel(r, "shrink").detail).toContain("60% floor");
+  });
+
+  it("line_height: stays silent — a positive number literal position", () => {
+    expect(at(src("Template: T", "  TextBox:", "    line_height: ¦")).suggestions).toEqual([]);
+  });
+
   it("src: is an expression position outside its string, silent inside (URLs)", () => {
     const outside = at(src("Template: T", "  Image:", "    src: ¦"));
     expect(labels(outside)).toContain("if");
@@ -499,6 +527,8 @@ describe("value positions", () => {
     expect(labels(at(src("Template: T", "  Icon:", "    x: ¦")))).toContain("middle");
     expect(labels(at(src("Template: T", "  Rectangle:", "    x: ¦")))).not.toContain("middle");
     expect(labels(at(src("Template: T", "  Image:", "    x: ¦")))).not.toContain("middle");
+    // TextBox has align:, never the x: middle sugar (§3.3 M3 — E007).
+    expect(labels(at(src("Template: T", "  TextBox:", "    x: ¦")))).not.toContain("middle");
   });
 
   it("middle is whole-value only (E007): dropped mid-expression, kept mid-word", () => {
@@ -537,11 +567,14 @@ describe("value positions", () => {
     expect(labels(at(src("Template: T", "  Image:", "    y: ¦")))).not.toContain("auto");
   });
 
-  it("auto stays Image-only: Rectangle width and Icon size never offer it", () => {
+  it("auto stays Image-only: Rectangle/TextBox width and Icon size never offer it", () => {
     expect(
       labels(at(src("Template: T", "  Rectangle:", "    width: ¦"))),
     ).not.toContain("auto");
     expect(labels(at(src("Template: T", "  Icon:", "    size: ¦")))).not.toContain("auto");
+    expect(
+      labels(at(src("Template: T", "  TextBox:", "    width: ¦"))),
+    ).not.toContain("auto");
   });
 
   it("auto must be the whole value — not offered mid-expression", () => {
@@ -777,6 +810,17 @@ describe("compiler pins (E008 probes)", () => {
     "    height: 12",
     '    src: "https://example.com/[name].png"',
     "    fit: cover",
+    "  TextBox:",
+    "    x: 2",
+    "    y: 17",
+    "    width: 16",
+    "    height: 8",
+    '    text: "Rules: [name]\\nDiscard after use."',
+    "    size: 1.1",
+    "    color: black",
+    "    align: middle",
+    "    line_height: 1.3",
+    "    overflow: shrink",
     "Template: BackT",
     "  Rectangle:",
     "    x: 0",
@@ -812,10 +856,11 @@ describe("compiler pins (E008 probes)", () => {
     const cardKeys = labels(at(src("Card: M", "  ¦")));
     const rectKeys = labels(at(src("Template: T", "  Rectangle:", "    ¦")));
     const textKeys = labels(at(src("Template: T", "  Text:", "    ¦")));
+    const textBoxKeys = labels(at(src("Template: T", "  TextBox:", "    ¦")));
     const iconKeys = labels(at(src("Template: T", "  Icon:", "    ¦")));
     const imageKeys = labels(at(src("Template: T", "  Image:", "    ¦")));
     for (const key of new Set([
-      ...cardKeys, ...rectKeys, ...textKeys, ...iconKeys, ...imageKeys,
+      ...cardKeys, ...rectKeys, ...textKeys, ...textBoxKeys, ...iconKeys, ...imageKeys,
     ])) {
       expect(PIN, `pin program must use suggested key '${key}:'`).toMatch(
         new RegExp(`^\\s+${key}: `, "m"),
@@ -838,7 +883,7 @@ describe("compiler pins (E008 probes)", () => {
     const cardKeys = labels(at(src("Card: M", "  ¦")));
     for (const key of cardMissing) expect(cardKeys).toContain(key);
 
-    for (const element of ["Rectangle", "Text", "Icon", "Image"] as const) {
+    for (const element of ["Rectangle", "Text", "TextBox", "Icon", "Image"] as const) {
       const missing = missingKeys(src("Template: T", `  ${element}:`, "    x: 1"));
       expect(missing.length).toBeGreaterThan(0);
       const offered = labels(at(src("Template: T", `  ${element}:`, "    ¦")));
@@ -851,6 +896,7 @@ describe("compiler pins (E008 probes)", () => {
       Card: labels(at(src("Card: M", "  ¦"))),
       Rectangle: labels(at(src("Template: T", "  Rectangle:", "    ¦"))),
       Text: labels(at(src("Template: T", "  Text:", "    ¦"))),
+      TextBox: labels(at(src("Template: T", "  TextBox:", "    ¦"))),
       Icon: labels(at(src("Template: T", "  Icon:", "    ¦"))),
       Image: labels(at(src("Template: T", "  Image:", "    ¦"))),
     };
@@ -869,7 +915,7 @@ describe("compiler pins (E008 probes)", () => {
         (d) =>
           d.code === "E008" && d.message.includes(`Unknown property '${key}:' on ${block}`),
       );
-    for (const el of ["Rectangle", "Text", "Icon", "Image"] as const) {
+    for (const el of ["Rectangle", "Text", "TextBox", "Icon", "Image"] as const) {
       const accepted = candidates.filter(
         (k) => !unknownOn(src("Template: T", `  ${el}:`, `    ${k}: 1`), k, el),
       );

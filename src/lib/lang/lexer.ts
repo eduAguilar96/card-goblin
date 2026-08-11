@@ -338,7 +338,15 @@ function lexRef(
   return close + 1;
 }
 
-/** Lex a double-quoted, single-line string with `[ref]` interpolation (§3.5). */
+/**
+ * Lex a double-quoted, single-line string with `[ref]` interpolation (§3.5)
+ * and the M3 escapes (§3.1): `\n` is a newline character and `\\` a literal
+ * backslash — the lexer's ONLY backslash escapes (besides `[[` for a literal
+ * `[`). Any other `\`-sequence is E001 with a hint listing the valid ones;
+ * recovery keeps the backslash as literal text, mirroring the malformed-`[`
+ * path. Hard breaks produced by `\n` are honored by TextBox and render as
+ * spaces in single-line Text (§3.3 — the evaluator's job, not ours).
+ */
 function lexString(
   line: string,
   li: number,
@@ -371,6 +379,33 @@ function lexString(
       flushText(j);
       out.push({ kind: "string", parts, range: range(start, j + 1) });
       return j + 1;
+    }
+    if (c === "\\") {
+      const next = line[j + 1];
+      if (next === "n") {
+        text += "\n"; // `\n` — a hard line break (§3.1 M3)
+        j += 2;
+        continue;
+      }
+      if (next === "\\") {
+        text += "\\"; // `\\` — a literal backslash
+        j += 2;
+        continue;
+      }
+      if (next !== undefined) {
+        // A `\` as the LAST character of the line is not reported here: the
+        // string is necessarily unterminated, and that diagnostic below owns
+        // the line (one mistake, one diagnostic).
+        diagnostics.push(
+          syntaxError(
+            `Unknown escape "\\${next}" — the only escapes are "\\n" (newline) and "\\\\" (backslash); for a literal "[" use "[["`,
+            range(j, j + 2),
+          ),
+        );
+      }
+      text += "\\"; // recover: treat as literal text
+      j++;
+      continue;
     }
     if (c === "[") {
       if (line[j + 1] === "[") {

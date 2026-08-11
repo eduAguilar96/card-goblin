@@ -44,6 +44,21 @@ const text: Shape = {
   anchor: "left",
 };
 
+const textbox: Shape = {
+  kind: "textbox",
+  x: 0,
+  y: 0,
+  width: 10,
+  height: 6,
+  size: 1,
+  color: "black",
+  align: "left",
+  lineHeight: 1.3,
+  lines: ["wrapped", "lines"],
+  clipped: false,
+  shrunk: false,
+};
+
 function spec(face: Shape[]): FaceRasterSpec {
   return { xUnits: 20, yUnits: 28, widthMm: 63.5, heightMm: 88.9, face };
 }
@@ -59,6 +74,21 @@ describe("iconFamiliesUsed", () => {
 
   it("no icons → no Dicier families requested at all", () => {
     expect(iconFamiliesUsed(new Map([["a:front", spec([text])]]))).toEqual([]);
+  });
+
+  it("a TextBox needs NO font additions — it draws in Geist, which every export embeds", () => {
+    // §3.3 M3: getFontEmbedCss starts from geistFamilies() unconditionally
+    // (Text shapes have always needed it), so wrapped text rides along free;
+    // the box must not request any Dicier family.
+    expect(iconFamiliesUsed(new Map([["a:front", spec([textbox, text])]]))).toEqual([]);
+    expect(imageUrlsUsed(new Map([["a:front", spec([textbox])]]))).toEqual([]);
+    // And the serialized face markup carries the resolved lines verbatim —
+    // the rasterizer re-renders CardFaceSvg, never re-wraps.
+    const markup = renderToStaticMarkup(
+      createElement(CardFaceSvg, { xUnits: 20, yUnits: 28, face: [textbox] }),
+    );
+    expect(markup).toContain(">wrapped</tspan>");
+    expect(markup).toContain(">lines</tspan>");
   });
 });
 

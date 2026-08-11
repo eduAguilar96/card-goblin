@@ -89,7 +89,7 @@ export interface FaceNode {
 
 export type TemplateNode = ElementNode | RepeatNode;
 
-export type ElementKind = "Rectangle" | "Text" | "Icon" | "Image";
+export type ElementKind = "Rectangle" | "Text" | "TextBox" | "Icon" | "Image";
 
 export interface ElementNode {
   kind: "Element";

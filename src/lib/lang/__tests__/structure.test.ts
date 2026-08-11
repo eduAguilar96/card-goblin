@@ -73,6 +73,13 @@ describe("reserved words are illegal as declared names (§3.1)", () => {
     reservedDiags("Enum: Image\n  case A\n");
     reservedDiags("Sheet: S\n  column Image: Number\n");
     reservedDiags("Card: C\n  loop: Suit as Image\n");
+    // TextBox joined in M3 — same everywhere-rejected guarantee, which
+    // follows from BLOCK_OPENERS membership alone (no per-site code).
+    reservedDiags("Enum: TextBox\n  case A\n");
+    reservedDiags("Sheet: S\n  column TextBox: Number\n");
+    reservedDiags("Template: TextBox\n");
+    reservedDiags("Card: C\n  loop: Suit as TextBox\n");
+    reservedDiags("Template: T\n  Repeat: 3 as TextBox\n    Icon:\n      x: 1\n");
   });
 
   it("rejects opener words as column names, keeping siblings", () => {
@@ -172,6 +179,44 @@ describe("declarations (§3.2)", () => {
 });
 
 describe("elements and Repeat (§3.3)", () => {
+  it("TextBox: parses as an element with label and properties (M3)", () => {
+    const p = parseClean(
+      [
+        "Template: T",
+        '  TextBox: "Rules"',
+        "    x: 1",
+        "    y: 1",
+        "    width: 10",
+        "    height: 6",
+        '    text: "line one\\nline two"',
+        "    size: 1",
+        "    align: middle",
+        "    line_height: 1.4",
+        "    overflow: shrink",
+        "",
+      ].join("\n"),
+    );
+    const tpl = p.declarations[0] as TemplateDecl;
+    const el = tpl.children[0] as ElementNode;
+    expect(el.element).toBe("TextBox");
+    expect(el.label).not.toBeNull();
+    expect(el.properties.map((prop) => prop.key.name)).toEqual([
+      "x", "y", "width", "height", "text", "size", "align", "line_height", "overflow",
+    ]);
+  });
+
+  it("capital TextBox: is an element while lowercase text: stays a property", () => {
+    const p = parseClean("Template: T\n  TextBox:\n    text: [name]\n");
+    const el = (p.declarations[0] as TemplateDecl).children[0] as ElementNode;
+    expect(el.element).toBe("TextBox");
+    expect(el.properties[0].key.name).toBe("text");
+  });
+
+  it("the unknown-element hint lists TextBox among the openers", () => {
+    const ds = diags("Template: T\n  Circle:\n    x: 1\n");
+    expect(ds[0].message).toContain("TextBox:");
+  });
+
   it("nested Repeats with children parse", () => {
     const p = parseClean(
       [

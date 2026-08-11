@@ -48,8 +48,8 @@ import type {
   TemplateNode,
 } from "./ast";
 import type { Diagnostic, Range, Severity } from "./diagnostics";
-import type { IconStyle, ImageFit } from "./model";
-import { ICON_STYLES, IMAGE_FITS } from "./model";
+import type { IconStyle, ImageFit, TextBoxOverflow } from "./model";
+import { ICON_STYLES, IMAGE_FITS, TEXTBOX_OVERFLOWS } from "./model";
 import { CSS_COLOR_NAMES } from "./css-colors";
 import { DICIER_CODES } from "./dicier-codes";
 
@@ -90,8 +90,14 @@ export type Resolution =
   | { kind: "colorName"; name: string }
   | { kind: "geometry"; keyword: "full" | "half" | "middle" }
   | { kind: "anchor"; keyword: "left" | "middle" | "right" }
+  /** TextBox `align:` (§3.3, M3): same three words as anchor, but a box
+   * aligns lines within its own width — a distinct kind so the evaluator
+   * can never confuse the two vocabularies. */
+  | { kind: "align"; keyword: "left" | "middle" | "right" }
   | { kind: "iconStyle"; style: IconStyle }
   | { kind: "imageFit"; fit: ImageFit }
+  /** TextBox `overflow:` (§3.3, M3): clip | shrink, resolved like fit. */
+  | { kind: "overflow"; value: TextBoxOverflow }
   /** Bare `auto` as the ENTIRE width:/height: value of an Image (§3.3): the
    * dimension derives from the art's intrinsic ratio at LOAD time, so the
    * model carries the keyword and the renderer/exporter resolve it. */
@@ -267,16 +273,24 @@ const ICON_STYLE_SET: ReadonlySet<string> = new Set(ICON_STYLES);
 /** Membership set over the §3.3 IMAGE_FITS vocabulary (three fit modes). */
 const IMAGE_FIT_SET: ReadonlySet<string> = new Set(IMAGE_FITS);
 
+/** Membership set over the §3.3 TEXTBOX_OVERFLOWS vocabulary (clip/shrink). */
+const TEXTBOX_OVERFLOW_SET: ReadonlySet<string> = new Set(TEXTBOX_OVERFLOWS);
+
 interface ElementSpec {
   required: readonly string[];
   optional: readonly string[];
 }
 
 /** §3.3 property tables. Text/Icon color defaults to black, anchor to left;
- * Icon style defaults to flat_dark, Image fit to contain (M2). */
+ * Icon style defaults to flat_dark, Image fit to contain (M2); TextBox
+ * align defaults to left, line_height to 1.3 × size, overflow to clip (M3). */
 const ELEMENT_SPECS: Record<ElementNode["element"], ElementSpec> = {
   Rectangle: { required: ["x", "y", "width", "height", "color"], optional: [] },
   Text: { required: ["x", "y", "size", "text"], optional: ["color", "anchor"] },
+  TextBox: {
+    required: ["x", "y", "width", "height", "text", "size"],
+    optional: ["color", "align", "line_height", "overflow"],
+  },
   Icon: { required: ["x", "y", "size", "code"], optional: ["color", "anchor", "style"] },
   Image: { required: ["x", "y", "width", "height", "src"], optional: ["fit"] },
 };
@@ -994,6 +1008,59 @@ class Checker {
           return;
         }
         this.error("E008", `anchor: must be left, middle, or right`, value.range);
+        return;
+      }
+      case "align": {
+        // TextBox only (ELEMENT_SPECS): the same three words as anchor, but
+        // recorded as its own kind — a box aligns lines within its width
+        // (§3.3, M3). Resolved by expected type like anchor; E008 otherwise.
+        if (value.kind === "Error") return;
+        if (
+          value.kind === "Identifier" &&
+          (value.name === "left" || value.name === "middle" || value.name === "right")
+        ) {
+          this.recordResolution(ctx, value, {
+            kind: "align",
+            keyword: value.name,
+          });
+          return;
+        }
+        this.error("E008", `align: must be left, middle, or right`, value.range);
+        return;
+      }
+      case "overflow": {
+        // TextBox only (ELEMENT_SPECS): a bare identifier from the closed
+        // clip/shrink vocabulary, resolved like fit (§3.3, M3).
+        if (value.kind === "Error") return;
+        if (value.kind === "Identifier" && TEXTBOX_OVERFLOW_SET.has(value.name)) {
+          this.recordResolution(ctx, value, {
+            kind: "overflow",
+            value: value.name as TextBoxOverflow,
+          });
+          return;
+        }
+        this.error(
+          "E008",
+          `overflow: must be ${TEXTBOX_OVERFLOWS.join(" or ")}`,
+          value.range,
+        );
+        return;
+      }
+      case "line_height": {
+        // TextBox only (ELEMENT_SPECS): a positive number LITERAL, like
+        // width_mm — line spacing is a layout constant, never data-driven
+        // (§3.3, M3). The evaluator reads the same literal shape directly,
+        // so accepting exactly this form here keeps the two in lockstep.
+        if (value.kind === "Error") return;
+        if (isPositiveNumberLiteral(value)) {
+          this.recordType(ctx, value, NUMBER);
+          return;
+        }
+        this.error(
+          "E008",
+          `line_height: must be a positive number literal (a multiplier on size:, e.g. line_height: 1.3)`,
+          value.range,
+        );
         return;
       }
       case "style": {

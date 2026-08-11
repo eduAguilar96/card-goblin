@@ -11,8 +11,11 @@ to read them now than to discover them three hours into a deck.
 
 ## Text
 
-- **Single line, no wrapping.** A `Text` shape is one line; long text runs off the
-  card rather than flowing. Break it into several `Text` shapes yourself.
+- **`Text` is one line by design** — long text runs off the card rather than
+  flowing. Wrapped, multi-line text is what
+  [`TextBox`](templates-and-shapes.md) is for.
+- **One look per box.** A `TextBox` wraps plain text in a single font, size, and
+  color — no bold runs or inline icons inside the flow yet.
 - **One font.** Text renders in the app's built-in font. Custom fonts aren't
   supported yet ([icons](icons.md) are their own font and do work).
 
@@ -28,10 +31,10 @@ to read them now than to discover them three hours into a deck.
 
 ## Persistence
 
-- **One save slot, this browser only.** Your project [autosaves](autosave.md) and
-  survives reloads, but there are no project files yet — nothing to export, import,
-  or sync between browsers — and two open editor tabs overwrite each other (the last
-  one to change wins).
+- **One save slot per browser.** Your project [autosaves](autosave.md) and survives
+  reloads, and [project files](project-files.md) cover backup and moving between
+  browsers — but the autosave slot is singular, so two open editor tabs overwrite
+  each other (the last one to change wins).
 
 ## Size caps
 

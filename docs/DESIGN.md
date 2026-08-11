@@ -73,7 +73,7 @@ Working name: **Goblin script**, file extension `.goblin` (cosmetic, revisit fre
 - **Continuation rule (◆23†):** only a **property line** (a lowercase key + `:`) may
   continue: its expression extends across subsequent lines while they are indented
   deeper than the key. Block headers (`Enum:`, `Sheet:`, `Template:`, `Card:`,
-  `Rectangle:`, `Text:`, `Icon:`, `Image:`, `Repeat:`, `Front:`, `Back:`) never continue —
+  `Rectangle:`, `Text:`, `TextBox:`, `Icon:`, `Image:`, `Repeat:`, `Front:`, `Back:`) never continue —
   their deeper-indented lines are children. Consequently a `Repeat:` count expression
   must fit on one line. Continuation is a parser-level rule; the lexer only reports
   indent levels.
@@ -81,9 +81,13 @@ Working name: **Goblin script**, file extension `.goblin` (cosmetic, revisit fre
 - **Identifiers:** `[A-Za-z][A-Za-z0-9_]*` — used for all declared names (⚑11).
 - **Literals:** numbers (`3`, `1.5`), strings (`"Cost: [cost]"` — see interpolation
   §3.5), colors (`#RRGGBB` anywhere; CSS names only in Color-typed positions, ◆21†).
+  **String escapes (M3 2026-08-10, §7.2):** `\n` is a newline and `\\` a literal
+  backslash — the lexer's only escapes besides `[[`; any other `\`-sequence is E001
+  with a hint listing the valid ones. Hard breaks are honored by `TextBox` and
+  render as spaces in single-line `Text` (§3.3).
 - **Reserved words (◆30†):** block openers (`Enum Sheet Template Card Rectangle Text
-  Icon Image Repeat Front Back` — `Image` added M2, 2026-08-09), declaration words
-  (`case column`), and expression
+  TextBox Icon Image Repeat Front Back` — `Image` added M2 2026-08-09, `TextBox`
+  added M3 2026-08-10), declaration words (`case column`), and expression
   structure (`if then else and or not as`). Everything else — including `count`,
   `size`, `sheet`, `loop`, `x`, `color`, `anchor`, `left`, `right`, `full`, `half`,
   `middle`, `auto`, size presets, and CSS color names — is an ordinary identifier
@@ -147,7 +151,8 @@ never referenced (⚑11).
 | Element | Properties | Notes |
 |---|---|---|
 | `Rectangle` | `x y width height color` | anchor: top-left |
-| `Text` | `x y size color text anchor` | single line (◆24); `size` = em height in units; default color `black`, default `anchor: left` |
+| `Text` | `x y size color text anchor` | single line (◆24); `size` = em height in units; default color `black`, default `anchor: left`. Newline characters in the resolved text render as spaces (M3 2026-08-10 — hard breaks belong to `TextBox`) |
+| `TextBox` | `x y width height text size color align line_height overflow` | (M3, agreed 2026-08-10 — §7.2) wrapped multi-line text in a box; ◆24 stays intact for `Text`. `x y width height text size` required; `color` (default `black`), `align: left \| middle \| right` (default `left` — a box aligns within its width, so it has `align`, never `anchor`, and `x: middle` stays Text/Icon-only, E007), `line_height` (positive number LITERAL, default 1.3, meaning × `size` — baseline advance in units is `line_height × size`), `overflow: clip \| shrink` (default `clip`) optional. **The compiler is the wrapping authority**: the evaluator wraps deterministically against a generated Geist advance-widths table (`geist-metrics.ts`, the dicier-codes pattern) with a 2% measurement safety margin, and the model carries the resolved `lines` — preview and PDF agree by construction. Wrap semantics: split on hard breaks (real `\n` in the resolved text — from the §3.1 escapes or from cell data) first; within a segment, greedy word-wrap on spaces (runs of spaces collapse at break points only; interior spacing is preserved); a single word wider than the box breaks mid-word rather than overflow horizontally. Vertical fit is `lines × line_height × size ≤ height`: `clip` keeps the last fully-fitting line and marks the box clipped; `shrink` retries at 5%-of-`size` steps down to a 60% floor, then clips at the floor — the shape carries the FINAL size. Clipped/shrunk boxes get a subtle per-card preview badge, never an error placeholder (⚑8) |
 | `Icon` | `x y size color code anchor style` | Dicier glyph; `code` is a Text expression; literal codes checked against the curated list — unknown literal = **W004 warning**, since the list is non-exhaustive (⚑10†). `style:` (M2, agreed 2026-08-09) is an optional bare identifier — `flat_dark` (default), `flat_light`, `flat_heavy`, `block_dark`, `block_light`, `block_heavy`, `round_dark`, `round_light`, `round_heavy`, `pixel` — resolved by expected type like `anchor:`; unknown value = E008. All ten faces are declared as `@font-face`; browsers fetch only the ones actually used |
 | `Image` | `x y width height src fit` | (M2, agreed 2026-08-09) raster art from a URL. `src:` is a Text expression (URLs may come from a sheet column); `fit:` optional bare identifier `contain` (default) \| `cover` \| `stretch`, realized via SVG `preserveAspectRatio`. **`auto` dimension (2026-08-10):** exactly one of `width:`/`height:` may be the bare keyword `auto` — that dimension derives from the other × the art's intrinsic aspect ratio (`width: full` + `height: auto` is the canonical "banner art" idiom). Both `auto` = E008. `auto` is resolved by the renderer/exporter at load time (intrinsic size is load-time knowledge — the pure model carries the keyword); pre-load placeholders use a square box, and `fit:` is inert alongside `auto` (the box matches the ratio by construction — allowed, documented, no diagnostic). Loading → subtle placeholder box; failed load → placeholder with warning styling (renderer-level state, **not** a D-code — the model stays pure, per-card isolation preserved). At PDF export, images load with `crossorigin=anonymous`; a load failure or canvas taint exports that image as a marked placeholder box and the modal warns "N images could not be embedded" before export — the deck always exports (⚑8 philosophy) |
 | `Repeat` | `Repeat: <Number expr> as <var>` (single line, ◆23†) | children emitted N times; `[var]` is the 0-based index (◆18), usable in any child expression; nests; cap 500/card (◆27) |
@@ -634,7 +639,7 @@ uploaded assets, sharing, docs site.
 - Multi-project management stays file-based in v1 (the autosave slot remains
   singular); accounts/cloud are later M3.
 
-### 7.2 Text wrapping (TextBox) — agreed direction (2026-08-10, spec §3.3 row TBD at implementation)
+### 7.2 Text wrapping (TextBox) — agreed direction (2026-08-10; shipped M3 2026-08-10 — normative spec in the §3.3 row and §3.1 escapes)
 
 - New **`TextBox`** element (Text stays single-line, ◆24 intact): x, y, width,
   height, text, size, color, `align: left|middle|right`, `line_height`
@@ -649,6 +654,25 @@ uploaded assets, sharing, docs site.
 - v1 wraps plain text (one font/size/color per box; interpolation substitutes
   before wrapping; breaks on spaces). Inline icons/bold (run-based layout) are
   a deliberate later design round.
+- **Float boundary note (review):** the vertical-fit formula
+  `lines × line_height × size ≤ height` is evaluated in IEEE floats exactly as
+  written, so a box authored to the exact product (e.g. `height: 3.9` for
+  3 × 1.3 × 1) may clip on the last line's ulp — author a hair of slack.
+- **Explicit line breaks (2026-08-10, user requirement):** hard breaks are
+  honored wherever a real newline character appears in the resolved text —
+  from cell data (paste/import can carry newlines; multi-line cell *editing*
+  in the grid is deferred) or from the new string-literal escapes: `\n` is a
+  newline, `\\` a literal backslash (the lexer's only escapes besides `[[`;
+  any other `\`-sequence is E001 with a hint). Hard breaks apply regardless
+  of wrapping; in single-line `Text`, newline characters render as spaces.
+- **Shipped detail (2026-08-10):** the shape carries an explicit `shrunk`
+  flag beside `clipped`. The badge must fire for a shrink that then FITS
+  (`clipped` false), and the shape deliberately drops the declared size
+  (it carries only the final one), so shrunk-ness is not derivable — it has
+  to travel. Rendering: one `<text>` per box with absolutely positioned
+  `<tspan>`s (x/y per line, no `dy` chaining), same `TEXT_ASCENT` realization
+  as `Text` (§3.4 m10); badge on the SHOWN face only, rendered by the preview
+  wrapper so PDF/landing markup stays badge-free.
 
 ## 8. Open questions (explicitly deferred, not blocking the slice)
 

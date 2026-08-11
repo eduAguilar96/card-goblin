@@ -14,7 +14,8 @@
  * - `and`/`or` short-circuit and `if` evaluates only the taken branch, so
  *   guards like `if [n] == 0 then 0 else 10 / [n]` cannot trip D008.
  * - `size:` uses the X axis for `full`/`half` (the axis of an em height is
- *   genuinely ambiguous; X keeps `size: half` independent of `y_units`).
+ *   genuinely ambiguous; X keeps `size: half` independent of `y_units`) —
+ *   on TextBox too, for consistency with Text.
  * - `x: middle` forces `anchor: middle` even when an explicit `anchor:` is
  *   also written — the sugar (§3.4: `x: half` + `anchor: middle`) wins.
  * - D005 fires only for COMPUTED icon codes: literal codes were already
@@ -39,9 +40,16 @@ import type {
   LoopCaseBinding,
   Shape,
   TextAnchor,
+  TextBoxOverflow,
 } from "./model";
-import { DEFAULT_ICON_STYLE, DEFAULT_IMAGE_FIT } from "./model";
+import {
+  DEFAULT_ICON_STYLE,
+  DEFAULT_IMAGE_FIT,
+  DEFAULT_LINE_HEIGHT,
+  DEFAULT_TEXTBOX_OVERFLOW,
+} from "./model";
 import { DICIER_CODES } from "./dicier-codes";
+import { GEIST_METRICS, layoutTextBox } from "./wrap";
 
 // ---------------------------------------------------------------------------
 // Values and errors
@@ -467,8 +475,46 @@ function evalElement(el: ElementNode, ctx: EvalContext): Shape {
         // Documented decision: `size` resolves full/half on the X axis.
         size: numberProp(el, "size", ctx, ctx.xUnits),
         color: colorProp(el, ctx, "black"), // default black (§3.3)
-        text: toText(evalExpr(requireProp(el, "text"), ctx, null)),
+        // §3.3 (M3): Text stays single-line (◆24) — newline characters in
+        // the resolved text (escapes or cell data) render as SPACES; hard
+        // breaks belong to TextBox. Resolved here so the model, the hash,
+        // and every renderer agree on the visible text.
+        text: toText(evalExpr(requireProp(el, "text"), ctx, null)).replace(/\n/g, " "),
         anchor,
+      };
+    }
+    case "TextBox": {
+      // §3.3 (M3, §7.2): THE COMPILER IS THE WRAPPING AUTHORITY — the box
+      // wraps here, against the generated Geist metrics, and the shape
+      // carries the resolved lines + the FINAL size, so preview and PDF
+      // agree by construction. Size resolves full/half on the X axis like
+      // Text; width on X, height on Y like Rectangle.
+      const width = numberProp(el, "width", ctx, ctx.xUnits);
+      const height = numberProp(el, "height", ctx, ctx.yUnits);
+      const size = numberProp(el, "size", ctx, ctx.xUnits);
+      const lineHeight = lineHeightOf(el);
+      const layout = layoutTextBox({
+        text: toText(evalExpr(requireProp(el, "text"), ctx, null)),
+        width,
+        height,
+        size,
+        lineHeight,
+        overflow: overflowOf(el, ctx),
+        metrics: GEIST_METRICS,
+      });
+      return {
+        kind: "textbox",
+        x: numberProp(el, "x", ctx, ctx.xUnits),
+        y: numberProp(el, "y", ctx, ctx.yUnits),
+        width,
+        height,
+        size: layout.size,
+        color: colorProp(el, ctx, "black"),
+        align: alignOf(el, ctx),
+        lineHeight,
+        lines: layout.lines,
+        clipped: layout.clipped,
+        shrunk: layout.shrunk,
       };
     }
     case "Icon": {
@@ -600,6 +646,40 @@ function styleOf(el: ElementNode, ctx: EvalContext): IconStyle {
   const res = ctx.card.resolutions.get(expr);
   if (res?.kind !== "iconStyle") return poisoned();
   return res.style;
+}
+
+/** TextBox `align:` (§3.3, M3): checker-blessed identifier or the left
+ * default — the same follow-the-resolution shape as anchorOf, reading the
+ * distinct `align` resolution kind (a box aligns within its width). */
+function alignOf(el: ElementNode, ctx: EvalContext): TextAnchor {
+  const expr = findProp(el, "align");
+  if (!expr) return "left"; // default (§3.3)
+  if (expr.kind !== "Identifier") return poisoned();
+  const res = ctx.card.resolutions.get(expr);
+  if (res?.kind !== "align") return poisoned();
+  return res.keyword;
+}
+
+/** TextBox `overflow:` (§3.3, M3): checker-blessed identifier or the clip
+ * default — the same follow-the-resolution shape as fitOf. */
+function overflowOf(el: ElementNode, ctx: EvalContext): TextBoxOverflow {
+  const expr = findProp(el, "overflow");
+  if (!expr) return DEFAULT_TEXTBOX_OVERFLOW;
+  if (expr.kind !== "Identifier") return poisoned();
+  const res = ctx.card.resolutions.get(expr);
+  if (res?.kind !== "overflow") return poisoned();
+  return res.value;
+}
+
+/** TextBox `line_height:` (§3.3, M3): the checker accepts exactly a positive
+ * number LITERAL (E008 otherwise), so the evaluator reads the same literal
+ * shape directly — no resolution entry needed, and any other shape here is
+ * a compile-poisoned context. Default 1.3 × size. */
+function lineHeightOf(el: ElementNode): number {
+  const expr = findProp(el, "line_height");
+  if (!expr) return DEFAULT_LINE_HEIGHT;
+  if (expr.kind !== "Number" || expr.value <= 0) return poisoned();
+  return expr.value;
 }
 
 /** Image `fit:` (§3.3, M2): checker-blessed identifier or the contain

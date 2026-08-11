@@ -12,6 +12,7 @@ import {
   type DataDiagnostic,
   type Deck,
   type ImageShape,
+  type TextBoxShape,
 } from "@/lib/lang";
 import { DEMO_PROJECT_ROWS, DEMO_PROJECT_SOURCE } from "@/lib/lang/demoProject";
 import {
@@ -22,8 +23,10 @@ import {
   IMAGE_PRESERVE_ASPECT,
   TEXT_ASCENT,
   cardSvgPropsEqual,
+  faceHasTextBoxOverflow,
   imagePlaceholderStroke,
   resolveImageBox,
+  textBoxLineX,
   type CardSvgProps,
   type ResolvedImages,
 } from "@/app/editor/_components/cardSvg";
@@ -249,6 +252,163 @@ describe("CardSVG: error placeholder", () => {
 });
 
 // -- the §4.2 memo comparator ------------------------------------------------
+
+describe("CardFaceSvg: TextBox shapes (§3.3 M3)", () => {
+  const boxShape = (over: Partial<TextBoxShape> = {}): TextBoxShape => ({
+    kind: "textbox",
+    x: 2,
+    y: 3,
+    width: 10,
+    height: 6,
+    size: 1.5,
+    color: "navy",
+    align: "left",
+    lineHeight: 1.3,
+    lines: ["first", "second", "third"],
+    clipped: false,
+    shrunk: false,
+    ...over,
+  });
+
+  const render = (shape: TextBoxShape): string =>
+    renderToStaticMarkup(<CardFaceSvg xUnits={20} yUnits={28} face={[shape]} />);
+
+  interface Tspan {
+    attrs: Record<string, string>;
+    content: string;
+  }
+  const tspans = (markup: string): Tspan[] =>
+    [...markup.matchAll(/<tspan\b([^>]*)>([^<]*)<\/tspan>/g)].map((m) => ({
+      attrs: parseAttrs(m[1]),
+      content: unescapeHtml(m[2]),
+    }));
+
+  it("renders ONE <text> in Geist with the model's size and color — never re-wrapping", () => {
+    const markup = render(boxShape());
+    const texts = [...markup.matchAll(/<text\b([^>]*)>/g)].map((m) => parseAttrs(m[1]));
+    expect(texts).toHaveLength(1);
+    expect(texts[0]["font-size"]).toBe("1.5");
+    expect(texts[0].fill).toBe("navy");
+    expect(texts[0]["font-family"]).toContain("--font-geist-sans");
+  });
+
+  it("each line is a tspan at baseline y + ascent·size + i·line_height·size", () => {
+    const markup = render(boxShape());
+    const lines = tspans(markup);
+    expect(lines.map((t) => t.content)).toEqual(["first", "second", "third"]);
+    for (const [i, t] of lines.entries()) {
+      expect(Number(t.attrs.y)).toBeCloseTo(3 + TEXT_ASCENT * 1.5 + i * 1.3 * 1.5, 12);
+      expect(t.attrs.x).toBe("2"); // align left → the box's left edge
+    }
+  });
+
+  it("align middle/right anchor each line at the box's center/right edge", () => {
+    const middle = render(boxShape({ align: "middle" }));
+    expect(parseAttrs(/<text\b([^>]*)>/.exec(middle)![1])["text-anchor"]).toBe("middle");
+    for (const t of tspans(middle)) expect(t.attrs.x).toBe("7"); // 2 + 10/2
+    const right = render(boxShape({ align: "right" }));
+    expect(parseAttrs(/<text\b([^>]*)>/.exec(right)![1])["text-anchor"]).toBe("end");
+    for (const t of tspans(right)) expect(t.attrs.x).toBe("12"); // 2 + 10
+  });
+
+  it("textBoxLineX is the pure form of that arithmetic", () => {
+    expect(textBoxLineX({ x: 2, width: 10 }, "left")).toBe(2);
+    expect(textBoxLineX({ x: 2, width: 10 }, "middle")).toBe(7);
+    expect(textBoxLineX({ x: 2, width: 10 }, "right")).toBe(12);
+  });
+
+  it("blank lines (consecutive hard breaks) render as empty tspans holding their slot", () => {
+    const markup = render(boxShape({ lines: ["a", "", "b"] }));
+    const lines = tspans(markup);
+    expect(lines.map((t) => t.content)).toEqual(["a", "", "b"]);
+    expect(Number(lines[2].attrs.y)).toBeCloseTo(3 + TEXT_ASCENT * 1.5 + 2 * 1.3 * 1.5, 12);
+  });
+
+  it("a compiled TextBox reaches the markup with its resolved lines (end to end)", () => {
+    const source = [
+      "Sheet: S",
+      "  column t: Text",
+      "Template: T",
+      "  TextBox:",
+      "    x: 1",
+      "    y: 1",
+      "    width: 18",
+      "    height: 10",
+      "    text: [t]",
+      "    size: 1",
+      "Card: C",
+      "  sheet: S",
+      "  size: poker",
+      "  x_units: 20",
+      "  y_units: auto",
+      "  Front: T",
+      "",
+    ].join("\n");
+    const result = compileProject(source, { S: [{ t: "one\ntwo" }] });
+    expect(result.diagnostics).toEqual([]);
+    const card = result.model.decks[0].cards[0];
+    const markup = renderToStaticMarkup(
+      <CardFaceSvg xUnits={20} yUnits={28} face={card.front} />,
+    );
+    expect(tspans(markup).map((t) => t.content)).toEqual(["one", "two"]);
+  });
+});
+
+describe("CardSVG: the clipped/shrunk badge (§3.3 M3)", () => {
+  const geometry = { xUnits: 20, yUnits: 28, widthMm: 63.5, heightMm: 88.9 };
+  const boxShape = (over: Partial<TextBoxShape>): TextBoxShape => ({
+    kind: "textbox",
+    x: 0,
+    y: 0,
+    width: 10,
+    height: 6,
+    size: 1,
+    color: "black",
+    align: "left",
+    lineHeight: 1.3,
+    lines: ["a"],
+    clipped: false,
+    shrunk: false,
+    ...over,
+  });
+
+  const render = (face: TextBoxShape[], error?: { diagnostics: DataDiagnostic[] }): string =>
+    renderToStaticMarkup(
+      <CardSVG {...geometry} face={face} contentHash="x" error={error} />,
+    );
+
+  it("a clipped box shows the subtle badge; a clean one doesn't", () => {
+    expect(render([boxShape({ clipped: true })])).toContain("data-textbox-overflow");
+    expect(render([boxShape({})])).not.toContain("data-textbox-overflow");
+  });
+
+  it("a shrunk-but-fitting box badges too — shrinking is a visible intervention", () => {
+    expect(render([boxShape({ shrunk: true, size: 0.8 })])).toContain(
+      "data-textbox-overflow",
+    );
+  });
+
+  it("faceHasTextBoxOverflow is the pure trigger: any textbox, clipped OR shrunk", () => {
+    expect(faceHasTextBoxOverflow([boxShape({})])).toBe(false);
+    expect(faceHasTextBoxOverflow([boxShape({ clipped: true })])).toBe(true);
+    expect(faceHasTextBoxOverflow([boxShape({ shrunk: true })])).toBe(true);
+    expect(faceHasTextBoxOverflow(dragonRock.front)).toBe(false); // no boxes at all
+  });
+
+  it("error placeholders never badge — the placeholder owns that surface (⚑8)", () => {
+    const markup = render([], {
+      diagnostics: [{ code: "D002", message: "bad cell" }],
+    });
+    expect(markup).not.toContain("data-textbox-overflow");
+  });
+
+  it("the badge never reaches CardFaceSvg — PDF and landing markup stay clean", () => {
+    const markup = renderToStaticMarkup(
+      <CardFaceSvg xUnits={20} yUnits={28} face={[boxShape({ clipped: true })]} />,
+    );
+    expect(markup).not.toContain("data-textbox-overflow");
+  });
+});
 
 describe("CardFaceSvg: Image shapes (§3.3 M2)", () => {
   const imageShape = (fit: ImageShape["fit"]): ImageShape => ({

@@ -74,6 +74,24 @@ describe("Text coercions (§3.5 ◆†)", () => {
   });
 });
 
+describe("newlines in single-line Text (§3.3 M3 — hard breaks belong to TextBox)", () => {
+  it("a \\n escape in a Text literal renders as a space", () => {
+    expect(text('"a\\nb"')).toBe("a b");
+  });
+
+  it("newline characters in CELL data render as spaces too", () => {
+    expect(text("[t]", { rows: [{ n: "1", t: "x\ny" }] })).toBe("x y");
+  });
+
+  it("consecutive newlines become one space EACH — replaced, not collapsed", () => {
+    expect(text('"a\\n\\nb"')).toBe("a  b");
+  });
+
+  it("a literal backslash-n (\\\\n) is untouched — it never was a newline", () => {
+    expect(text('"a\\\\nb"')).toBe("a\\nb");
+  });
+});
+
 describe("string interpolation (§3.5)", () => {
   it("substitutes refs with Text coercions", () => {
     expect(text('"Cost: [n]"', { rows: [{ n: "5", t: "x" }] })).toBe("Cost: 5");

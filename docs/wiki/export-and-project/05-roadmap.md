@@ -40,12 +40,18 @@ control and PDF embedding. See
 moving between browsers, and keeping more than one project. See
 [Project files](project-files.md).
 
+**Text wrapping.** The `TextBox` element: multi-line text that wraps in the
+compiler itself, so the preview and the PDF always agree — with hard breaks
+(`\n` and newlines in cells), alignment, and clip/shrink overflow control. See
+[Templates & shapes](templates-and-shapes.md).
+
 ## Further out
 
 - **Accounts and sharing** — projects that live in the cloud and decks you can
   share by link, past today's [file-based story](project-files.md).
 - **Uploaded assets** — your own images and fonts, stored with the project.
-- **Text wrapping** — multi-line text boxes, which need a real layout engine.
+- **Rich text in boxes** — bold runs and inline icons inside a `TextBox`
+  (run-based layout, a deliberate later design round).
 
 ## Open questions
 

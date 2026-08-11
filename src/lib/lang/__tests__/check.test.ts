@@ -9,7 +9,7 @@ import { describe, expect, it } from "vitest";
 import type { DataRef, ElementNode, Program, RepeatNode, TemplateDecl } from "../ast";
 import type { CheckResult } from "../check";
 import { check } from "../check";
-import { compileSource, ICON_STYLES, IMAGE_FITS } from "../index";
+import { compileSource, ICON_STYLES, IMAGE_FITS, TEXTBOX_OVERFLOWS } from "../index";
 import type { Diagnostic } from "../diagnostics";
 import { parse } from "../parser";
 
@@ -831,6 +831,171 @@ describe("Image auto dimension (§3.3)", () => {
 });
 
 // -- custom card sizes (§3.4, M2) --------------------------------------------
+
+describe("TextBox (§3.3 M3)", () => {
+  const BOX_BASE = [
+    "x: 1",
+    "y: 1",
+    "width: 10",
+    "height: 6",
+    'text: "some rules text"',
+    "size: 1",
+  ];
+
+  /** The resolution recorded for the given property of T's TextBox. */
+  function resolutionOf(source: string, key: string) {
+    const result = checkOf(source);
+    const tpl = result.bindings.templates.get("T") as TemplateDecl;
+    const prop = (tpl.children[0] as ElementNode).properties.find(
+      (p) => p.key.name === key,
+    )!;
+    return result.bindings.cards[0].resolutions.get(prop.value as never);
+  }
+
+  it("accepts the full property set and records align + overflow resolutions", () => {
+    const source = withElement("TextBox:", [
+      ...BOX_BASE,
+      "color: navy",
+      "align: middle",
+      "line_height: 1.5",
+      "overflow: shrink",
+    ]);
+    expect(diagsOf(source)).toEqual([]);
+    expect(resolutionOf(source, "align")).toEqual({ kind: "align", keyword: "middle" });
+    expect(resolutionOf(source, "overflow")).toEqual({ kind: "overflow", value: "shrink" });
+  });
+
+  it("every align keyword and every overflow mode resolves", () => {
+    for (const align of ["left", "middle", "right"]) {
+      const source = withElement("TextBox:", [...BOX_BASE, `align: ${align}`]);
+      expect(diagsOf(source), align).toEqual([]);
+      expect(resolutionOf(source, "align")).toEqual({ kind: "align", keyword: align });
+    }
+    for (const overflow of TEXTBOX_OVERFLOWS) {
+      const source = withElement("TextBox:", [...BOX_BASE, `overflow: ${overflow}`]);
+      expect(diagsOf(source), overflow).toEqual([]);
+      expect(resolutionOf(source, "overflow")).toEqual({ kind: "overflow", value: overflow });
+    }
+  });
+
+  it("all optionals may be omitted — defaults are the evaluator's business", () => {
+    expect(codesOf(withElement("TextBox:", BOX_BASE))).toEqual([]);
+  });
+
+  it("required-property matrix: dropping any one of x/y/width/height/text/size is E008", () => {
+    for (let i = 0; i < BOX_BASE.length; i++) {
+      const key = BOX_BASE[i].split(":")[0];
+      const ds = diagsOf(withElement("TextBox:", BOX_BASE.filter((_, j) => j !== i)));
+      expect(ds.map((d) => d.code), key).toEqual(["E008"]);
+      expect(ds[0].message).toBe(`TextBox is missing required property '${key}:'`);
+    }
+  });
+
+  it("an unknown align is E008 naming the vocabulary", () => {
+    const ds = diagsOf(withElement("TextBox:", [...BOX_BASE, "align: justified"]));
+    expect(ds.map((d) => d.code)).toEqual(["E008"]);
+    expect(ds[0].message).toBe("align: must be left, middle, or right");
+  });
+
+  it("align must be a bare identifier — strings and expressions are E008", () => {
+    for (const bad of ['align: "middle"', "align: 1", "align: 1 + 1"]) {
+      const ds = diagsOf(withElement("TextBox:", [...BOX_BASE, bad]));
+      expect(ds.map((d) => d.code), bad).toEqual(["E008"]);
+    }
+  });
+
+  it("an unknown overflow is E008 naming the closed vocabulary", () => {
+    const ds = diagsOf(withElement("TextBox:", [...BOX_BASE, "overflow: hide"]));
+    expect(ds.map((d) => d.code)).toEqual(["E008"]);
+    expect(ds[0].message).toBe("overflow: must be clip or shrink");
+  });
+
+  it("line_height accepts positive number literals only (a layout constant)", () => {
+    expect(codesOf(withElement("TextBox:", [...BOX_BASE, "line_height: 1.15"]))).toEqual([]);
+    for (const bad of [
+      "line_height: 0",
+      "line_height: 0 - 1",
+      "line_height: 1 + 0.3",
+      "line_height: [cost]",
+      'line_height: "1.3"',
+    ]) {
+      const ds = diagsOf(withElement("TextBox:", [...BOX_BASE, bad]));
+      expect(ds.map((d) => d.code), bad).toEqual(["E008"]);
+      expect(ds[0].message).toContain("positive number literal");
+    }
+  });
+
+  it("x: middle is E007 on TextBox — it has align:, never the anchor sugar", () => {
+    const ds = diagsOf(
+      withElement("TextBox:", ["x: middle", ...BOX_BASE.slice(1)]),
+    );
+    expect(ds.map((d) => d.code)).toEqual(["E007"]);
+    expect(ds[0].message).toContain("Text or Icon");
+  });
+
+  it("width: auto stays Image-only — E007 on TextBox", () => {
+    const ds = diagsOf(
+      withElement("TextBox:", ["x: 1", "y: 1", "width: auto", ...BOX_BASE.slice(3)]),
+    );
+    expect(ds.map((d) => d.code)).toEqual(["E007"]);
+    expect(ds[0].message).toContain("Image");
+  });
+
+  it("anchor on TextBox and align on Text are unknown properties (E008)", () => {
+    const anchored = diagsOf(withElement("TextBox:", [...BOX_BASE, "anchor: middle"]));
+    expect(anchored.map((d) => d.code)).toEqual(["E008"]);
+    expect(anchored[0].message).toBe("Unknown property 'anchor:' on TextBox");
+    const aligned = diagsOf(
+      withElement("Text:", [...TEXT_BASE, 'text: "t"', "align: middle"]),
+    );
+    expect(aligned.map((d) => d.code)).toEqual(["E008"]);
+    expect(aligned[0].message).toBe("Unknown property 'align:' on Text");
+  });
+
+  it("geometry keywords resolve in TextBox geometry positions (§3.4)", () => {
+    expect(
+      codesOf(
+        withElement("TextBox:", [
+          "x: 0",
+          "y: 0",
+          "width: full",
+          "height: half",
+          'text: "t"',
+          "size: half",
+        ]),
+      ),
+    ).toEqual([]);
+  });
+
+  it("text: takes the §3.5 coercions — a Number column is legal, a color name is not", () => {
+    expect(codesOf(withElement("TextBox:", [...BOX_BASE.slice(0, 4), "text: [cost]", "size: 1"]))).toEqual([]);
+    // ◆21†: CSS names resolve only in Color positions — bare `red` in a
+    // text: position is an unknown name, exactly as on Text.
+    expect(codesOf(withElement("TextBox:", [...BOX_BASE.slice(0, 4), "text: red", "size: 1"]))).toEqual(["E002"]);
+  });
+
+  it("duplicate TextBox properties are E005 like any element's", () => {
+    const ds = diagsOf(withElement("TextBox:", [...BOX_BASE, "align: left", "align: right"]));
+    expect(ds.map((d) => d.code)).toEqual(["E005"]);
+  });
+
+  it("a TextBox in an unused template still gets structural checks (W002 path)", () => {
+    const ds = diagsOf(
+      src(
+        "Template: Lonely",
+        "  TextBox:",
+        "    x: 1",
+        "    y: 1",
+        "    width: 5",
+        '    text: "t"',
+        "    size: 1",
+        "    overflow: sideways",
+      ),
+    );
+    // Missing height (E008), unknown overflow (E008), and the W002.
+    expect(ds.map((d) => d.code).sort()).toEqual(["E008", "E008", "W002"]);
+  });
+});
 
 describe("custom card sizes (§3.4 M2)", () => {
   const REST = ["x_units: 20", "y_units: auto", "Front: T"];

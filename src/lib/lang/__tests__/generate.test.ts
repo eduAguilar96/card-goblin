@@ -15,9 +15,10 @@ import type {
   ProjectResult,
   RectShape,
   SheetRows,
+  TextBoxShape,
   TextShape,
 } from "../index";
-import { compileProject, generateModel } from "../index";
+import { GEIST_METRICS, compileProject, generateModel, measureText } from "../index";
 import { parse } from "../parser";
 
 const demoSource = readFileSync(
@@ -511,6 +512,159 @@ describe("Image auto dimension flows to the shape (§3.3)", () => {
     const card = result.model.decks[0].cards[0];
     expect(card.front).toEqual([]);
     expect(card.error?.diagnostics[0].code).toBe("D000");
+  });
+});
+
+// -- TextBox (§3.3, M3): the compiler is the wrapping authority --------------
+
+describe("TextBox evaluates to a wrapped TextBoxShape (§3.3 M3)", () => {
+  /** One TextBox on a poker/20 card (X axis = 20 units, size 1 default),
+   * text from the `t` column so cell-data newlines can be probed. */
+  const boxProject = (
+    props: string[],
+    cell = "aaa aaa aaa",
+    text = "text: [t]",
+  ): ProjectResult =>
+    compileProject(
+      src(
+        ...sheetLines(["t: Text"]),
+        "Template: T",
+        "  TextBox:",
+        "    x: 2",
+        "    y: 3",
+        `    ${text}`,
+        ...props.map((l) => `    ${l}`),
+        ...CARD_LINES,
+        "  Front: T",
+      ),
+      { Sh: [{ t: cell }] },
+    );
+
+  const boxOf = (result: ProjectResult): TextBoxShape => {
+    expect(result.diagnostics.filter((d) => d.severity === "error")).toEqual([]);
+    const card = result.model.decks[0].cards[0];
+    expect(card.error).toBeUndefined();
+    return card.front[0] as TextBoxShape;
+  };
+
+  const WIDE = ["width: 18", "height: 20", "size: 1"];
+
+  it("materializes every default: black, left, 1.3, unclipped — and geometry verbatim", () => {
+    const shape = boxOf(boxProject(WIDE));
+    expect(shape).toEqual({
+      kind: "textbox",
+      x: 2,
+      y: 3,
+      width: 18,
+      height: 20,
+      size: 1,
+      color: "black",
+      align: "left",
+      lineHeight: 1.3,
+      lines: ["aaa aaa aaa"], // fits an 18-unit box on one line
+      clipped: false,
+      shrunk: false,
+    });
+  });
+
+  it("declared color/align/line_height reach the shape", () => {
+    const shape = boxOf(
+      boxProject([...WIDE, "color: navy", "align: right", "line_height: 1.5"]),
+    );
+    expect(shape.color).toBe("navy");
+    expect(shape.align).toBe("right");
+    expect(shape.lineHeight).toBe(1.5);
+  });
+
+  it("geometry keywords resolve per axis: width full = 20 (X), height half = 14 (Y), size on X", () => {
+    const shape = boxOf(
+      boxProject(["width: full", "height: half", "size: half"], "aaa"),
+    );
+    expect(shape.width).toBe(20);
+    expect(shape.height).toBe(14); // poker@20 → 28 y-units; half = 14
+    expect(shape.size).toBe(10); // documented decision: size uses the X axis
+  });
+
+  it("wraps against the real Geist metrics: a 3-unit box breaks 'aaa aaa aaa' per word", () => {
+    // Geist 'a' advances 570/1000 em, space 250: "aaa" measures ~1.74 units
+    // at size 1 and "aaa aaa" ~3.74 — so each word takes a line, spaces
+    // collapsing at the breaks. Deterministic because the metrics table is
+    // committed (metrics.test.ts pins regeneration).
+    const shape = boxOf(boxProject(["width: 3", "height: 20", "size: 1"]));
+    expect(shape.lines).toEqual(["aaa", "aaa", "aaa"]);
+    for (const line of shape.lines) {
+      expect(measureText(line, shape.size, GEIST_METRICS)).toBeLessThanOrEqual(3);
+    }
+    expect(shape.clipped).toBe(false);
+  });
+
+  it("hard breaks arrive from string-literal escapes (§3.1)", () => {
+    const shape = boxOf(
+      boxProject(WIDE, "unused", 'text: "one\\ntwo\\n\\nfour"'),
+    );
+    expect(shape.lines).toEqual(["one", "two", "", "four"]);
+  });
+
+  it("hard breaks arrive from CELL data — a newline in a cell is data, not escaping", () => {
+    const shape = boxOf(boxProject(WIDE, "first\nsecond"));
+    expect(shape.lines).toEqual(["first", "second"]);
+  });
+
+  it("interpolation substitutes BEFORE wrapping — cell newlines survive inside a literal", () => {
+    const shape = boxOf(boxProject(WIDE, "x\ny", 'text: "pre [t] post"'));
+    expect(shape.lines).toEqual(["pre x", "y post"]);
+  });
+
+  it("clip: keeps the last fully fitting line, marks the box, keeps the size", () => {
+    // 3 wrapped lines × 1.3 × 1 = 3.9; height 2 fits one line.
+    const shape = boxOf(boxProject(["width: 3", "height: 2", "size: 1"]));
+    expect(shape.lines).toEqual(["aaa"]);
+    expect(shape.clipped).toBe(true);
+    expect(shape.shrunk).toBe(false);
+    expect(shape.size).toBe(1);
+  });
+
+  it("shrink: converges to the first fitting step, re-wrapping as it goes", () => {
+    // At size 1 the 3-unit box holds one "aaa" per line (3 lines — too tall
+    // for height 2). At 0.8 two words fit a line but 2 × 1.3 × 0.8 > 2;
+    // 0.75 fits both ways → FINAL size 0.75, two re-wrapped lines.
+    const shape = boxOf(
+      boxProject(["width: 3", "height: 2", "size: 1", "overflow: shrink"]),
+    );
+    expect(shape.size).toBe(0.75);
+    expect(shape.lines).toEqual(["aaa aaa", "aaa"]);
+    expect(shape.shrunk).toBe(true);
+    expect(shape.clipped).toBe(false);
+  });
+
+  it("shrink bottoms out at the 60% floor and clips there", () => {
+    const shape = boxOf(
+      boxProject(["width: 3", "height: 1", "size: 1", "overflow: shrink"]),
+    );
+    expect(shape.size).toBe(0.6);
+    expect(shape.shrunk).toBe(true);
+    expect(shape.clipped).toBe(true);
+    expect(shape.lines).toEqual(["aaa aaa"]); // one 0.78-unit line fits height 1
+  });
+
+  it("every content knob changes the contentHash: text, width, align, line_height, clipping", () => {
+    const base = boxProject(WIDE).model.decks[0].cards[0];
+    const variants = [
+      boxProject(WIDE, "different text"),
+      boxProject(["width: 17", ...WIDE.slice(1)]),
+      boxProject([...WIDE, "align: middle"]),
+      boxProject([...WIDE, "line_height: 1.4"]),
+      boxProject(["width: 3", "height: 2", "size: 1"]), // clips
+    ];
+    for (const variant of variants) {
+      expect(variant.model.decks[0].cards[0].contentHash).not.toBe(base.contentHash);
+    }
+  });
+
+  it("two identical projects hash identically — wrapping is deterministic", () => {
+    const a = boxProject(["width: 3", "height: 2", "size: 1", "overflow: shrink"]);
+    const b = boxProject(["width: 3", "height: 2", "size: 1", "overflow: shrink"]);
+    expect(a.model.decks[0].cards[0].contentHash).toBe(b.model.decks[0].cards[0].contentHash);
   });
 });
 

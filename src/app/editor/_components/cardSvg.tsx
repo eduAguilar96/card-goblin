@@ -32,6 +32,7 @@ import type {
   ImageShape,
   Shape,
   TextAnchor,
+  TextBoxShape,
 } from "@/lib/lang";
 
 // ---------------------------------------------------------------------------
@@ -437,6 +438,8 @@ function renderShape(shape: Shape, index: number, images?: ResolvedImages): Reac
           {shape.text}
         </text>
       );
+    case "textbox":
+      return renderTextBox(shape, index);
     case "icon":
       // The code IS the text content: known codes ligate into glyphs; an
       // unknown code deliberately stays raw text — that failed ligature is
@@ -456,6 +459,59 @@ function renderShape(shape: Shape, index: number, images?: ResolvedImages): Reac
         </text>
       );
   }
+}
+
+// ---------------------------------------------------------------------------
+// TextBox (§3.3, M3)
+// ---------------------------------------------------------------------------
+
+/** Where a line's x sits (and which SVG text-anchor realizes it) for each
+ * TextBox `align:` — left edge / center / right edge of the BOX, not the
+ * card (§3.3: a box aligns lines within its own width). Pure and exported
+ * for the markup tests. */
+export function textBoxLineX(box: { x: number; width: number }, align: TextAnchor): number {
+  if (align === "middle") return box.x + box.width / 2;
+  if (align === "right") return box.x + box.width;
+  return box.x;
+}
+
+/**
+ * A wrapped text box: ONE `<text>` element per box (a single DOM node keeps
+ * the box inspectable as a unit), with one absolutely positioned `<tspan>`
+ * per resolved line — explicit x/y on every tspan rather than dy chaining,
+ * so each line's position is independent, testable arithmetic (documented
+ * decision). The model already wrapped and clip/shrunk (§7.2: the compiler
+ * is the wrapping authority) — this function draws lines, nothing more.
+ * Line i's baseline: box top + the §3.4 ascent realization (TEXT_ASCENT ×
+ * final size, same constant as Text) + i × lineHeight × size of advance.
+ */
+function renderTextBox(shape: TextBoxShape, index: number): ReactElement {
+  const x = textBoxLineX(shape, shape.align);
+  return (
+    <text
+      key={index}
+      fontSize={shape.size}
+      fill={shape.color}
+      textAnchor={SVG_ANCHOR[shape.align]}
+      fontFamily={TEXT_FONT_FAMILY}
+    >
+      {shape.lines.map((line, i) => (
+        <tspan
+          key={i}
+          x={x}
+          y={shape.y + TEXT_ASCENT * shape.size + i * shape.lineHeight * shape.size}
+        >
+          {line}
+        </tspan>
+      ))}
+    </text>
+  );
+}
+
+/** True when any shape of `face` is a TextBox that clipped or shrunk — the
+ * §3.3 per-card preview badge trigger. Pure and exported for tests. */
+export function faceHasTextBoxOverflow(face: readonly Shape[]): boolean {
+  return face.some((s) => s.kind === "textbox" && (s.clipped || s.shrunk));
 }
 
 /** Single line, no wrapping (◆24) — clamp with an ellipsis instead. */
@@ -585,13 +641,20 @@ function CardSvgImpl({
   face,
   error,
 }: CardSvgProps): ReactElement {
+  // §3.3 (M3): a subtle per-card badge when any TextBox on the SHOWN face
+  // clipped or shrunk — never an error placeholder (⚑8; overflow is a
+  // design nudge, not a data mistake). The shown face only: the badge sits
+  // on what the user is looking at, and flipping reveals the other side's.
+  // Rendered here (not in CardFaceSvg) so the preview gets it in both views
+  // while the PDF rasterizer and the landing page stay badge-free.
+  const overflow = !error && faceHasTextBoxOverflow(face);
   return (
     // The wrapper owns the card's physical shape (CSS aspect-ratio in mm) and
     // the cosmetic frame: white stock, rounded corner, hairline border,
     // overflow hidden so shapes drawn past the edge clip like a real cut
     // card. Corner radius is cosmetic chrome — a task-7 tuning knob.
     <div
-      className="overflow-hidden rounded-md border border-gray-600 bg-white"
+      className="relative overflow-hidden rounded-md border border-gray-600 bg-white"
       style={{ aspectRatio: `${widthMm} / ${heightMm}` }}
     >
       <CardFaceSvg
@@ -601,6 +664,13 @@ function CardSvgImpl({
         error={error}
         svgAttributes={{ className: "block h-full w-full", role: "img" }}
       />
+      {overflow && (
+        <span
+          data-textbox-overflow
+          title="Some text didn't fit its box — it was clipped or shrunk (see TextBox overflow)"
+          className="absolute right-1 top-1 block h-2 w-2 rounded-full border border-amber-600 bg-amber-400"
+        />
+      )}
     </div>
   );
 }
