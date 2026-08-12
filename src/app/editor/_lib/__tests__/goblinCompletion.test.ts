@@ -12,9 +12,11 @@ import {
   compileSource,
   DEFAULT_ICON_STYLE,
   DEFAULT_IMAGE_FIT,
+  DEFAULT_QR_LEVEL,
   DICIER_CODES,
   ICON_STYLES,
   IMAGE_FITS,
+  QR_LEVELS,
   SIZE_PRESETS,
 } from "@/lib/lang";
 import type { SchemaSnapshot } from "@/app/editor/_store/editorStore";
@@ -365,6 +367,16 @@ describe("property keys", () => {
     expect(byLabel(r, "fit").detail).toContain("contain | cover | stretch");
   });
 
+  it("Qr keys include data/level/background (§7.1a)", () => {
+    const r = at(src("Template: T", "  Qr:", "    ¦"));
+    expect(labels(r)).toEqual([
+      "x", "y", "size", "data", "color", "background", "level", "anchor",
+    ]);
+    expect(byLabel(r, "data").detail).toBe("Text — the encoded content");
+    expect(byLabel(r, "background").detail).toBe("Color (optional, default white)");
+    expect(byLabel(r, "level").detail).toContain("l | m | q | h");
+  });
+
   it("TextBox keys include text/align/line_height/overflow (§3.3 M3)", () => {
     const r = at(src("Template: T", "  TextBox:", "    ¦"));
     expect(labels(r)).toEqual([
@@ -391,7 +403,9 @@ describe("property keys", () => {
       src("Template: T", "  Repeat: 3 as i", "    ¦"),
     ]) {
       const r = at(doc);
-      expect(labels(r)).toEqual(["Rectangle", "Text", "TextBox", "Icon", "Image", "Repeat"]);
+      expect(labels(r)).toEqual([
+        "Rectangle", "Text", "TextBox", "Icon", "Image", "Qr", "Repeat",
+      ]);
       expect(byLabel(r, "Rectangle").insertText).toBe("Rectangle: ");
     }
   });
@@ -504,6 +518,9 @@ describe("value positions", () => {
     expect(labels(at(src("Template: T", "  TextBox:", "    anchor: ¦")))).toEqual([
       ...ANCHOR_TOKENS, "center",
     ]);
+    expect(labels(at(src("Template: T", "  Qr:", "    anchor: ¦")))).toEqual([
+      ...ANCHOR_TOKENS, "center",
+    ]);
   });
 
   it("style: offers exactly the ten Dicier faces, default marked", () => {
@@ -517,6 +534,24 @@ describe("value positions", () => {
     expect(labels(r)).toEqual([...IMAGE_FITS]);
     expect(byLabel(r, DEFAULT_IMAGE_FIT).detail).toBe("image fit (the default)");
     expect(byLabel(r, "cover").detail).toBe("image fit");
+  });
+
+  it("level: offers exactly l/m/q/h, default marked (§7.1a)", () => {
+    const r = at(src("Template: T", "  Qr:", "    level: ¦"));
+    expect(labels(r)).toEqual([...QR_LEVELS]);
+    expect(byLabel(r, DEFAULT_QR_LEVEL).detail).toBe("QR error correction (the default)");
+    expect(byLabel(r, "h").detail).toBe("QR error correction");
+  });
+
+  it("background: offers colors like color:, on Qr (§7.1a)", () => {
+    const r = at(src("Template: T", "  Qr:", "    background: ¦"));
+    expect(labels(r)).toContain("white");
+    expect(byLabel(r, "white").kind).toBe("color");
+  });
+
+  it("data: is an expression position outside its string (§7.1a)", () => {
+    const r = at(src("Template: T", "  Qr:", "    data: ¦"));
+    expect(labels(r)).toContain("if");
   });
 
   it("align: offers exactly left/middle/right, default marked (§3.3 M3)", () => {
@@ -543,12 +578,14 @@ describe("value positions", () => {
     expect(at(src("Template: T", "  Image:", '    src: "https://¦"')).suggestions).toEqual([]);
   });
 
-  it("x: includes middle on Text/Icon but not on Rectangle or Image", () => {
+  it("x: includes middle on Text/Icon but not on Rectangle, Image, or Qr", () => {
     expect(labels(at(src("Template: T", "  Icon:", "    x: ¦")))).toContain("middle");
     expect(labels(at(src("Template: T", "  Rectangle:", "    x: ¦")))).not.toContain("middle");
     expect(labels(at(src("Template: T", "  Image:", "    x: ¦")))).not.toContain("middle");
     // TextBox has align:, never the x: middle sugar (§3.3 M3 — E007).
     expect(labels(at(src("Template: T", "  TextBox:", "    x: ¦")))).not.toContain("middle");
+    // Qr has no anchor sugar either (§7.1a — mirrors Rectangle/Image).
+    expect(labels(at(src("Template: T", "  Qr:", "    x: ¦")))).not.toContain("middle");
   });
 
   it("middle is whole-value only (E007): dropped mid-expression, kept mid-word", () => {
@@ -844,6 +881,15 @@ describe("compiler pins (E008 probes)", () => {
     "    line_height: 1.3",
     "    overflow: shrink",
     "    anchor: center_right",
+    "  Qr:",
+    "    x: 2",
+    "    y: 26",
+    "    size: 2",
+    '    data: "https://example.com/[name]"',
+    "    color: black",
+    "    background: white",
+    "    level: h",
+    "    anchor: bottom_left",
     "Template: BackT",
     "  Rectangle:",
     "    x: 0",
@@ -882,8 +928,9 @@ describe("compiler pins (E008 probes)", () => {
     const textBoxKeys = labels(at(src("Template: T", "  TextBox:", "    ¦")));
     const iconKeys = labels(at(src("Template: T", "  Icon:", "    ¦")));
     const imageKeys = labels(at(src("Template: T", "  Image:", "    ¦")));
+    const qrKeys = labels(at(src("Template: T", "  Qr:", "    ¦")));
     for (const key of new Set([
-      ...cardKeys, ...rectKeys, ...textKeys, ...textBoxKeys, ...iconKeys, ...imageKeys,
+      ...cardKeys, ...rectKeys, ...textKeys, ...textBoxKeys, ...iconKeys, ...imageKeys, ...qrKeys,
     ])) {
       expect(PIN, `pin program must use suggested key '${key}:'`).toMatch(
         new RegExp(`^\\s+${key}: `, "m"),
@@ -906,7 +953,7 @@ describe("compiler pins (E008 probes)", () => {
     const cardKeys = labels(at(src("Card: M", "  ¦")));
     for (const key of cardMissing) expect(cardKeys).toContain(key);
 
-    for (const element of ["Rectangle", "Text", "TextBox", "Icon", "Image"] as const) {
+    for (const element of ["Rectangle", "Text", "TextBox", "Icon", "Image", "Qr"] as const) {
       const missing = missingKeys(src("Template: T", `  ${element}:`, "    x: 1"));
       expect(missing.length).toBeGreaterThan(0);
       const offered = labels(at(src("Template: T", `  ${element}:`, "    ¦")));
@@ -922,6 +969,7 @@ describe("compiler pins (E008 probes)", () => {
       TextBox: labels(at(src("Template: T", "  TextBox:", "    ¦"))),
       Icon: labels(at(src("Template: T", "  Icon:", "    ¦"))),
       Image: labels(at(src("Template: T", "  Image:", "    ¦"))),
+      Qr: labels(at(src("Template: T", "  Qr:", "    ¦"))),
     };
     // Candidate universe: every lowercase key offered on ANY block, plus a
     // decoy that must never be accepted. Front:/Back: are face lines, not
@@ -938,7 +986,7 @@ describe("compiler pins (E008 probes)", () => {
         (d) =>
           d.code === "E008" && d.message.includes(`Unknown property '${key}:' on ${block}`),
       );
-    for (const el of ["Rectangle", "Text", "TextBox", "Icon", "Image"] as const) {
+    for (const el of ["Rectangle", "Text", "TextBox", "Icon", "Image", "Qr"] as const) {
       const accepted = candidates.filter(
         (k) => !unknownOn(src("Template: T", `  ${el}:`, `    ${k}: 1`), k, el),
       );

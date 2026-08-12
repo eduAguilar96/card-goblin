@@ -73,10 +73,10 @@ Working name: **Goblin script**, file extension `.goblin` (cosmetic, revisit fre
 - **Continuation rule (◆23†):** only a **property line** (a lowercase key + `:`) may
   continue: its expression extends across subsequent lines while they are indented
   deeper than the key. Block headers (`Enum:`, `Sheet:`, `Template:`, `Card:`,
-  `Rectangle:`, `Text:`, `TextBox:`, `Icon:`, `Image:`, `Repeat:`, `Front:`, `Back:`) never continue —
-  their deeper-indented lines are children. Consequently a `Repeat:` count expression
-  must fit on one line. Continuation is a parser-level rule; the lexer only reports
-  indent levels.
+  `Rectangle:`, `Text:`, `TextBox:`, `Icon:`, `Image:`, `Qr:`, `Repeat:`, `Front:`,
+  `Back:`) never continue — their deeper-indented lines are children. Consequently a
+  `Repeat:` count expression must fit on one line. Continuation is a parser-level
+  rule; the lexer only reports indent levels.
 - **Comments (◆22):** `#` to end of line.
 - **Identifiers:** `[A-Za-z][A-Za-z0-9_]*` — used for all declared names (⚑11).
 - **Literals:** numbers (`3`, `1.5`), strings (`"Cost: [cost]"` — see interpolation
@@ -86,9 +86,9 @@ Working name: **Goblin script**, file extension `.goblin` (cosmetic, revisit fre
   with a hint listing the valid ones. Hard breaks are honored by `TextBox` and
   render as spaces in single-line `Text` (§3.3).
 - **Reserved words (◆30†):** block openers (`Enum Sheet Template Card Rectangle Text
-  TextBox Icon Image Repeat Front Back` — `Image` added M2 2026-08-09, `TextBox`
-  added M3 2026-08-10), declaration words (`case column`), and expression
-  structure (`if then else and or not as`). Everything else — including `count`,
+  TextBox Icon Image Qr Repeat Front Back` — `Image` added M2 2026-08-09, `TextBox`
+  added M3 2026-08-10, `Qr` added M3 2026-08-11), declaration words (`case column`),
+  and expression structure (`if then else and or not as`). Everything else — including `count`,
   `size`, `sheet`, `loop`, `x`, `color`, `anchor`, `left`, `right`, `full`, `half`,
   `middle`, `auto`, size presets, and CSS color names — is an ordinary identifier
   whose meaning comes from position and expected type. `[brackets]` always denote a
@@ -155,6 +155,7 @@ never referenced (⚑11).
 | `TextBox` | `x y width height text size color align line_height overflow anchor` | (M3, agreed 2026-08-10 — §7.2) wrapped multi-line text in a box; ◆24 stays intact for `Text`. `x y width height text size` required; `color` (default `black`), `align: left \| middle \| right` (default `left` — align lays lines within the box's width; the nine-point `anchor:` of §3.4 moves the box itself, and `x: middle` stays Text/Icon-only, E007), `line_height` (positive number LITERAL, default 1.3, meaning × `size` — baseline advance in units is `line_height × size`), `overflow: clip \| shrink` (default `clip`) optional. **The compiler is the wrapping authority**: the evaluator wraps deterministically against a generated Geist advance-widths table (`geist-metrics.ts`, the dicier-codes pattern) with a 2% measurement safety margin, and the model carries the resolved `lines` — preview and PDF agree by construction. Wrap semantics: split on hard breaks (real `\n` in the resolved text — from the §3.1 escapes or from cell data) first; within a segment, greedy word-wrap on spaces (runs of spaces collapse at break points only; interior spacing is preserved); a single word wider than the box breaks mid-word rather than overflow horizontally. Vertical fit is `lines × line_height × size ≤ height`: `clip` keeps the last fully-fitting line and marks the box clipped; `shrink` retries at 5%-of-`size` steps down to a 60% floor, then clips at the floor — the shape carries the FINAL size. Clipped/shrunk boxes get a subtle per-card preview badge, never an error placeholder (⚑8) |
 | `Icon` | `x y size color code anchor style` | Dicier glyph; `code` is a Text expression; literal codes checked against the curated list — unknown literal = **W004 warning**, since the list is non-exhaustive (⚑10†). `style:` (M2, agreed 2026-08-09) is an optional bare identifier — `flat_dark` (default), `flat_light`, `flat_heavy`, `block_dark`, `block_light`, `block_heavy`, `round_dark`, `round_light`, `round_heavy`, `pixel` — resolved by expected type like `anchor:`; unknown value = E008. All ten faces are declared as `@font-face`; browsers fetch only the ones actually used |
 | `Image` | `x y width height src fit anchor` | (M2, agreed 2026-08-09) raster art from a URL. `src:` is a Text expression (URLs may come from a sheet column); `fit:` optional bare identifier `contain` (default) \| `cover` \| `stretch`, realized via SVG `preserveAspectRatio`. **`auto` dimension (2026-08-10):** exactly one of `width:`/`height:` may be the bare keyword `auto` — that dimension derives from the other × the art's intrinsic aspect ratio (`width: full` + `height: auto` is the canonical "banner art" idiom). Both `auto` = E008. `auto` is resolved by the renderer/exporter at load time (intrinsic size is load-time knowledge — the pure model carries the keyword); pre-load placeholders use a square box, and `fit:` is inert alongside `auto` (the box matches the ratio by construction — allowed, documented, no diagnostic). Loading → subtle placeholder box; failed load → placeholder with warning styling (renderer-level state, **not** a D-code — the model stays pure, per-card isolation preserved). At PDF export, images load with `crossorigin=anonymous`; a load failure or canvas taint exports that image as a marked placeholder box and the modal warns "N images could not be embedded" before export — the deck always exports (⚑8 philosophy) |
+| `Qr` | `x y size data color background level anchor` | (M3, agreed 2026-08-10, shipped 2026-08-11 — §7.1a) a scannable QR code. `x y size data` required — `size` is the square box's side in units, `data:` a Text expression (usual §3.5 coercions: `[column]`, interpolation, conditionals). Optional `color` (default `black`), `background` (default `white`), `level:` — error-correction, bare identifier `l \| m \| q \| h` (default `m`) — resolved by expected type like `fit:`/`style:`; unknown value = E008. **Encoded at EVAL time** (pure, deterministic, the wrap.ts precedent — via `qrcode-generator`, the second sanctioned runtime dependency): the shape carries the resolved module matrix (row-major `"1"`/`"0"`, quiet zone NOT included), never the source data, so the renderer only draws one vector `<path>`. The spec's 4-module quiet zone is drawn INSIDE the declared box (so adjacent art can never break scanning) — total grid = `moduleCount + 8`, module unit = `size / grid`. `x: middle` is E007 (no anchor sugar — same as Rectangle/Image); `x/y/size` geometry keywords behave as on `Icon`'s `size` (full/half legal, X-axis). `data:` too long for the level's capacity (even at QR version 40) → **D009**, a placeholder card (§3.8) — empty-string `data:` encodes normally, no special case |
 | `Repeat` | `Repeat: <Number expr> as <var>` (single line, ◆23†) | children emitted N times; `[var]` is the 0-based index (◆18), usable in any child expression; nests; cap 500/card (◆27) |
 
 **The showcase** — one number in the sheet becomes a row of hearts (⚑6, ⚑9, ⚑10):
@@ -201,7 +202,7 @@ Repeat: [health] as i
   the legacy Text/Icon values `left | middle | right` remain as aliases for
   the top row (existing cards unchanged). Underscores, not hyphens — `-` is
   the minus operator. Unknown value → E008 naming the vocabulary.
-  Semantics: box elements (Rectangle, Image, TextBox) offset by
+  Semantics: box elements (Rectangle, Image, TextBox, Qr) offset by
   `(width·fx, height·fy)`, fx/fy ∈ {0, ½, 1}; Text/Icon anchor horizontally
   via `text-anchor` on the intrinsic line and vertically by the em box
   (top = today's behavior; `y` names the anchored edge/center of the em).
@@ -294,7 +295,7 @@ grid keeps last good schema — §4.2):
 W004 in Revision A because the code list is provably incomplete.)*
 
 **Data-time** (⚑8, ◆19). D001–D003 flag the offending cell red **and** render the
-affected card(s) as error placeholders; D004–D007 arise from computed values with no
+affected card(s) as error placeholders; D004–D009 arise from computed values with no
 single source cell (◆†), so they mark the placeholder card / problems strip only:
 
 | Code | Meaning |
@@ -307,6 +308,7 @@ single source cell (◆†), so they mark the placeholder card / problems strip 
 | D006 | `count:` non-integer, negative, or unevaluable → one placeholder per row×case combination † |
 | D007 | per-Card instance cap (2,000) exceeded — generation truncated † |
 | D008 | non-finite numeric result during evaluation (division by zero) → placeholder card |
+| D009 | QR data is too long for one code (exceeds the `level:`'s capacity, even at the largest QR version) → placeholder card (§7.1a) |
 
 ### 3.9 The demo project (slice acceptance fixture)
 
@@ -655,7 +657,7 @@ uploaded assets, sharing, docs site.
 - Multi-project management stays file-based in v1 (the autosave slot remains
   singular); accounts/cloud are later M3.
 
-### 7.1a QR codes — scoped, HIGH PRIORITY (2026-08-10, not yet implemented)
+### 7.1a QR codes — scoped, HIGH PRIORITY (2026-08-10, shipped M3 2026-08-11 — normative spec in the §3.3 row, §3.1 opener/reserved-word lists, and §3.8's D009 row)
 
 **Requirement (edu):** cards carry scannable codes from sheet data, enabling
 cross-media games (an app scans the card and acts). The app is out of scope;
@@ -673,18 +675,34 @@ template gives every card its own QR.
   standard coercions — `[column]`, interpolation, and conditionals all work.
 - **Encoding at EVAL time in the compiler** (pure, deterministic — the wrap
   precedent): the shape carries the resolved module matrix; the renderer
-  draws one vector path (crisp at print scale; PDF inherits it). Encoder: a
-  zero-dependency MIT library (e.g. qrcode-generator) as the SECOND sanctioned
-  runtime dependency — Reed-Solomon + mask scoring is too intricate to
-  hand-roll responsibly. Known-answer tests cross-validate encodings.
-- **Semantics:** UTF-8 byte mode; the spec's 4-module quiet zone is drawn
-  INSIDE the declared box (white border; modules shrink accordingly) so
+  draws one vector path (crisp at print scale; PDF inherits it). Encoder:
+  `qrcode-generator` (zero-dependency, MIT) as the SECOND sanctioned runtime
+  dependency — Reed-Solomon + mask scoring is too intricate to hand-roll
+  responsibly — isolated behind a typed wrapper (`src/lib/lang/qr.ts`), the
+  only file that imports it. Structural tests (finder + timing pattern
+  geometry) cross-validate encodings against the real QR spec, not just
+  round-tripping.
+- **Semantics:** UTF-8 byte mode — via `TextEncoder` rather than the
+  library's own `stringToBytesFuncs['UTF-8']`, which its packaged CJS and ESM
+  builds disagree on shipping. `data:` is written as raw UTF-8 bytes with no
+  ECI (Extended Channel Interpretation) designator — the industry-standard
+  assumption for byte-mode QR content when no ECI is present (zxing does the
+  same), so general-purpose decoders auto-detect it correctly without one.
+  The spec's 4-module quiet zone is drawn INSIDE
+  the declared box (background-color border; modules shrink accordingly) so
   adjacent art can never break scanning. Empty referenced cell → D003 as
-  usual; data exceeding the level's capacity → new D-code (placeholder card,
-  cell provenance where derivable). Same data → same matrix, always.
-- **Estimate:** one executor session + adversarial review — the shape of the
-  Image-element batch (a new element through the practiced pipeline) plus
-  encoder wiring and scan-verification of fixture outputs.
+  usual; empty-string `data:` itself encodes normally (a valid tiny QR, no
+  special case). Data exceeding the level's capacity (even at the largest QR
+  version, 40) → **D009** "QR data is too long for one code", wired exactly
+  like D008 (card-scoped placeholder, no `cell` — a decision reached during
+  implementation: no new provenance machinery, since "the character that
+  overflowed" has no single source cell any more precisely than "the number
+  that divided by zero" does). Same data + level → same matrix, always
+  (`qr.test.ts` asserts this directly).
+- Shipped through the practiced element pipeline (lexer/parser openers,
+  checker `ELEMENT_SPECS`, evaluator, `Shape` union, renderer, Monaco
+  autocomplete + E008 pins, wiki, docFacts guard) — the same shape as the
+  Image-element batch, plus the encoder wrapper and its structural tests.
 
 ### 7.2 Text wrapping (TextBox) — agreed direction (2026-08-10; shipped M3 2026-08-10 — normative spec in the §3.3 row and §3.1 escapes)
 

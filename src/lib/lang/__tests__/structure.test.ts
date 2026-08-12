@@ -80,6 +80,12 @@ describe("reserved words are illegal as declared names (§3.1)", () => {
     reservedDiags("Template: TextBox\n");
     reservedDiags("Card: C\n  loop: Suit as TextBox\n");
     reservedDiags("Template: T\n  Repeat: 3 as TextBox\n    Icon:\n      x: 1\n");
+    // Qr joined in M3 (§7.1a) — same everywhere-rejected guarantee.
+    reservedDiags("Enum: Qr\n  case A\n");
+    reservedDiags("Sheet: S\n  column Qr: Number\n");
+    reservedDiags("Template: Qr\n");
+    reservedDiags("Card: C\n  loop: Suit as Qr\n");
+    reservedDiags("Template: T\n  Repeat: 3 as Qr\n    Icon:\n      x: 1\n");
   });
 
   it("rejects opener words as column names, keeping siblings", () => {
@@ -311,6 +317,53 @@ describe("elements and Repeat (§3.3)", () => {
     );
     const rep = (p.declarations[0] as TemplateDecl).children[0] as RepeatNode;
     expect((rep.children[0] as ElementNode).element).toBe("Image");
+  });
+
+  it("Qr blocks parse like any element, label allowed (§7.1a)", () => {
+    const p = parseClean(
+      [
+        "Template: T",
+        '  Qr: "Back scan code"',
+        "    x: 1",
+        "    y: 2",
+        "    size: 10",
+        '    data: "https://example.com/[code]"',
+        "    color: black",
+        "    background: white",
+        "    level: h",
+        "    anchor: bottom_right",
+        "  Qr:",
+        "    x: 0",
+        "    y: 0",
+        "    size: 1",
+        "    data: [code]",
+        "",
+      ].join("\n"),
+    );
+    const tpl = p.declarations[0] as TemplateDecl;
+    const labelled = tpl.children[0] as ElementNode;
+    expect(labelled.element).toBe("Qr");
+    expect(labelled.label).not.toBeNull();
+    expect(labelled.properties.map((q) => q.key.name)).toEqual([
+      "x", "y", "size", "data", "color", "background", "level", "anchor",
+    ]);
+    const bare = tpl.children[1] as ElementNode;
+    expect(bare.element).toBe("Qr");
+    expect(bare.label).toBeNull();
+    expect(asKind(bare.properties[3].value, "Ref").name).toBe("code");
+  });
+
+  it("Qr nests inside Repeat", () => {
+    const p = parseClean(
+      "Template: T\n  Repeat: 3 as i\n    Qr:\n      x: [i]\n      y: 0\n      size: 1\n      data: \"u\"\n",
+    );
+    const rep = (p.declarations[0] as TemplateDecl).children[0] as RepeatNode;
+    expect((rep.children[0] as ElementNode).element).toBe("Qr");
+  });
+
+  it("the unknown-element hint lists Qr among the openers", () => {
+    const ds = diags("Template: T\n  Circle:\n    x: 1\n");
+    expect(ds[0].message).toContain("Qr:");
   });
 });
 

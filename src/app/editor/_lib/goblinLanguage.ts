@@ -37,6 +37,7 @@ const BLOCK_OPENERS = [
   "TextBox",
   "Icon",
   "Image",
+  "Qr",
   "Repeat",
   "Front",
   "Back",

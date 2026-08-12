@@ -48,8 +48,15 @@ import type {
   TemplateNode,
 } from "./ast";
 import type { Diagnostic, Range, Severity } from "./diagnostics";
-import type { Anchor, IconStyle, ImageFit, TextBoxOverflow } from "./model";
-import { ANCHOR_TOKENS, ICON_STYLES, IMAGE_FITS, TEXTBOX_OVERFLOWS, parseAnchor } from "./model";
+import type { Anchor, IconStyle, ImageFit, QrLevel, TextBoxOverflow } from "./model";
+import {
+  ANCHOR_TOKENS,
+  ICON_STYLES,
+  IMAGE_FITS,
+  QR_LEVELS,
+  TEXTBOX_OVERFLOWS,
+  parseAnchor,
+} from "./model";
 import { CSS_COLOR_NAMES } from "./css-colors";
 import { DICIER_CODES } from "./dicier-codes";
 
@@ -101,6 +108,8 @@ export type Resolution =
   | { kind: "imageFit"; fit: ImageFit }
   /** TextBox `overflow:` (§3.3, M3): clip | shrink, resolved like fit. */
   | { kind: "overflow"; value: TextBoxOverflow }
+  /** Qr `level:` (§7.1a): l | m | q | h, resolved like fit/style. */
+  | { kind: "qrLevel"; level: QrLevel }
   /** Bare `auto` as the ENTIRE width:/height: value of an Image (§3.3): the
    * dimension derives from the art's intrinsic ratio at LOAD time, so the
    * model carries the keyword and the renderer/exporter resolve it. */
@@ -279,6 +288,9 @@ const IMAGE_FIT_SET: ReadonlySet<string> = new Set(IMAGE_FITS);
 /** Membership set over the §3.3 TEXTBOX_OVERFLOWS vocabulary (clip/shrink). */
 const TEXTBOX_OVERFLOW_SET: ReadonlySet<string> = new Set(TEXTBOX_OVERFLOWS);
 
+/** Membership set over the §7.1a QR_LEVELS vocabulary (l/m/q/h). */
+const QR_LEVEL_SET: ReadonlySet<string> = new Set(QR_LEVELS);
+
 interface ElementSpec {
   required: readonly string[];
   optional: readonly string[];
@@ -286,9 +298,10 @@ interface ElementSpec {
 
 /** §3.3 property tables. Text/Icon color defaults to black; Icon style
  * defaults to flat_dark, Image fit to contain (M2); TextBox align defaults
- * to left, line_height to 1.3 × size, overflow to clip (M3). EVERY drawable
- * element takes an optional nine-point `anchor:` (§3.4, M3; default
- * top_left). */
+ * to left, line_height to 1.3 × size, overflow to clip (M3); Qr color
+ * defaults to black, background to white, level to m (§7.1a). EVERY
+ * drawable element takes an optional nine-point `anchor:` (§3.4, M3;
+ * default top_left). */
 const ELEMENT_SPECS: Record<ElementNode["element"], ElementSpec> = {
   Rectangle: { required: ["x", "y", "width", "height", "color"], optional: ["anchor"] },
   Text: { required: ["x", "y", "size", "text"], optional: ["color", "anchor"] },
@@ -298,6 +311,10 @@ const ELEMENT_SPECS: Record<ElementNode["element"], ElementSpec> = {
   },
   Icon: { required: ["x", "y", "size", "code"], optional: ["color", "anchor", "style"] },
   Image: { required: ["x", "y", "width", "height", "src"], optional: ["fit", "anchor"] },
+  Qr: {
+    required: ["x", "y", "size", "data"],
+    optional: ["color", "background", "level", "anchor"],
+  },
 };
 
 /** Mutable recording target while checking in one Card's context; null during
@@ -977,6 +994,11 @@ class Checker {
       case "color":
         this.checkValue(value, EXP_COLOR, ctx, false);
         return;
+      case "background":
+        // Qr only (ELEMENT_SPECS): the quiet-zone/background fill, Color-
+        // typed exactly like color: (§7.1a); default white.
+        this.checkValue(value, EXP_COLOR, ctx, false);
+        return;
       case "text":
         this.checkValue(value, EXP_TEXT, ctx, false);
         return;
@@ -984,6 +1006,12 @@ class Checker {
         // Image only (ELEMENT_SPECS): a Text expression with the usual §3.5
         // coercions — URLs routinely come from a sheet column or an
         // interpolated string, so no literal-shape restriction applies.
+        this.checkValue(value, EXP_TEXT, ctx, false);
+        return;
+      case "data":
+        // Qr only (ELEMENT_SPECS): a Text expression with the usual §3.5
+        // coercions, exactly like src: — QR content routinely comes from a
+        // sheet column of codes (§7.1a's canonical per-card-backs idiom).
         this.checkValue(value, EXP_TEXT, ctx, false);
         return;
       case "code": {
@@ -1105,6 +1133,21 @@ class Checker {
           return;
         }
         this.error("E008", `fit: must be one of ${IMAGE_FITS.join(", ")}`, value.range);
+        return;
+      }
+      case "level": {
+        // Qr only (ELEMENT_SPECS): a bare identifier from the closed four-
+        // level error-correction vocabulary, resolved by expected type like
+        // fit/style (§7.1a) — E008 on anything else.
+        if (value.kind === "Error") return;
+        if (value.kind === "Identifier" && QR_LEVEL_SET.has(value.name)) {
+          this.recordResolution(ctx, value, {
+            kind: "qrLevel",
+            level: value.name as QrLevel,
+          });
+          return;
+        }
+        this.error("E008", `level: must be one of ${QR_LEVELS.join(", ")}`, value.range);
         return;
       }
     }

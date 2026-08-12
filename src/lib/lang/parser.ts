@@ -5,7 +5,7 @@
  * for expressions (§3.5). Implements the two Revision-A grammar rules:
  *
  * - Contextual keywords (◆30†): block openers (Enum, Sheet, Template, Card,
- *   Rectangle, Text, TextBox, Icon, Image, Repeat, Front, Back) are only special in HEADER
+ *   Rectangle, Text, TextBox, Icon, Image, Qr, Repeat, Front, Back) are only special in HEADER
  *   position — start of a line, followed by ':'. Everywhere else they are
  *   ordinary identifiers, so `column count: Number`, `[count]`, `x: full`,
  *   `anchor: right` all parse. Reserved words are however ILLEGAL as DECLARED
@@ -64,6 +64,7 @@ export const BLOCK_OPENERS: ReadonlySet<string> = new Set([
   "TextBox",
   "Icon",
   "Image",
+  "Qr",
   "Repeat",
   "Front",
   "Back",
@@ -512,7 +513,8 @@ class Parser {
         t.text === "Text" ||
         t.text === "TextBox" ||
         t.text === "Icon" ||
-        t.text === "Image"
+        t.text === "Image" ||
+        t.text === "Qr"
       ) {
         return this.parseElement(t.text);
       }
@@ -524,21 +526,21 @@ class Parser {
       }
       if (/^[a-z]/.test(t.text)) {
         this.error(
-          `Property line '${t.text}:' is only allowed inside an element (Rectangle:, Text:, TextBox:, Icon:, Image:)`,
+          `Property line '${t.text}:' is only allowed inside an element (Rectangle:, Text:, TextBox:, Icon:, Image:, Qr:)`,
           t.range,
         );
         this.sync(0);
         return null;
       }
       this.error(
-        `Unknown element '${t.text}:' — expected Rectangle:, Text:, TextBox:, Icon:, Image:, or Repeat:`,
+        `Unknown element '${t.text}:' — expected Rectangle:, Text:, TextBox:, Icon:, Image:, Qr:, or Repeat:`,
         t.range,
       );
       this.sync(0);
       return null;
     }
     this.error(
-      `Expected an element (Rectangle:, Text:, TextBox:, Icon:, Image:, or Repeat:), found ${this.describe(t)}`,
+      `Expected an element (Rectangle:, Text:, TextBox:, Icon:, Image:, Qr:, or Repeat:), found ${this.describe(t)}`,
       t.range,
     );
     this.sync(0);

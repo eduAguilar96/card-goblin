@@ -17,7 +17,7 @@
 // ---------------------------------------------------------------------------
 
 /**
- * D001–D008 are the §3.8 catalog. D000 is OUTSIDE the catalog by design,
+ * D001–D009 are the §3.8 catalog. D000 is OUTSIDE the catalog by design,
  * mirroring the checker's E000: it never marks a data-entry mistake. It is
  * used (a) per card, when a card cannot be evaluated because its code has
  * compile errors (the squiggles own the surface; the model just marks the
@@ -33,7 +33,8 @@ export type DataDiagnosticCode =
   | "D005"
   | "D006"
   | "D007"
-  | "D008";
+  | "D008"
+  | "D009";
 
 /** Cell provenance — the grid flags this cell red (§3.8 D001–D003). */
 export interface CellRef {
@@ -65,7 +66,7 @@ export interface DataDiagnostic {
    */
   cell?: CellRef;
   /**
-   * Present for card-scoped diagnostics (D004–D006, D008, and per-card
+   * Present for card-scoped diagnostics (D004–D006, D008–D009, and per-card
    * D000). D007 and the model-level D000 carry neither `cell` nor `cardRef`
    * — they are deck/model-level (the message names the deck).
    */
@@ -135,6 +136,20 @@ export const DEFAULT_TEXTBOX_OVERFLOW: TextBoxOverflow = "clip";
 
 /** §3.3: `line_height:` is optional; baseline advance = line_height × size. */
 export const DEFAULT_LINE_HEIGHT = 1.3;
+
+/**
+ * Qr `level:` vocabulary (§7.1a): the four QR error-correction levels
+ * (low → high redundancy), lowercase per the language's bare-identifier
+ * convention. Closed set like IMAGE_FITS — the checker's vocabulary, the
+ * qr.ts encoder's L/M/Q/H map, and the wiki's level table (docFacts) all
+ * pin to this array.
+ */
+export const QR_LEVELS = ["l", "m", "q", "h"] as const;
+
+export type QrLevel = (typeof QR_LEVELS)[number];
+
+/** §7.1a: `level:` is optional; the default is medium (~15% redundancy). */
+export const DEFAULT_QR_LEVEL: QrLevel = "m";
 
 /**
  * The nine canonical `anchor:` tokens (§3.4, M3), row-major top→bottom,
@@ -336,8 +351,39 @@ export interface TextBoxShape {
   shrunk: boolean;
 }
 
+/**
+ * A scannable QR code from resolved Text data (§7.1a). Square and anchored
+ * like Rectangle/Image (`size` is the box's side length in units). Encoding
+ * happens at EVAL time (pure, deterministic — the wrap.ts precedent): the
+ * shape carries the RESOLVED module matrix, never the source data or the
+ * encoding parameters, so the renderer only draws.
+ */
+export interface QrShape {
+  kind: "qr";
+  /** The box's `anchor` point (§3.4), like Rectangle. */
+  x: number;
+  y: number;
+  /** Side length of the square box, in units. */
+  size: number;
+  /** Module (dark pixel) color — CSS color string; default black. */
+  color: string;
+  /** Fill behind the modules and the quiet zone — CSS color string; default
+   * white. Contrast with `color` is what makes a code scannable, but that's
+   * the card designer's job, not a diagnostic. */
+  background: string;
+  /** Which point of the box x/y name (§3.4); top-left when omitted. */
+  anchor: Anchor;
+  /** Modules per side — one of the legal QR sizes, 21 + 4k. */
+  moduleCount: number;
+  /** Row-major "1" (dark) / "0" (light) string, length moduleCount². The
+   * quiet zone is NOT included in this matrix — the renderer draws the
+   * spec's 4-module quiet zone itself, INSIDE the declared box (§7.1a), so
+   * adjacent art can never crowd a code's scan margin. */
+  modules: string;
+}
+
 /** In declaration order — later shapes draw on top (◆15). */
-export type Shape = RectShape | TextShape | TextBoxShape | IconShape | ImageShape;
+export type Shape = RectShape | TextShape | TextBoxShape | IconShape | ImageShape | QrShape;
 
 // ---------------------------------------------------------------------------
 // Cards and decks (§3.7, §4.1)

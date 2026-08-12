@@ -13,6 +13,7 @@ import type {
   IconShape,
   ImageShape,
   ProjectResult,
+  QrShape,
   RectShape,
   SheetRows,
   TextBoxShape,
@@ -20,6 +21,7 @@ import type {
 } from "../index";
 import { GEIST_METRICS, compileProject, generateModel, measureText } from "../index";
 import { parse } from "../parser";
+import { encodeQr } from "../qr";
 
 const demoSource = readFileSync(
   fileURLToPath(new URL("./fixtures/demo.goblin", import.meta.url)),
@@ -526,6 +528,128 @@ describe("Image auto dimension flows to the shape (§3.3)", () => {
   });
 });
 
+// -- Qr (§7.1a) ----------------------------------------------------------------
+
+describe("Qr flows to the shape (§7.1a)", () => {
+  const qrProject = (extra: string[], row: Record<string, string> = { t: "x" }): ProjectResult =>
+    projectOf(
+      src(
+        ...sheetLines(["t: Text"]),
+        "Template: T",
+        "  Qr:",
+        "    x: 1",
+        "    y: 2",
+        "    size: half",
+        '    data: "card/[t]"',
+        ...extra.map((l) => `    ${l}`),
+        ...CARD_LINES,
+        "  Front: T",
+      ),
+      { Sh: [row] },
+    );
+
+  it("resolves geometry (size on the X axis, the Icon-size precedent) and data through interpolation", () => {
+    const qr = qrProject([], { t: "dragon" }).model.decks[0].cards[0].front[0] as QrShape;
+    const expected = encodeQr("card/dragon", "m")!;
+    expect(qr).toEqual({
+      kind: "qr",
+      x: 1,
+      y: 2,
+      size: 10, // half of 20 X units
+      color: "black",
+      background: "white",
+      anchor: { h: "left", v: "top" },
+      moduleCount: expected.moduleCount,
+      modules: expected.modules,
+    });
+  });
+
+  it("omitted color/background/level are MATERIALIZED to black/white/m", () => {
+    const qr = qrProject([]).model.decks[0].cards[0].front[0] as QrShape;
+    expect(qr.color).toBe("black");
+    expect(qr.background).toBe("white");
+    expect(qr.modules).toBe(encodeQr("card/x", "m")!.modules);
+  });
+
+  it("declared color/background/level reach the shape, and level changes the encoding", () => {
+    const qr = qrProject(["color: red", "background: navy", "level: h"]).model.decks[0].cards[0]
+      .front[0] as QrShape;
+    expect(qr.color).toBe("red");
+    expect(qr.background).toBe("navy");
+    expect(qr.modules).toBe(encodeQr("card/x", "h")!.modules);
+  });
+
+  it("data and level changes change the contentHash; the same inputs hash identically", () => {
+    const base = qrProject([]).model.decks[0].cards[0];
+    const again = qrProject([]).model.decks[0].cards[0];
+    const otherData = qrProject([], { t: "y" }).model.decks[0].cards[0];
+    const otherLevel = qrProject(["level: h"]).model.decks[0].cards[0];
+    expect(again.contentHash).toBe(base.contentHash);
+    expect(otherData.contentHash).not.toBe(base.contentHash);
+    expect(otherLevel.contentHash).not.toBe(base.contentHash);
+  });
+
+  it("empty-string data encodes normally — a valid tiny QR, no special case (§7.1a)", () => {
+    const result = projectOf(
+      src(
+        ...sheetLines(["t: Text"]),
+        "Template: T",
+        "  Qr:",
+        "    x: 0",
+        "    y: 0",
+        "    size: 5",
+        '    data: ""',
+        ...CARD_LINES,
+        "  Front: T",
+      ),
+      { Sh: [{ t: "x" }] },
+    );
+    const card = result.model.decks[0].cards[0];
+    expect(card.error).toBeUndefined();
+    const qr = card.front[0] as QrShape;
+    expect(qr.modules).toBe(encodeQr("", "m")!.modules);
+  });
+});
+
+// -- D009 — QR data too long for one code -------------------------------------
+
+describe("D009 — QR data too long for one code", () => {
+  const qrTooLongSource = (): string =>
+    src(
+      ...sheetLines(["t: Text"]),
+      "Template: T",
+      "  Qr:",
+      "    x: 0",
+      "    y: 0",
+      "    size: 5",
+      "    data: [t]",
+      "    level: h",
+      ...CARD_LINES,
+      "  Front: T",
+    );
+
+  it("data exceeding the level's capacity → one placeholder with D009 + cardRef", () => {
+    const p = projectOf(qrTooLongSource(), { Sh: [{ t: "x".repeat(3000) }] });
+    const card = p.model.decks[0].cards[0];
+    expect(card.error?.diagnostics.map((d) => d.code)).toEqual(["D009"]);
+    expect(card.error?.diagnostics[0].message).toBe("QR data is too long for one code");
+    expect(p.dataDiagnostics.map((d) => d.code)).toEqual(["D009"]);
+    expect(p.dataDiagnostics[0].cardRef).toEqual({ deck: "C", deckIndex: 0, cardIndex: 0 });
+    expect(p.dataDiagnostics[0].cell).toBeUndefined(); // computed-value diagnostic (§3.8 †)
+  });
+
+  it("one row's overlong data does not affect a sibling row (⚑8 isolation)", () => {
+    const p = projectOf(qrTooLongSource(), {
+      Sh: [{ t: "x".repeat(3000) }, { t: "short" }],
+    });
+    const cards = p.model.decks[0].cards;
+    expect(cards).toHaveLength(2);
+    expect(cards[0].error?.diagnostics.map((d) => d.code)).toEqual(["D009"]);
+    expect(cards[1].error).toBeUndefined();
+    expect((cards[1].front[0] as QrShape).kind).toBe("qr");
+  });
+});
+
 // -- nine-point anchors (§3.4, M3) --------------------------------------------
 
 describe("nine-point anchor flows to the shape (§3.4 M3)", () => {
@@ -592,13 +716,18 @@ describe("nine-point anchor flows to the shape (§3.4 M3)", () => {
         "    width: 2",
         "    height: 2",
         '    src: "a.png"',
+        "  Qr:",
+        "    x: 0",
+        "    y: 12",
+        "    size: 2",
+        '    data: "a"',
         ...CARD_LINES,
         "  Front: T",
       ),
       { Sh: [{ t: "x" }] },
     );
     const front = p.model.decks[0].cards[0].front;
-    expect(front).toHaveLength(5);
+    expect(front).toHaveLength(6);
     for (const shape of front) {
       expect(shape.anchor, shape.kind).toEqual({ h: "left", v: "top" });
     }

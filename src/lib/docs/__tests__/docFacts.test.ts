@@ -30,9 +30,11 @@ import {
   DEFAULT_ICON_STYLE,
   DEFAULT_IMAGE_FIT,
   DEFAULT_LINE_HEIGHT,
+  DEFAULT_QR_LEVEL,
   DEFAULT_TEXTBOX_OVERFLOW,
   ICON_STYLES,
   IMAGE_FITS,
+  QR_LEVELS,
   TEXTBOX_OVERFLOWS,
   parseAnchor,
 } from "@/lib/lang/model";
@@ -315,6 +317,33 @@ describe("the image-fit table matches IMAGE_FITS", () => {
         /default/i.test(what),
         `"${fit}" default marking must match DEFAULT_IMAGE_FIT (${DEFAULT_IMAGE_FIT})`,
       ).toBe(fit === DEFAULT_IMAGE_FIT);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Qr error-correction levels
+// ---------------------------------------------------------------------------
+
+describe("the Qr level table matches QR_LEVELS", () => {
+  const text = pageText("templates-and-shapes");
+  /** `m` → its What-it-does prose, from the table with a "level" header. */
+  const documented = new Map(
+    tableWithHeader(text, "level").rows.map(
+      (cells) => [plain(cells[0]), plain(cells[1] ?? "")] as const,
+    ),
+  );
+
+  it("documents every level — a new level can't ship undocumented", () => {
+    expect([...documented.keys()].sort()).toEqual([...QR_LEVELS].sort());
+  });
+
+  it("marks exactly the code's default level as the default", () => {
+    for (const [level, what] of documented) {
+      expect(
+        /default/i.test(what),
+        `"${level}" default marking must match DEFAULT_QR_LEVEL (${DEFAULT_QR_LEVEL})`,
+      ).toBe(level === DEFAULT_QR_LEVEL);
     }
   });
 });

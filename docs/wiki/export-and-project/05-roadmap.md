@@ -45,6 +45,11 @@ compiler itself, so the preview and the PDF always agree — with hard breaks
 (`\n` and newlines in cells), alignment, and clip/shrink overflow control. See
 [Templates & shapes](templates-and-shapes.md).
 
+**QR codes.** The `Qr` element: scannable codes generated straight from sheet
+data, with error-correction levels and a scan-safe quiet zone — the idiom for
+giving every card in a deck its own code on the back. See
+[Templates & shapes](templates-and-shapes.md).
+
 ## Further out
 
 - **Accounts and sharing** — projects that live in the cloud and decks you can

@@ -28,11 +28,13 @@ import {
   DEFAULT_ICON_STYLE,
   DEFAULT_IMAGE_FIT,
   DEFAULT_LINE_HEIGHT,
+  DEFAULT_QR_LEVEL,
   DEFAULT_TEXTBOX_OVERFLOW,
   DICIER_CODES,
   DICIER_CODE_CATEGORIES,
   ICON_STYLES,
   IMAGE_FITS,
+  QR_LEVELS,
   SHRINK_FLOOR,
   SIZE_PRESETS,
   TEXTBOX_OVERFLOWS,
@@ -173,7 +175,7 @@ export interface CompletionResult {
  * position-specific (loop:) and handled where it is legal. */
 const EXPRESSION_KEYWORDS = ["if", "then", "else", "and", "or", "not"] as const;
 
-type ElementKind = "Rectangle" | "Text" | "TextBox" | "Icon" | "Image";
+type ElementKind = "Rectangle" | "Text" | "TextBox" | "Icon" | "Image" | "Qr";
 type BlockKind = ElementKind | "Repeat" | "Card" | "Template" | "Sheet" | "Enum";
 
 /** §3.3 property tables — mirrors check.ts's private ELEMENT_SPECS (pinned by
@@ -233,6 +235,16 @@ const ELEMENT_KEYS: Record<ElementKind, { key: string; detail: string }[]> = {
     { key: "fit", detail: `${IMAGE_FITS.join(" | ")} (optional, default ${DEFAULT_IMAGE_FIT})` },
     ANCHOR_KEY,
   ],
+  Qr: [
+    { key: "x", detail: "Number — units" },
+    { key: "y", detail: "Number — units" },
+    { key: "size", detail: "Number — units (square side)" },
+    { key: "data", detail: "Text — the encoded content" },
+    { key: "color", detail: "Color (optional, default black)" },
+    { key: "background", detail: "Color (optional, default white)" },
+    { key: "level", detail: `${QR_LEVELS.join(" | ")} (optional, default ${DEFAULT_QR_LEVEL})` },
+    ANCHOR_KEY,
+  ],
 };
 
 /** §3.2 Card properties — mirrors check.ts's private CARD_PROPERTY_KEYS
@@ -256,6 +268,7 @@ const ELEMENT_OPENERS: { key: string; detail: string }[] = [
   { key: "TextBox", detail: "x y width height text size (color align line_height overflow)" },
   { key: "Icon", detail: "x y size code (color anchor)" },
   { key: "Image", detail: "x y width height src (fit)" },
+  { key: "Qr", detail: "x y size data (color background level anchor)" },
   { key: "Repeat", detail: "<count expr> as <variable>" },
 ];
 
@@ -267,7 +280,7 @@ const TOP_LEVEL_OPENERS: { key: string; detail: string }[] = [
 ];
 
 const BLOCK_HEADER_RE =
-  /^(Enum|Sheet|Template|Card|Rectangle|TextBox|Text|Icon|Image|Repeat|Front|Back)[ \t]*:[ \t]*(.*)$/;
+  /^(Enum|Sheet|Template|Card|Rectangle|TextBox|Text|Icon|Image|Qr|Repeat|Front|Back)[ \t]*:[ \t]*(.*)$/;
 const WORD_CHAR = /[A-Za-z0-9_]/;
 
 // ---------------------------------------------------------------------------
@@ -383,7 +396,8 @@ function scanAncestors(lines: string[], lineIndex: number, startIndent: number):
         kind === "Text" ||
         kind === "TextBox" ||
         kind === "Icon" ||
-        kind === "Image"
+        kind === "Image" ||
+        kind === "Qr"
       ) {
         if (out.elementKind === null) out.elementKind = kind;
         continue;
@@ -824,6 +838,7 @@ export function computeCompletions(
       case "TextBox":
       case "Icon":
       case "Image":
+      case "Qr":
         return result(keySuggestions(ELEMENT_KEYS[ancestors.innermost], colonFollows, false));
       case "Card": {
         const suggestions = CARD_KEYS.map(({ key, detail }) => ({
@@ -889,6 +904,7 @@ function valueSuggestions(
     case "TextBox":
     case "Icon":
     case "Image":
+    case "Qr":
       return NO_SUGGESTIONS;
     case "Repeat":
       // `Repeat: <Number expr> as <var>` — expression until `as`, then naming.
@@ -964,15 +980,16 @@ function valueSuggestions(
     // ---- element properties ------------------------------------------------
     case "x": {
       // `middle` must be the WHOLE value (E007), and only Text/Icon have the
-      // anchor sugar (§3.4) — Rectangle, Image, and TextBox (which has
-      // align:, §3.3 M3) get plain geometry. An unknown block (broken code)
-      // keeps offering it. full/half are Numbers and stay legal
-      // mid-expression.
+      // anchor sugar (§3.4) — Rectangle, Image, TextBox (which has align:,
+      // §3.3 M3), and Qr (§7.1a) get plain geometry. An unknown block
+      // (broken code) keeps offering it. full/half are Numbers and stay
+      // legal mid-expression.
       const bareValue = /^[ \t]*[A-Za-z0-9_]*$/.test(afterColon);
       const middleOk =
         ancestors.elementKind !== "Rectangle" &&
         ancestors.elementKind !== "Image" &&
-        ancestors.elementKind !== "TextBox";
+        ancestors.elementKind !== "TextBox" &&
+        ancestors.elementKind !== "Qr";
       return [
         ...geometrySuggestions(middleOk && bareValue),
         ...expressionExtras(beforeWord, scope(), snapshot),
@@ -1005,6 +1022,9 @@ function valueSuggestions(
       return [...out, ...expressionExtras(beforeWord, scope(), snapshot)];
     }
     case "color":
+      return [...colorSuggestions(), ...expressionExtras(beforeWord, scope(), snapshot)];
+    case "background":
+      // Qr only (§7.1a): the same Color vocabulary as color:.
       return [...colorSuggestions(), ...expressionExtras(beforeWord, scope(), snapshot)];
     case "anchor": {
       // Nine-point anchors (§3.4, M3): the nine canonical tokens plus the
@@ -1073,9 +1093,19 @@ function valueSuggestions(
         detail: f === DEFAULT_IMAGE_FIT ? "image fit (the default)" : "image fit",
         group: 0 as const,
       }));
+    case "level":
+      // Qr only (§7.1a): the four error-correction levels, closed vocabulary.
+      return QR_LEVELS.map((l) => ({
+        label: l,
+        insertText: l,
+        kind: "value" as const,
+        detail: l === DEFAULT_QR_LEVEL ? "QR error correction (the default)" : "QR error correction",
+        group: 0 as const,
+      }));
     case "text":
     case "code":
     case "src":
+    case "data":
       // Outside the string: an expression (in-string handled by the caller).
       return expressionExtras(beforeWord, scope(), snapshot);
 

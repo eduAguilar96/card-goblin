@@ -14,6 +14,7 @@ import {
   type Deck,
   type IconShape,
   type ImageShape,
+  type QrShape,
   type RectShape,
   type Shape,
   type TextBoxShape,
@@ -771,6 +772,77 @@ describe("CardFaceSvg: nine-point anchors (§3.4 M3)", () => {
     expect(lines.map((l) => l.x)).toEqual(["7", "7"]);
     expect(Number(lines[0].y)).toBeCloseTo(3 + TEXT_ASCENT * 1.5, 12);
     expect(Number(lines[1].y)).toBeCloseTo(3 + TEXT_ASCENT * 1.5 + 1.3 * 1.5, 12);
+  });
+});
+
+describe("CardFaceSvg: Qr shapes (§7.1a)", () => {
+  const render = (face: Shape[]): string =>
+    renderToStaticMarkup(<CardFaceSvg xUnits={20} yUnits={28} face={face} />);
+
+  /** moduleCount 21 (a real QR's smallest size), one dark module at (0,0) —
+   * the top-left corner of the top-left finder pattern, which is always dark
+   * in a real QR (qr.test.ts's structural check), so this is representative
+   * without needing the whole matrix to hand-compute the path. */
+  const oneModule: QrShape = {
+    kind: "qr",
+    x: 2,
+    y: 2,
+    size: 10,
+    color: "black",
+    background: "white",
+    anchor: { h: "left", v: "top" },
+    moduleCount: 21,
+    modules: "1" + "0".repeat(21 * 21 - 1),
+  };
+
+  it("hand-computable markup: background rect, module unit, and the one dark module's path", () => {
+    const markup = render([oneModule]);
+    const [rect] = rectTags(markup);
+    expect(rect).toMatchObject({ x: "2", y: "2", width: "10", height: "10", fill: "white" });
+
+    // grid = moduleCount + 8 (4-module quiet zone per side, §7.1a); unit =
+    // size / grid, ROUNDED to 4 decimal places (adversarial review,
+    // 2026-08-11 — 0.0001 unit is far below print resolution, and full
+    // float precision bloated the path); the box origin is (2,2) for
+    // top_left, so the module at row0/col0 sits 4 (rounded) units in from
+    // the origin on both axes, rounded again.
+    const unit = 0.3448; // round(10/29, 4)
+    const mx = 3.3792; // round(2 + 4 × 0.3448, 4)
+    const my = 3.3792;
+    const expectedD = `M${mx} ${my}h${unit}v${unit}h-${unit}z`;
+
+    const path = /<path\b([^>]*)\/?>/.exec(markup)!;
+    const attrs = parseAttrs(path[1]);
+    expect(attrs.fill).toBe("black");
+    expect(attrs.d).toBe(expectedD);
+    // Full precision (17 significant digits) never leaks into the path.
+    expect(attrs.d).not.toContain("0.34482758620689655");
+    // ONE <path> for the whole matrix, regardless of module count.
+    expect([...markup.matchAll(/<path\b/g)]).toHaveLength(1);
+  });
+
+  it("anchor bottom_right shifts the box by (size, size) — same anchoredBoxOrigin math as Rectangle/Image", () => {
+    const shifted: QrShape = { ...oneModule, anchor: { h: "right", v: "bottom" } };
+    const markup = render([shifted]);
+    const [rect] = rectTags(markup);
+    // top_left origin was (2,2); bottom_right backs off by (size, size).
+    expect(rect).toMatchObject({ x: "-8", y: "-8", width: "10", height: "10" });
+    expect(
+      anchoredBoxOrigin(shifted, { width: shifted.size, height: shifted.size }),
+    ).toEqual({ x: -8, y: -8 });
+  });
+
+  it("background and color are independent CSS strings, not swapped", () => {
+    const markup = render([{ ...oneModule, color: "red", background: "navy" }]);
+    expect(rectTags(markup)[0].fill).toBe("navy");
+    expect(parseAttrs(/<path\b([^>]*)\/?>/.exec(markup)![1]).fill).toBe("red");
+  });
+
+  it("no dark modules → an empty path (still one <path> element, valid empty d)", () => {
+    const blank: QrShape = { ...oneModule, modules: "0".repeat(21 * 21) };
+    const markup = render([blank]);
+    const attrs = parseAttrs(/<path\b([^>]*)\/?>/.exec(markup)![1]);
+    expect(attrs.d).toBe("");
   });
 });
 

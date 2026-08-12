@@ -40,6 +40,7 @@ import type {
   IconStyle,
   ImageFit,
   LoopCaseBinding,
+  QrLevel,
   Shape,
   TextAnchor,
   TextBoxOverflow,
@@ -49,9 +50,11 @@ import {
   DEFAULT_ICON_STYLE,
   DEFAULT_IMAGE_FIT,
   DEFAULT_LINE_HEIGHT,
+  DEFAULT_QR_LEVEL,
   DEFAULT_TEXTBOX_OVERFLOW,
 } from "./model";
 import { DICIER_CODES } from "./dicier-codes";
+import { encodeQr } from "./qr";
 import { GEIST_METRICS, layoutTextBox } from "./wrap";
 
 // ---------------------------------------------------------------------------
@@ -563,6 +566,34 @@ function evalElement(el: ElementNode, ctx: EvalContext): Shape {
         fit: fitOf(el, ctx),
         anchor: anchorOf(el, ctx), // §3.4: applied to the RESOLVED box at render time
       };
+    case "Qr": {
+      // §7.1a: data resolves like text (Text coercions apply, same as
+      // Image's src); level materializes to its default like fit/style.
+      // Encoding happens HERE, at eval time (pure, deterministic — the
+      // wrap.ts precedent): the shape carries the resolved module matrix,
+      // never the source data, so the renderer only draws.
+      const data = toText(evalExpr(requireProp(el, "data"), ctx, null));
+      const level = qrLevelOf(el, ctx);
+      const encoded = encodeQr(data, level);
+      if (!encoded) {
+        throw new DataError([
+          { code: "D009", message: "QR data is too long for one code" },
+        ]);
+      }
+      return {
+        kind: "qr",
+        // §7.1a: a square box — size resolves full/half on the X axis, the
+        // same documented convention as Icon's size and TextBox's size.
+        x: numberProp(el, "x", ctx, ctx.xUnits),
+        y: numberProp(el, "y", ctx, ctx.yUnits),
+        size: numberProp(el, "size", ctx, ctx.xUnits),
+        color: colorProp(el, ctx, "black"),
+        background: backgroundProp(el, ctx),
+        anchor: anchorOf(el, ctx),
+        moduleCount: encoded.moduleCount,
+        modules: encoded.modules,
+      };
+    }
   }
 }
 
@@ -611,6 +642,16 @@ function numberProp(el: ElementNode, key: string, ctx: EvalContext, axisUnits: n
 function colorProp(el: ElementNode, ctx: EvalContext, fallback: string | null): string {
   const expr = findProp(el, "color");
   if (!expr) return fallback ?? poisoned();
+  const v = evalExpr(expr, ctx, null);
+  if (v.kind !== "color") return poisoned();
+  return v.value;
+}
+
+/** Qr `background:` (§7.1a): the same Color-property shape as colorProp, on
+ * its own key so the two never collide — default white. */
+function backgroundProp(el: ElementNode, ctx: EvalContext): string {
+  const expr = findProp(el, "background");
+  if (!expr) return "white";
   const v = evalExpr(expr, ctx, null);
   if (v.kind !== "color") return poisoned();
   return v.value;
@@ -706,6 +747,17 @@ function fitOf(el: ElementNode, ctx: EvalContext): ImageFit {
   const res = ctx.card.resolutions.get(expr);
   if (res?.kind !== "imageFit") return poisoned();
   return res.fit;
+}
+
+/** Qr `level:` (§7.1a): checker-blessed identifier or the medium default —
+ * the same follow-the-resolution shape as fitOf/styleOf. */
+function qrLevelOf(el: ElementNode, ctx: EvalContext): QrLevel {
+  const expr = findProp(el, "level");
+  if (!expr) return DEFAULT_QR_LEVEL;
+  if (expr.kind !== "Identifier") return poisoned();
+  const res = ctx.card.resolutions.get(expr);
+  if (res?.kind !== "qrLevel") return poisoned();
+  return res.level;
 }
 
 /** The literal value of a string with NO interpolation parts, else null. */

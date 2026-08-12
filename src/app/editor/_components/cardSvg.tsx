@@ -33,6 +33,7 @@ import type {
   IconStyle,
   ImageFit,
   ImageShape,
+  QrShape,
   Shape,
   TextAnchor,
   TextBoxShape,
@@ -404,6 +405,62 @@ function LiveImage({ shape, index }: { shape: ImageShape; index: number }): Reac
 }
 
 // ---------------------------------------------------------------------------
+// Qr (§7.1a)
+// ---------------------------------------------------------------------------
+
+/** The spec's quiet zone: 4 modules of `background` on every side, drawn
+ * INSIDE the declared box so adjacent art can never crowd a code's scan
+ * margin (§7.1a) — the matrix itself (`shape.modules`) does not include it. */
+const QR_QUIET_ZONE_MODULES = 4;
+
+/**
+ * Round a path coordinate/length to 4 decimal places (adversarial review,
+ * 2026-08-11): 0.0001 card-units is 0.0000125 in on a 20-unit card — far
+ * below print resolution — but full float precision (up to 17 significant
+ * digits per number) made one module's `d` segment up to 98 characters,
+ * ballooning a URL-sized QR's path to ~31 KB (and a capacity QR to
+ * ~1.56 MB). `Math.round`, not `toFixed` — `toFixed` would pad "0.3448"
+ * out to trailing zeros and stringify via a slower path.
+ */
+function roundQrCoord(n: number): number {
+  return Math.round(n * 10000) / 10000;
+}
+
+/**
+ * QR modules → SVG (§7.1a). `anchoredBoxOrigin` places the size×size box
+ * exactly like Rectangle/Image; inside it, one background `<rect>` covers
+ * the whole box (including the quiet zone) and ONE `<path>` carries every
+ * dark module — a single DOM node regardless of QR size, built as
+ * `M{x} {y}h{u}v{u}h-{u}z` per module (a fresh `M` starts an unconnected
+ * subpath, so nonzero-rule fill paints every module without the path ever
+ * "closing" across modules). The module unit is rounded once and its
+ * string reused for every module (never re-stringified per h/v segment);
+ * each module's origin is rounded too — see `roundQrCoord`.
+ */
+function renderQr(shape: QrShape, index: number): ReactElement {
+  const origin = anchoredBoxOrigin(shape, { width: shape.size, height: shape.size });
+  const grid = shape.moduleCount + QR_QUIET_ZONE_MODULES * 2;
+  const unit = roundQrCoord(shape.size / grid);
+  const unitStr = String(unit);
+  const edge = `h${unitStr}v${unitStr}h-${unitStr}z`;
+  let d = "";
+  for (let row = 0; row < shape.moduleCount; row++) {
+    for (let col = 0; col < shape.moduleCount; col++) {
+      if (shape.modules[row * shape.moduleCount + col] !== "1") continue;
+      const x = roundQrCoord(origin.x + (col + QR_QUIET_ZONE_MODULES) * unit);
+      const y = roundQrCoord(origin.y + (row + QR_QUIET_ZONE_MODULES) * unit);
+      d += `M${x} ${y}${edge}`;
+    }
+  }
+  return (
+    <g key={index}>
+      <rect x={origin.x} y={origin.y} width={shape.size} height={shape.size} fill={shape.background} />
+      <path d={d} fill={shape.color} />
+    </g>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Props and the §4.2 memo comparator
 // ---------------------------------------------------------------------------
 
@@ -509,6 +566,8 @@ function renderShape(shape: Shape, index: number, images?: ResolvedImages): Reac
       );
     case "textbox":
       return renderTextBox(shape, index);
+    case "qr":
+      return renderQr(shape, index);
     case "icon":
       // The code IS the text content: known codes ligate into glyphs; an
       // unknown code deliberately stays raw text — that failed ligature is

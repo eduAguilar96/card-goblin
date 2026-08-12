@@ -906,6 +906,154 @@ describe("Image (§3.3 M2)", () => {
   });
 });
 
+// -- Qr (§7.1a) ---------------------------------------------------------------
+
+describe("Qr (§7.1a)", () => {
+  const QR_BASE = ["x: 1", "y: 1", "size: 5", 'data: "https://example.com/a"'];
+
+  it("accepts the full property set and records a qrLevel resolution per level", () => {
+    for (const level of ["l", "m", "q", "h"] as const) {
+      const result = checkOf(withElement("Qr:", [...QR_BASE, `level: ${level}`]));
+      expect(result.diagnostics, level).toEqual([]);
+      const tpl = result.bindings.templates.get("T") as TemplateDecl;
+      const prop = (tpl.children[0] as ElementNode).properties.find(
+        (p) => p.key.name === "level",
+      )!;
+      expect(result.bindings.cards[0].resolutions.get(prop.value as never)).toEqual({
+        kind: "qrLevel",
+        level,
+      });
+    }
+  });
+
+  it("omitting level:/color:/background:/anchor: is legal — the defaults are the evaluator's business", () => {
+    expect(codesOf(withElement("Qr:", QR_BASE))).toEqual([]);
+  });
+
+  it("required-property matrix: dropping any one of x/y/size/data is E008", () => {
+    for (let i = 0; i < QR_BASE.length; i++) {
+      const key = QR_BASE[i].split(":")[0];
+      const ds = diagsOf(withElement("Qr:", QR_BASE.filter((_, j) => j !== i)));
+      expect(ds.map((d) => d.code), key).toEqual(["E008"]);
+      expect(ds[0].message).toBe(`Qr is missing required property '${key}:'`);
+    }
+  });
+
+  it("an unknown level is E008 naming the closed vocabulary", () => {
+    const ds = diagsOf(withElement("Qr:", [...QR_BASE, "level: extreme"]));
+    expect(ds.map((d) => d.code)).toEqual(["E008"]);
+    expect(ds[0].message).toBe("level: must be one of l, m, q, h");
+  });
+
+  it("level must be a bare identifier — strings and expressions are E008", () => {
+    for (const bad of ['level: "m"', "level: 1", "level: 1 + 1"]) {
+      expect(codesOf(withElement("Qr:", [...QR_BASE, bad])), bad).toEqual(["E008"]);
+    }
+  });
+
+  it("level/data/background on Text or Rectangle are unknown properties (Qr only, §7.1a)", () => {
+    for (const [prop, on, base] of [
+      ["level: m", "Text", [...TEXT_BASE, 'text: "a"']],
+      ["data: \"x\"", "Text", [...TEXT_BASE, 'text: "a"']],
+      ["background: white", "Rectangle", ["x: 0", "y: 0", "width: 1", "height: 1", "color: red"]],
+    ] as const) {
+      const ds = diagsOf(withElement(`${on}:`, [...base, prop]));
+      expect(ds.map((d) => d.code), prop).toEqual(["E008"]);
+      const key = prop.split(":")[0];
+      expect(ds[0].message).toBe(`Unknown property '${key}:' on ${on}`);
+    }
+  });
+
+  it("background is Color-typed with the same vocabulary as color", () => {
+    const head = QR_BASE;
+    expect(codesOf(withElement("Qr:", [...head, "background: white"]))).toEqual([]);
+    expect(codesOf(withElement("Qr:", [...head, "background: #112233"]))).toEqual([]);
+    expect(codesOf(withElement("Qr:", [...head, 'background: "white"']))).toEqual(["E003"]);
+  });
+
+  it("data is Text-typed with the §3.5 coercions: columns, Numbers, enums, interpolation", () => {
+    const head = QR_BASE.slice(0, 3);
+    expect(codesOf(withElement("Qr:", [...head, "data: [name]"]))).toEqual([]);
+    expect(codesOf(withElement("Qr:", [...head, "data: [cost]"]))).toEqual([]); // Number column legal
+    expect(codesOf(withElement("Qr:", [...head, "data: [suit]"]))).toEqual([]);
+    expect(
+      codesOf(withElement("Qr:", [...head, 'data: "card/[name]-[cost]"'])),
+    ).toEqual([]);
+  });
+
+  it("a Color or Bool data is E003 (the non-coercing kinds)", () => {
+    const head = QR_BASE.slice(0, 3);
+    expect(codesOf(withElement("Qr:", [...head, "data: #ff0000"]))).toEqual(["E003"]);
+    expect(codesOf(withElement("Qr:", [...head, "data: 1 == 2"]))).toEqual(["E003"]);
+  });
+
+  it("geometry keywords resolve in x/y/size (full/half legal, X axis per Icon's size precedent)", () => {
+    expect(
+      codesOf(withElement("Qr:", ["x: full", "y: half", "size: half", 'data: "u"'])),
+    ).toEqual([]);
+  });
+
+  it("x: middle is E007 on Qr — the §3.4 sugar is Text/Icon only", () => {
+    const ds = diagsOf(withElement("Qr:", ["x: middle", "y: 1", "size: 5", 'data: "u"']));
+    expect(ds.map((d) => d.code)).toEqual(["E007"]);
+    expect(ds[0].message).toContain("Text or Icon");
+  });
+
+  it("anchor: is legal on Qr, resolved like every other drawable (§3.4)", () => {
+    expect(
+      codesOf(withElement("Qr:", [...QR_BASE, "anchor: bottom_right"])),
+    ).toEqual([]);
+  });
+
+  it("Qr inside Repeat sees the repeat variable", () => {
+    const source = src(
+      ...PRELUDE,
+      "Template: T",
+      "  Repeat: [cost] as i",
+      "    Qr:",
+      "      x: [i] * 2",
+      "      y: 0",
+      "      size: 1",
+      '      data: "card/[i]"',
+      "Card: C",
+      ...CARD_ITEMS.map((i) => `  ${i}`),
+    );
+    expect(diagsOf(source)).toEqual([]);
+  });
+
+  it("templates with a Qr are checked per using Card (§3.6): a data ref must resolve in each context", () => {
+    const source = src(
+      "Sheet: A",
+      "  column code: Text",
+      "Sheet: B",
+      "  column other: Text",
+      "Template: T",
+      "  Qr:",
+      "    x: 0",
+      "    y: 0",
+      "    size: 5",
+      "    data: [code]",
+      "Card: CA",
+      "  sheet: A",
+      "  size: poker",
+      "  x_units: 20",
+      "  y_units: auto",
+      "  Front: T",
+      "Card: CB",
+      "  sheet: B",
+      "  size: poker",
+      "  x_units: 20",
+      "  y_units: auto",
+      "  Front: T",
+    );
+    // CA's context resolves [code]; CB's does not — one E002 (context-free
+    // message, deduped across using Cards at the template's range).
+    const ds = diagsOf(source);
+    expect(ds.map((d) => d.code)).toEqual(["E002"]);
+    expect(ds[0].message).toBe("Unknown reference [code]");
+  });
+});
+
 // -- Image auto dimension (§3.3, 2026-08-10) ----------------------------------
 
 describe("Image auto dimension (§3.3)", () => {
