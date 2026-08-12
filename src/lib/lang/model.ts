@@ -121,6 +121,26 @@ export type ImageFit = (typeof IMAGE_FITS)[number];
 export const DEFAULT_IMAGE_FIT: ImageFit = "contain";
 
 /**
+ * Local-asset scheme for Image `src:` (§7.1b, M3): `"asset:dragon"` refers to
+ * an upload in the Assets drawer's IndexedDB library by name, rather than a
+ * URL. Zero language change — `src:` stays a plain Text expression, so the
+ * scheme is a string convention the checker (W005) and renderers (cardSvg.tsx,
+ * pdfRaster.tsx) parse, not new grammar. Shared here (not in an editor/app
+ * module) because both the pure checker and the renderers need it, and
+ * src/lib/lang stays framework-free (CLAUDE.md code map).
+ */
+export const ASSET_SRC_SCHEME = "asset:";
+
+/** The asset name in a `src:` value shaped `"asset:<name>"`, or null when the
+ * value doesn't use the scheme. Pure string parsing — no validation of the
+ * name itself (callers check that against their own asset library / the
+ * identifier rules, §3.1). Exported for the checker and both renderers so
+ * "starts with asset:" is spelled once. */
+export function parseAssetSrc(src: string): string | null {
+  return src.startsWith(ASSET_SRC_SCHEME) ? src.slice(ASSET_SRC_SCHEME.length) : null;
+}
+
+/**
  * TextBox `overflow:` vocabulary (§3.3, M3): what happens when the wrapped
  * text is taller than the box. Closed set like IMAGE_FITS — the checker's
  * vocabulary, the completion values, and the wiki's overflow table (docFacts)

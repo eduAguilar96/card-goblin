@@ -1,10 +1,12 @@
 /**
- * Project file export/import (DESIGN.md §7.1): the pure filename + payload
- * helpers, the parsePersisted-shared validation (invalid classes leave a real
- * store untouched), the two-step confirm's three static states, a full
- * export → import round-trip through `replaceProject` on a real store, and
- * the §7.1 autosave posture — an import persists through the normal debounce
- * with NO edit needed (unlike reset, which is muted).
+ * Project file export/import (DESIGN.md §7.1, §7.1b): the pure filename +
+ * v2 payload helpers, the shared-with-persistence.ts validation (invalid
+ * classes leave a real store AND asset library untouched), v1 compatibility
+ * (imports forever, clears the library), the two-step confirm's three static
+ * states, a full export → import round-trip (project + assets) through
+ * `replaceProject`/`assetStore` on real stores, and the §7.1 autosave
+ * posture — an import persists through the normal debounce with NO edit
+ * needed (unlike reset, which is muted).
  *
  * Static markup only, as everywhere: the file-picker flow (hidden input,
  * File.text()) has no driver in this project, so the pure pieces it leans on
@@ -28,14 +30,29 @@ import {
   type ProjectStorage,
 } from "@/app/editor/_store/persistence";
 import {
+  ASSET_MAX_BYTES,
+  createAssetStore,
+  createInMemoryAssetAdapter,
+  type StoredAsset,
+} from "@/app/editor/_store/assetStore";
+import {
   buildProjectExport,
+  EXPORT_FAILED_MESSAGE,
   IMPORT_INVALID_MESSAGE,
-  parseImportedProject,
+  PROJECT_FILE_VERSION,
+  parseImportedProjectFile,
   ProjectFileButtons,
   projectFileName,
+  runExport,
 } from "@/app/editor/_components/projectFile";
 
 const stripTags = (markup: string): string => markup.replace(/<[^>]+>/g, "");
+
+const dragonAsset: StoredAsset = {
+  name: "dragon",
+  mime: "image/png",
+  bytes: new Uint8Array([1, 2, 3, 4]),
+};
 
 /** A model with exactly the given Card blocks (compiled, not hand-built). */
 function modelWithDecks(cardNames: string[]): RenderModel {
@@ -87,10 +104,10 @@ describe("projectFileName", () => {
   });
 });
 
-// -- payload round-trip ------------------------------------------------------
+// -- payload round-trip (v2, §7.1b) ------------------------------------------
 
 describe("buildProjectExport", () => {
-  it("emits the §6.2 autosave payload: bytes parse back to the same project", () => {
+  it("emits a v2 payload: code/sheets parse back via parseImportedProjectFile", async () => {
     const sheets: SheetsState = {
       S: {
         // Orphaned tombstone keys and the ◆29 flags are part of the project.
@@ -99,47 +116,128 @@ describe("buildProjectExport", () => {
       },
     };
     const code = "Sheet: S\n  column a: Text\n";
-    const { json } = buildProjectExport(code, sheets, null);
-    expect(JSON.parse(json).version).toBe(PERSIST_VERSION);
-    const seed = parsePersisted(json);
-    expect(seed).not.toBeNull();
-    expect(seed?.code).toBe(code);
-    expect(seed?.sheets.S.rows).toEqual(sheets.S.rows);
-    expect(seed?.sheets.S.editedRows).toEqual([true, false]);
+    const { json } = await buildProjectExport(code, sheets, null);
+    expect(JSON.parse(json).version).toBe(PROJECT_FILE_VERSION);
+    const parsed = parseImportedProjectFile(json);
+    if (!("seed" in parsed)) throw new Error("export did not import");
+    expect(parsed.seed.code).toBe(code);
+    expect(parsed.seed.sheets.S.rows).toEqual(sheets.S.rows);
+    expect(parsed.seed.sheets.S.editedRows).toEqual([true, false]);
+    expect(parsed.assets).toEqual([]);
   });
 
-  it("names the demo project's export after its single deck", () => {
+  it("names the demo project's export after its single deck", async () => {
     const state = createEditorStore().getState();
-    const { filename } = buildProjectExport(
+    const { filename } = await buildProjectExport(
       state.code,
       state.sheets,
       state.compile?.model ?? null,
     );
     expect(filename).toBe("Monster.cardgoblin.json");
   });
+
+  it("carries assets through as base64, byte-exact", async () => {
+    const { json } = await buildProjectExport("", {}, null, [dragonAsset]);
+    const payload = JSON.parse(json);
+    expect(payload.assets.dragon.mime).toBe("image/png");
+    const parsed = parseImportedProjectFile(json);
+    if (!("assets" in parsed)) throw new Error("export did not import");
+    expect(parsed.assets).toHaveLength(1);
+    expect(parsed.assets[0].name).toBe("dragon");
+    expect(parsed.assets[0].mime).toBe("image/png");
+    expect(new Uint8Array(parsed.assets[0].bytes as Uint8Array)).toEqual(dragonAsset.bytes);
+  });
+
+  it("reads Blob-backed asset bytes too (the real browser adapter's shape)", async () => {
+    const blobAsset: StoredAsset = {
+      name: "banner",
+      mime: "image/jpeg",
+      bytes: new Blob([new Uint8Array([9, 9, 9])], { type: "image/jpeg" }),
+    };
+    const { json } = await buildProjectExport("", {}, null, [blobAsset]);
+    const parsed = parseImportedProjectFile(json);
+    if (!("assets" in parsed)) throw new Error("export did not import");
+    expect(new Uint8Array(parsed.assets[0].bytes as Uint8Array)).toEqual(
+      new Uint8Array([9, 9, 9]),
+    );
+  });
 });
 
-// -- import validation (same rules as autosave restore) ----------------------
+// -- import validation (v1 + v2) ---------------------------------------------
 
-describe("parseImportedProject", () => {
+describe("parseImportedProjectFile", () => {
   const INVALID: [label: string, raw: string][] = [
     ["unparseable JSON", "{not json"],
     ["a JSON scalar", "42"],
     [
-      "a version mismatch",
-      JSON.stringify({ version: PERSIST_VERSION + 1, code: "", sheets: {} }),
+      "an unknown version",
+      JSON.stringify({ version: 99, code: "", sheets: {}, assets: {} }),
     ],
-    ["a missing code field", JSON.stringify({ version: PERSIST_VERSION, sheets: {} })],
+    ["a v1 missing code field", JSON.stringify({ version: PERSIST_VERSION, sheets: {} })],
     [
-      "sheets as an array",
+      "v1 sheets as an array",
       JSON.stringify({ version: PERSIST_VERSION, code: "", sheets: [] }),
     ],
     [
-      "a non-string cell value",
+      "v1 a non-string cell value",
       JSON.stringify({
         version: PERSIST_VERSION,
         code: "",
         sheets: { S: { rows: [{ a: 5 }], editedRows: [true] } },
+      }),
+    ],
+    [
+      "v2 missing assets key",
+      JSON.stringify({ version: PROJECT_FILE_VERSION, code: "", sheets: {} }),
+    ],
+    [
+      "v2 an invalid asset name",
+      JSON.stringify({
+        version: PROJECT_FILE_VERSION,
+        code: "",
+        sheets: {},
+        assets: { "not an identifier": { mime: "image/png", bytes: "AAAA" } },
+      }),
+    ],
+    [
+      "v2 non-base64 asset bytes",
+      JSON.stringify({
+        version: PROJECT_FILE_VERSION,
+        code: "",
+        sheets: {},
+        assets: { dragon: { mime: "image/png", bytes: "not base64!!" } },
+      }),
+    ],
+    [
+      "v2 an asset over the 2 MB cap",
+      JSON.stringify({
+        version: PROJECT_FILE_VERSION,
+        code: "",
+        sheets: {},
+        assets: {
+          dragon: {
+            mime: "image/png",
+            bytes: Buffer.alloc(ASSET_MAX_BYTES + 1).toString("base64"),
+          },
+        },
+      }),
+    ],
+    [
+      "v2 a missing mime field",
+      JSON.stringify({
+        version: PROJECT_FILE_VERSION,
+        code: "",
+        sheets: {},
+        assets: { dragon: { bytes: "AAAA" } },
+      }),
+    ],
+    [
+      "v2 a non-image mime (adversarial m8)",
+      JSON.stringify({
+        version: PROJECT_FILE_VERSION,
+        code: "",
+        sheets: {},
+        assets: { dragon: { mime: "text/html", bytes: "AAAA" } },
       }),
     ],
   ];
@@ -148,18 +246,51 @@ describe("parseImportedProject", () => {
     it(`${label} → the inline error, and a live store is untouched`, () => {
       const store = createEditorStore();
       const before = store.getState();
-      expect(parseImportedProject(raw)).toEqual({ error: IMPORT_INVALID_MESSAGE });
+      expect(parseImportedProjectFile(raw)).toEqual({ error: IMPORT_INVALID_MESSAGE });
       // Nothing commits without a seed: state is reference-identical.
       expect(store.getState()).toBe(before);
     });
   }
 
-  it("a valid payload yields the seed replaceProject expects", () => {
-    const raw = buildProjectExport("Sheet: S\n  column a: Text\n", {
-      S: { rows: [{ a: "1" }], editedRows: [true] },
-    }, null).json;
-    const parsed = parseImportedProject(raw);
+  it('caller 2 — a "__proto__" sheet name in a v2 file is a plain own key too (adversarial m11)', () => {
+    // Same hazard as persistence.ts's parsePersisted (which shares
+    // parseSheetsPayload with this v2 parser) — pinned at THIS entry point
+    // too, since it's now a second, independent caller of the same helper.
+    // Built from a raw JSON string, not a `{ __proto__: ... }` object
+    // literal (which sets the prototype at parse time instead of creating
+    // an own property, defeating the premise — see persistence.test.ts).
+    const raw =
+      `{"version":${PROJECT_FILE_VERSION},"code":"","assets":{},` +
+      `"sheets":{"__proto__":{"rows":[{"a":"1"}],"editedRows":[true]}}}`;
+    const parsed = parseImportedProjectFile(raw);
+    expect("seed" in parsed).toBe(true);
+    const sheets = "seed" in parsed ? parsed.seed.sheets : {};
+    expect(Object.hasOwn(sheets, "__proto__")).toBe(true);
+    expect(sheets.__proto__?.rows).toEqual([{ a: "1" }]);
+    expect(Object.getPrototypeOf({})).toBe(Object.prototype); // global untouched
+  });
+
+  it("a valid v2 payload yields the seed replaceProject expects, plus its assets", async () => {
+    const { json } = await buildProjectExport(
+      "Sheet: S\n  column a: Text\n",
+      { S: { rows: [{ a: "1" }], editedRows: [true] } },
+      null,
+      [dragonAsset],
+    );
+    const parsed = parseImportedProjectFile(json);
     expect("seed" in parsed && parsed.seed.code).toContain("Sheet: S");
+    expect("assets" in parsed && parsed.assets.map((a) => a.name)).toEqual(["dragon"]);
+  });
+
+  it("a valid v1 payload imports with an EMPTY asset list (§7.1b: v1 has none)", () => {
+    const raw = JSON.stringify({
+      version: PERSIST_VERSION,
+      code: "Sheet: S\n  column a: Text\n",
+      sheets: { S: { rows: [{ a: "1" }], editedRows: [true] } },
+    });
+    const parsed = parseImportedProjectFile(raw);
+    expect("seed" in parsed && parsed.seed.code).toContain("Sheet: S");
+    expect("assets" in parsed && parsed.assets).toEqual([]);
   });
 });
 
@@ -182,16 +313,18 @@ describe("ProjectFileButtons", () => {
     expect(markup).toContain('accept=".json,application/json"');
   });
 
-  it("armed (test seam): names the file in the question and offers Import / Keep", () => {
+  it("armed (test seam): names the file, mentions assets, offers Import / Keep", () => {
     const markup = renderToStaticMarkup(
       <ProjectFileButtons
         onExport={() => {}}
         onImport={() => {}}
-        initialPending={{ seed, filename: "orcs.cardgoblin.json" }}
+        initialPending={{ seed, assets: [], filename: "orcs.cardgoblin.json" }}
       />,
     );
     const text = stripTags(markup);
-    expect(text).toContain("Replace your project with “orcs.cardgoblin.json”?");
+    expect(text).toContain(
+      "Replace your project (and your uploaded assets) with “orcs.cardgoblin.json”?",
+    );
     expect(text).toContain("Import");
     expect(text).toContain("Keep");
     expect(markup).toContain("text-red-400"); // the destructive click is marked
@@ -210,6 +343,43 @@ describe("ProjectFileButtons", () => {
     // The buttons stay usable beside the message (retry is a click away).
     expect(stripTags(markup)).toContain("Import project");
   });
+
+  it("export failure (test seam): the SAME inline-alert surface as an invalid import", () => {
+    const markup = renderToStaticMarkup(
+      <ProjectFileButtons
+        onExport={() => {}}
+        onImport={() => {}}
+        initialError={EXPORT_FAILED_MESSAGE}
+      />,
+    );
+    expect(markup).toContain('role="alert"');
+    expect(stripTags(markup)).toContain(EXPORT_FAILED_MESSAGE);
+    expect(stripTags(markup)).toContain("Export project");
+  });
+});
+
+// -- export rejection handling (adversarial m7: no interaction driver, so ---
+// -- the button's catch logic is tested through its pure extraction) --------
+
+describe("runExport (§7.1b m7 — exportEditorProject is async and can reject)", () => {
+  it("resolves to null when onExport succeeds", async () => {
+    await expect(runExport(() => {})).resolves.toBeNull();
+    await expect(runExport(async () => {})).resolves.toBeNull();
+  });
+
+  it("resolves to EXPORT_FAILED_MESSAGE — never an unhandled rejection — when onExport throws", async () => {
+    await expect(
+      runExport(() => {
+        throw new Error("boom");
+      }),
+    ).resolves.toBe(EXPORT_FAILED_MESSAGE);
+  });
+
+  it("resolves to EXPORT_FAILED_MESSAGE when the returned promise rejects", async () => {
+    await expect(runExport(() => Promise.reject(new Error("IDB read failed")))).resolves.toBe(
+      EXPORT_FAILED_MESSAGE,
+    );
+  });
 });
 
 // -- store round-trip + the §7.1 autosave posture ----------------------------
@@ -226,14 +396,14 @@ function memoryStorage(): ProjectStorage & { map: Map<string, string> } {
 }
 
 describe("import → replaceProject on a real store", () => {
-  it("round-trips a full project: edited demo out, identical project in", () => {
+  it("round-trips a full project: edited demo out, identical project in", async () => {
     const source = createEditorStore();
     source.getState().setCell("Monsters", 0, "health", "3");
     source.getState().addRow("Monsters"); // a pristine row (editedRows: false)
     const { code, sheets, compile } = source.getState();
-    const { json } = buildProjectExport(code, sheets, compile?.model ?? null);
+    const { json } = await buildProjectExport(code, sheets, compile?.model ?? null);
 
-    const parsed = parseImportedProject(json);
+    const parsed = parseImportedProjectFile(json);
     if (!("seed" in parsed)) throw new Error("export did not import");
     const target = createEditorStore();
     target.getState().replaceProject(parsed.seed);
@@ -244,6 +414,49 @@ describe("import → replaceProject on a real store", () => {
     expect(s.sheets.Monsters.editedRows).toEqual([true, true, false]);
     // And it compiles like the source did (Dragon's health 3 → 9 cards).
     expect(s.lastGoodModel?.model.decks[0].cards).toHaveLength(9);
+  });
+
+  it("round-trips the asset library byte-exact via assetStore.replaceAll", async () => {
+    const sourceAssets = createAssetStore(createInMemoryAssetAdapter([dragonAsset]));
+    await sourceAssets.refresh();
+    const asset = await sourceAssets.getBytes("dragon");
+    if (!asset) throw new Error("seed asset missing");
+    const { json } = await buildProjectExport("", {}, null, [asset]);
+
+    const parsed = parseImportedProjectFile(json);
+    if (!("assets" in parsed)) throw new Error("export did not import");
+
+    const targetAssets = createAssetStore(createInMemoryAssetAdapter());
+    await targetAssets.replaceAll(parsed.assets);
+    expect(targetAssets.getAssetNames()).toEqual(new Set(["dragon"]));
+    const restored = await targetAssets.getBytes("dragon");
+    expect(restored?.bytes).toEqual(dragonAsset.bytes);
+  });
+
+  it("v1 import clears a target library (replaceAll([]))", async () => {
+    const targetAssets = createAssetStore(createInMemoryAssetAdapter([dragonAsset]));
+    await targetAssets.refresh();
+    expect(targetAssets.getAssetNames().size).toBe(1);
+    const parsed = parseImportedProjectFile(
+      JSON.stringify({ version: PERSIST_VERSION, code: "", sheets: {} }),
+    );
+    if (!("assets" in parsed)) throw new Error("v1 file did not import");
+    await targetAssets.replaceAll(parsed.assets);
+    expect(targetAssets.getAssetNames().size).toBe(0);
+  });
+
+  it("an invalid v2 asset entry rejects the WHOLE file, leaving a target store untouched", async () => {
+    const targetAssets = createAssetStore(createInMemoryAssetAdapter([dragonAsset]));
+    await targetAssets.refresh();
+    const raw = JSON.stringify({
+      version: PROJECT_FILE_VERSION,
+      code: "ok code",
+      sheets: {},
+      assets: { imp: { mime: "image/png", bytes: "not base64!!" } },
+    });
+    expect(parseImportedProjectFile(raw)).toEqual({ error: IMPORT_INVALID_MESSAGE });
+    // Never reached replaceAll — the store's original library survives.
+    expect(targetAssets.getAssetNames()).toEqual(new Set(["dragon"]));
   });
 
   it("persists through the normal autosave debounce with NO edit (§7.1 — import is not muted)", () => {

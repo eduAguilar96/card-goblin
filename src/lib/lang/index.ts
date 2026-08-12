@@ -39,6 +39,7 @@ export { generateModel } from "./generate";
 export type { EditedRows, GenerateResult, SheetRows } from "./generate";
 export {
   ANCHOR_TOKENS,
+  ASSET_SRC_SCHEME,
   DEFAULT_ANCHOR,
   DEFAULT_ICON_STYLE,
   DEFAULT_IMAGE_FIT,
@@ -50,6 +51,7 @@ export {
   QR_LEVELS,
   TEXTBOX_OVERFLOWS,
   parseAnchor,
+  parseAssetSrc,
 } from "./model";
 export type {
   Anchor,
@@ -98,10 +100,19 @@ export interface CompileResult {
   diagnostics: Diagnostic[];
 }
 
-/** Parse + check a Goblin source. Never throws. */
-export function compileSource(source: string): CompileResult {
+/**
+ * Parse + check a Goblin source. Never throws. `assetNames` is additive
+ * (§7.1b): the current Assets-drawer library, so a literal `asset:` Image
+ * `src:` whose name isn't in it gets W005 (check.ts). Omitted entirely (not
+ * just empty), W005 never fires — callers with no notion of an asset library
+ * (most compiler-level tests) see identical diagnostics to before §7.1b.
+ */
+export function compileSource(
+  source: string,
+  assetNames?: ReadonlySet<string>,
+): CompileResult {
   const { program, diagnostics: parseDiagnostics } = parse(source);
-  const { bindings, diagnostics: checkDiagnostics } = check(program);
+  const { bindings, diagnostics: checkDiagnostics } = check(program, assetNames);
   const diagnostics = [...parseDiagnostics, ...checkDiagnostics].sort(compareDiagnostics);
   return { program, bindings, diagnostics };
 }
@@ -124,8 +135,9 @@ export function compileProject(
   code: string,
   sheets: SheetRows,
   editedRows?: EditedRows,
+  assetNames?: ReadonlySet<string>,
 ): ProjectResult {
-  const compiled = compileSource(code);
+  const compiled = compileSource(code, assetNames);
   const generated = generateModel(compiled.program, compiled.bindings, sheets, editedRows);
   return {
     ...compiled,

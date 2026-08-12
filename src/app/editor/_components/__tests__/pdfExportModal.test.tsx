@@ -124,6 +124,40 @@ function imageModel(): RenderModel {
   return result.model;
 }
 
+/** A one-card model with BOTH a remote Image and an `asset:` Image (§7.1b) —
+ * the M2 adversarial case for the pre-flight's "Checking…" count. */
+function mixedImageModel(): RenderModel {
+  const result = compileProject(
+    [
+      "Sheet: S",
+      "  column name: Text",
+      "Template: T",
+      "  Image:",
+      "    x: 0",
+      "    y: 0",
+      "    width: 10",
+      "    height: 10",
+      '    src: "https://example.com/[name].png"',
+      "  Image:",
+      "    x: 0",
+      "    y: 10",
+      "    width: 10",
+      "    height: 10",
+      '    src: "asset:dragon"',
+      "Card: Art",
+      "  sheet: S",
+      "  size: poker",
+      "  x_units: 20",
+      "  y_units: auto",
+      "  Front: T",
+    ].join("\n") + "\n",
+    { S: [{ name: "a" }] },
+    { S: [true] },
+  );
+  expect(result.diagnostics).toEqual([]);
+  return result.model;
+}
+
 describe("PdfExportModal — image pre-flight (§3.3 M2)", () => {
   beforeEach(resetSessionPdfOptions);
 
@@ -143,6 +177,16 @@ describe("PdfExportModal — image pre-flight (§3.3 M2)", () => {
     const markup = render(demoModel());
     expect(markup).not.toContain("Checking");
     expect(markup).not.toContain("could not be embedded");
+  });
+
+  it("§7.1b M2: 'Checking…' counts only REMOTE sources — asset: never needs the CORS pre-flight", () => {
+    // Two image shapes: one remote URL, one asset: reference. A modal that
+    // reverted to counting the FULL imageUrlsUsed list (asset included)
+    // would say "Checking 2 images…"; wired to remoteImageUrlsUsed it says
+    // 1 — the asset resolves locally and was never part of this check.
+    const markup = render(mixedImageModel());
+    expect(markup).toContain("Checking 1 image…");
+    expect(markup).not.toContain("Checking 2 images…");
   });
 
   it("imageEmbedWarning words the §3.3 warning with counts", () => {

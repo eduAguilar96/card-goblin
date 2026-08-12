@@ -7,12 +7,19 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { TextShape } from "@/lib/lang";
 import { DEMO_PROJECT_SOURCE } from "@/lib/lang/demoProject";
-import type { EditorStore, SchemaColumn, SheetSchema, SheetsState } from "../editorStore";
+import type {
+  EditorSeed,
+  EditorStore,
+  SchemaColumn,
+  SheetSchema,
+  SheetsState,
+} from "../editorStore";
 import {
   COMPILE_DEBOUNCE_MS,
   createEditorStore,
   reconcileSheets,
 } from "../editorStore";
+import { createAssetStore, createInMemoryAssetAdapter } from "../assetStore";
 
 afterEach(() => {
   vi.useRealTimers();
@@ -157,6 +164,100 @@ describe("debounced recompile", () => {
     expect(heartsOf(store, 0)).toBe(1);
     vi.advanceTimersByTime(10 * COMPILE_DEBOUNCE_MS);
     expect(compiles.count).toBe(1); // the pending timer was consumed, not just copied
+  });
+});
+
+// -- asset library changes are a compile input too (§7.1b) -------------------
+
+describe("asset library changes trigger a recompile (§7.1b)", () => {
+  /** A Card whose Front references a literal, as-yet-unknown asset — the
+   * carrier for observing whether the compile's W005 tracks the library. */
+  const assetSeed: EditorSeed = {
+    code:
+      [
+        "Sheet: S",
+        "Template: T",
+        "  Image:",
+        "    x: 0",
+        "    y: 0",
+        "    width: 1",
+        "    height: 1",
+        '    src: "asset:dragon"',
+        "Card: C",
+        "  sheet: S",
+        "  size: poker",
+        "  x_units: 20",
+        "  y_units: auto",
+        "  Front: T",
+      ].join("\n") + "\n",
+    sheets: { S: { rows: [], editedRows: [] } },
+  };
+
+  const w005 = (store: EditorStore): boolean =>
+    (store.getState().compile?.diagnostics ?? []).some((d) => d.code === "W005");
+
+  it("compileProject reads the injected asset source's names at eager-compile time", async () => {
+    const empty = createEditorStore(assetSeed, createAssetStore(createInMemoryAssetAdapter()));
+    expect(w005(empty)).toBe(true);
+
+    const seededSource = createAssetStore(
+      createInMemoryAssetAdapter([{ name: "dragon", mime: "image/png", bytes: new Uint8Array([1]) }]),
+    );
+    await seededSource.refresh(); // populated BEFORE the store's eager compile runs
+    const seeded = createEditorStore(assetSeed, seededSource);
+    expect(w005(seeded)).toBe(false);
+  });
+
+  it("an uploaded asset clears a stale W005 after the debounce — same delay as setCell", async () => {
+    vi.useFakeTimers();
+    const assetSource = createAssetStore(createInMemoryAssetAdapter());
+    const store = createEditorStore(assetSeed, assetSource);
+    expect(w005(store)).toBe(true);
+
+    const compiles = countCompiles(store);
+    await assetSource.upload("dragon", "image/png", new Uint8Array([1]));
+    expect(compiles.count).toBe(0); // debounced, not synchronous
+    vi.advanceTimersByTime(COMPILE_DEBOUNCE_MS - 1);
+    expect(compiles.count).toBe(0);
+    vi.advanceTimersByTime(1);
+    expect(compiles.count).toBe(1);
+    expect(w005(store)).toBe(false);
+  });
+
+  it("a burst of asset changes collapses to ONE trailing recompile", async () => {
+    vi.useFakeTimers();
+    const assetSource = createAssetStore(createInMemoryAssetAdapter());
+    const store = createEditorStore(assetSeed, assetSource);
+    const compiles = countCompiles(store);
+    await assetSource.upload("dragon", "image/png", new Uint8Array([1]));
+    await assetSource.rename("dragon", "wyrm");
+    await assetSource.upload("dragon", "image/png", new Uint8Array([2]));
+    expect(compiles.count).toBe(0);
+    vi.advanceTimersByTime(COMPILE_DEBOUNCE_MS);
+    expect(compiles.count).toBe(1); // not three
+    expect(w005(store)).toBe(false); // "dragon" exists again after the burst
+  });
+
+  it("with NO override, the store defaults to the real assetStore singleton (additive param)", () => {
+    // The demo project never references asset: — an unrelated default source
+    // must not change its (already covered elsewhere) clean-compile behavior.
+    const store = createEditorStore();
+    expect(w005(store)).toBe(false);
+  });
+
+  it("a W005-only compile is still GOOD — isStale stays false and lastGoodModel updates (adversarial M1)", () => {
+    // §4.2: "good" is defined as zero ERROR-severity diagnostics; warnings
+    // (W005 included) must never flip that. A mutant that made W005 an
+    // error, or that made isGood count warnings, would otherwise still pass
+    // every OTHER test in this file (none of them assert isStale/lastGood
+    // against a W005-bearing compile specifically).
+    const store = createEditorStore(assetSeed, createAssetStore(createInMemoryAssetAdapter()));
+    const state = store.getState();
+    expect(w005(store)).toBe(true); // the premise: this compile DOES carry W005
+    expect(state.isStale).toBe(false);
+    expect(state.lastGoodModel).not.toBeNull();
+    expect(state.lastGoodSchema).not.toBeNull();
+    expect(state.compile?.diagnostics.some((d) => d.severity === "error")).toBe(false);
   });
 });
 

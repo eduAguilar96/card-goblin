@@ -19,7 +19,11 @@
  *   retrying: private-mode and quota errors don't heal mid-session.
  * - RESET removes both keys and reseeds via `replaceProject` inside a muted
  *   subscription, so the reset itself is not re-persisted — "clears storage"
- *   stays literally true until the next user edit.
+ *   stays literally true until the next user edit. It also clears the §7.1b
+ *   Assets-drawer library (IndexedDB, independent of these two localStorage
+ *   keys) — best-effort, like every other asset-store operation: a disabled
+ *   or already-empty library is a no-op, never a blocker for the rest of the
+ *   reset.
  * - MULTI-TAB is last-writer-wins (no `storage`-event merging in v1, §6.2).
  *
  * SSR: everything above the singleton wiring is window-free and node-testable
@@ -36,6 +40,7 @@ import {
   type EditorStore,
   type SheetsState,
 } from "@/app/editor/_store/editorStore";
+import { assetStore } from "@/app/editor/_store/assetStore";
 
 /** Save debounce (§6.2) — separate from COMPILE_DEBOUNCE_MS by design. */
 export const PERSIST_DEBOUNCE_MS = 1000;
@@ -64,25 +69,36 @@ export interface ProjectStorage {
 // Pure serialize / validate
 // ---------------------------------------------------------------------------
 
-/** The §6.2 payload: exactly what a reload cannot recompute. */
-export function serializeProject(code: string, sheets: SheetsState): string {
+/** The `sheets` shape both the v1 autosave/project-file payload AND the
+ * §7.1b v2 project-file payload carry verbatim — extracted so
+ * `serializeProject` and projectFile.tsx's v2 exporter build it identically.
+ * Explicit field picks: whatever else SheetState grows later must opt in
+ * here (and bump a version if a reload can't ignore it). */
+export function sheetsToPersisted(
+  sheets: SheetsState,
+): Record<string, { rows: Record<string, string>[]; editedRows: boolean[] }> {
   const persistedSheets: Record<string, { rows: Record<string, string>[]; editedRows: boolean[] }> =
     {};
   for (const [name, sheet] of Object.entries(sheets)) {
-    // Explicit field picks: whatever else SheetState grows later must opt in
-    // here (and bump the version if a reload can't ignore it).
     persistedSheets[name] = { rows: sheet.rows, editedRows: sheet.editedRows };
   }
-  return JSON.stringify({ version: PERSIST_VERSION, code, sheets: persistedSheets });
+  return persistedSheets;
 }
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
+/** The §6.2 payload: exactly what a reload cannot recompute. */
+export function serializeProject(code: string, sheets: SheetsState): string {
+  return JSON.stringify({ version: PERSIST_VERSION, code, sheets: sheetsToPersisted(sheets) });
+}
+
+export const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
 /**
- * Parse + shape-validate a raw payload → a store seed, or null if ANYTHING
- * is off (§6.2: no partial restores — half a project restored silently is
- * worse than the demo plus a quarantined original).
+ * Shape-validate a payload's `sheets` object (the SAME strictness
+ * `parsePersisted` has always applied) → a store-ready `SheetsState`, or null
+ * if anything is off. Shared with projectFile.tsx's v2 format — the sheet
+ * shape itself never changed when the project-file envelope grew `assets`
+ * (§7.1b); only the outer version/keys did.
  *
  * Strict about what matters, lenient where the seed contract already is:
  * `rows` must be string-valued records (orphaned `__orphan__*` keys are
@@ -90,20 +106,11 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
  * be an array — createEditorStore/replaceProject normalize misalignment and
  * non-`true` entries per the EditorSeed contract.
  */
-export function parsePersisted(raw: string): EditorSeed | null {
-  let payload: unknown;
-  try {
-    payload = JSON.parse(raw);
-  } catch {
-    return null;
-  }
-  if (!isRecord(payload) || payload.version !== PERSIST_VERSION) return null;
-  if (typeof payload.code !== "string" || !isRecord(payload.sheets)) return null;
-
+export function parseSheetsPayload(raw: Record<string, unknown>): SheetsState | null {
   // Null prototype: a hand-crafted payload with a "__proto__" sheet name must
   // not hit the prototype setter (it would silently drop the sheet on restore).
   const sheets: SheetsState = Object.create(null) as SheetsState;
-  for (const [name, sheet] of Object.entries(payload.sheets)) {
+  for (const [name, sheet] of Object.entries(raw)) {
     if (!isRecord(sheet) || !Array.isArray(sheet.rows) || !Array.isArray(sheet.editedRows)) {
       return null;
     }
@@ -117,6 +124,25 @@ export function parsePersisted(raw: string): EditorSeed | null {
     }
     sheets[name] = { rows, editedRows: sheet.editedRows.map((flag) => flag === true) };
   }
+  return sheets;
+}
+
+/**
+ * Parse + shape-validate a raw payload → a store seed, or null if ANYTHING
+ * is off (§6.2: no partial restores — half a project restored silently is
+ * worse than the demo plus a quarantined original).
+ */
+export function parsePersisted(raw: string): EditorSeed | null {
+  let payload: unknown;
+  try {
+    payload = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!isRecord(payload) || payload.version !== PERSIST_VERSION) return null;
+  if (typeof payload.code !== "string" || !isRecord(payload.sheets)) return null;
+  const sheets = parseSheetsPayload(payload.sheets);
+  if (sheets === null) return null;
   return { code: payload.code, sheets };
 }
 
@@ -230,6 +256,10 @@ export function attachPersistence(
         // Storage that can't even remove is the disabled-autosave world; the
         // in-memory reset above still happened.
       }
+      // §7.1b: the asset library is reset too — independent storage (IDB),
+      // best-effort like every asset-store mutation (a disabled/unavailable
+      // store just no-ops).
+      void assetStore.clear();
     },
 
     dispose: () => {
@@ -277,11 +307,13 @@ export function initEditorPersistence(): void {
 
 /** The status bar's reset affordance. Falls back to a plain reseed when
  * persistence never attached (SSR, blocked storage) — the button must work
- * even where autosave doesn't. */
+ * even where autosave doesn't. Either way the §7.1b asset library clears too
+ * (independent of whether the localStorage controller ever attached). */
 export function resetEditorToDemo(): void {
   if (liveController !== null) {
     liveController.resetToDemo();
     return;
   }
   editorStore.getState().replaceProject(demoSeed());
+  void assetStore.clear();
 }

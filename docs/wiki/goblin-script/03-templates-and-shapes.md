@@ -36,7 +36,7 @@ them.
 | `Text` | `x y size text` | `color` (black), `anchor` (top_left) | one line; `size` is text height in units |
 | `TextBox` | `x y width height text size` | `color` (black), `align` (left), `line_height` (1.3), `overflow` (clip), `anchor` (top_left) | wrapped multi-line text in a box — see below |
 | `Icon` | `x y size code` | `color` (black), `anchor` (top_left), `style` (flat_dark) | a game glyph — see [Icons](icons.md) |
-| `Image` | `x y width height src` | `fit` (contain), `anchor` (top_left) | your own artwork, from a URL — see below |
+| `Image` | `x y width height src` | `fit` (contain), `anchor` (top_left) | your own artwork, from a URL or an uploaded asset — see below |
 | `Qr` | `x y size data` | `color` (black), `background` (white), `level` (m), `anchor` (top_left) | a scannable QR code — see below |
 | `Repeat: N as i` | — | — | draws its children N times |
 
@@ -223,12 +223,50 @@ natural proportions. A few things to know:
   so all three modes draw the same picture. Writing it isn't an error; it's just
   inert.
 
-While an image downloads, its box shows a subtle gray placeholder; if the URL fails to
-load, the box turns into an amber crossed-out placeholder instead. **Neither is a
-code or data error** — the rest of the card renders normally, and fixing the URL fixes
-the box. Images come from the web by URL (uploading files into the project isn't a
-thing yet), and PDF export has one extra requirement for them — see
+While an image downloads, its box shows a subtle gray placeholder; if the source fails
+to load, the box turns into an amber crossed-out placeholder instead. **Neither is a
+code or data error** — the rest of the card renders normally, and fixing the source
+fixes the box. PDF export has one extra requirement for URL art — see
 [PDF export](pdf-export.md).
+
+### Uploaded assets — art with no hosting required
+
+`src:` doesn't have to be a URL. The **Assets** button in the status bar opens a
+drawer where you upload images straight from your machine — drag and drop, or the
+file picker — and each one gets a name (derived from the filename, renameable
+anytime). Reference an upload with the `asset:` scheme instead of a URL:
+
+```goblin
+Image: "Portrait"
+  x: 2
+  y: 4
+  width: 16
+  height: 12
+  src: "asset:dragon_art"
+```
+
+Everything about `src:` being a Text expression still applies — an asset reference
+works from a sheet column (`src: [art]`) or built with interpolation
+(`src: "asset:[art]"`), so different rows can point at different uploads exactly
+like different URLs. Each row of the drawer has a **Copy ref** button that copies
+`asset:<name>` ready to paste into a `src:` line.
+
+A few things specific to uploads:
+
+- **2 MB** per image. Enough for card-sized art at print resolution; the drawer
+  says so if a file is over the limit.
+- **Renaming updates the library only.** It doesn't rewrite `src:` lines for
+  you — rename `dragon_art` to `dragon` and every `src: "asset:dragon_art"`
+  still says the old name, now pointing at nothing. Update those references
+  yourself; the compiler's unknown-asset warning squiggles exactly the
+  `src:` lines that need it, so you won't miss one. Referencing a name that
+  doesn't exist yet (or anymore) isn't an error, just that warning — you
+  might be about to upload it.
+- **Stored in this browser.** Uploads live in this browser's storage, separately
+  from [autosave](autosave.md) — see there for exactly what that means.
+- **Shareable.** [Exporting a project file](project-files.md) bundles your
+  uploads into the file itself, so handing someone a `.cardgoblin.json` hands
+  them the art too — no broken links, no separate zip of images.
 
 ## `Qr` — scannable codes
 

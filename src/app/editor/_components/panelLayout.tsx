@@ -7,6 +7,7 @@ import WindowCode from "@/app/editor/_components/windowCode";
 import WindowPreview from "@/app/editor/_components/windowPreview";
 import WindowSpreadsheet from "@/app/editor/_components/windowSpreadsheet";
 import { initEditorPersistence } from "@/app/editor/_store/persistence";
+import { initAssetStore } from "@/app/editor/_store/assetStore";
 
 export default function PanelLayout() {
   // Autosave restore + subscription, POST-hydration (§6.2): the prerender and
@@ -14,6 +15,10 @@ export default function PanelLayout() {
   // them. Idempotent, so StrictMode's double effect run is harmless.
   useEffect(() => {
     initEditorPersistence();
+    // §7.1b: attaches the real IndexedDB-backed asset store — SSR-safe/no-op
+    // without `window` for the same reason, and idempotent for the same
+    // StrictMode double-mount.
+    initAssetStore();
   }, []);
 
   return (

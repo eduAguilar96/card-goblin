@@ -48,6 +48,21 @@ function codesOf(source: string): string[] {
     .sort();
 }
 
+/** Like `checkOf`, but threading §7.1b's `assetNames` (W005's compile input)
+ * through to `check()`. */
+function checkOfWithAssets(
+  source: string,
+  assetNames: ReadonlySet<string>,
+): CheckResult & { program: Program } {
+  const { program, diagnostics } = parse(source);
+  expect(diagnostics).toEqual([]);
+  return { program, ...check(program, assetNames) };
+}
+
+function diagsOfWithAssets(source: string, assetNames: ReadonlySet<string>): Diagnostic[] {
+  return checkOfWithAssets(source, assetNames).diagnostics;
+}
+
 const PRELUDE = [
   "Enum: Suit",
   "  case Rock",
@@ -1551,6 +1566,68 @@ describe("W004 icon codes", () => {
   it("computed/interpolated codes are not checked at compile time (runtime D005)", () => {
     expect(codesOf(icon('"X[cost]"'))).toEqual([]);
     expect(codesOf(icon("[name]"))).toEqual([]);
+  });
+});
+
+// -- W005: unknown asset (§7.1b) ---------------------------------------------
+
+describe("W005 unknown asset", () => {
+  const image = (srcExpr: string): string =>
+    withElement("Image:", ["x: 1", "y: 1", "width: 1", "height: 1", `src: ${srcExpr}`]);
+
+  it("a literal asset: src whose name isn't in the library warns, at the literal's range", () => {
+    const source = image('"asset:dragon"');
+    const ds = diagsOfWithAssets(source, new Set(["imp"]));
+    expect(ds.map((d) => d.code)).toEqual(["W005"]);
+    expect(ds[0].message).toBe("Unknown asset 'dragon'");
+    // Adversarial m1: severity is pinned directly — a mutant flipping
+    // warn→error would otherwise pass the whole suite unnoticed.
+    expect(ds[0].severity).toBe("warning");
+    // Adversarial m5: the range is asserted against the ACTUAL source text
+    // (not hand-counted line/col numbers, which would be fragile against
+    // reflowing `withElement`/PRELUDE) — it must point exactly at the
+    // string literal, quotes included (the lexer's string-token range).
+    const { range } = ds[0];
+    expect(range.startLine).toBe(range.endLine);
+    const line = source.split("\n")[range.startLine];
+    expect(line.slice(range.startCol, range.endCol)).toBe('"asset:dragon"');
+  });
+
+  it("a literal asset: src whose name IS in the library doesn't warn", () => {
+    expect(diagsOfWithAssets(image('"asset:dragon"'), new Set(["dragon"]))).toEqual([]);
+  });
+
+  it("an empty library still warns on any literal asset: reference", () => {
+    expect(diagsOfWithAssets(image('"asset:dragon"'), new Set()).map((d) => d.code)).toEqual([
+      "W005",
+    ]);
+  });
+
+  it("a plain URL literal never warns, library present or not", () => {
+    expect(diagsOfWithAssets(image('"https://example.com/a.png"'), new Set())).toEqual([]);
+    expect(diagsOfWithAssets(image('"https://example.com/a.png"'), new Set(["dragon"]))).toEqual(
+      [],
+    );
+  });
+
+  it("computed/interpolated asset: srcs never warn — runtime territory, like W004's codes", () => {
+    expect(diagsOfWithAssets(image('"asset:[name]"'), new Set())).toEqual([]);
+    expect(diagsOfWithAssets(image("[name]"), new Set())).toEqual([]);
+  });
+
+  it("with NO assetNames argument, W005 never fires — even for an obviously-unknown literal", () => {
+    expect(codesOf(image('"asset:totally_unknown"'))).toEqual([]);
+  });
+
+  it("compileSource threads assetNames through to check() the same way", () => {
+    const source = image('"asset:dragon"');
+    expect(compileSource(source).diagnostics.map((d) => d.code)).not.toContain("W005");
+    expect(
+      compileSource(source, new Set(["imp"])).diagnostics.map((d) => d.code),
+    ).toContain("W005");
+    expect(
+      compileSource(source, new Set(["dragon"])).diagnostics.map((d) => d.code),
+    ).not.toContain("W005");
   });
 });
 

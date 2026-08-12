@@ -19,10 +19,15 @@ Everything the editor would need to pick up where you left off:
 - every sheet's rows — including which rows you've touched, so dimmed pristine
   rows come back dimmed, and including values from columns you've removed
   (they resurface if the column comes back),
+- every [uploaded asset](templates-and-shapes.md) in your Assets drawer — the
+  art itself, not a reference to it, so the file is self-contained,
 - a format version, so future versions of CardGoblin can keep reading old files.
 
-It's the exact same format [autosave](autosave.md) writes to your browser, as
-plain JSON — readable in any text editor, friendly to version control.
+The code-and-sheets part is the exact same shape
+[autosave](autosave.md) writes to your browser; assets are the one addition a
+project *file* carries that the autosave slot doesn't (see
+[Autosave](autosave.md) for why). Either way it's plain JSON — readable in any
+text editor, friendly to version control (art included, as base64 text).
 
 ## Export
 
@@ -40,15 +45,27 @@ autosave, it never swaps in some older working version behind your back.
 
 - **The file isn't a readable CardGoblin project** — wrong file, damaged, or
   from an incompatible future version. The status bar says so, and your current
-  project is untouched. Import is all-or-nothing: it never half-loads a file.
+  project is untouched. Import is all-or-nothing: it never half-loads a file
+  (a damaged asset entry invalidates the whole file, same as a damaged sheet
+  row).
 - **The file is valid** — the status bar asks
-  **Replace your project with "\<file\>"?** first, because importing is
-  destructive: there is one project slot, and the file *replaces* what's open.
-  If the current project matters, export it first.
+  **Replace your project (and your uploaded assets) with "\<file\>"?** first,
+  because importing is destructive: there is one project slot and one asset
+  library, and the file *replaces* both. If the current project or its
+  uploads matter, export first.
 
 After you confirm, the imported project is live immediately — and about a
-second later it becomes the autosaved project too, just as if you'd typed it.
+second later it becomes the autosaved project too, just as if you'd typed it
+(its assets, meanwhile, are already saved — see [Autosave](autosave.md)).
 Reloading brings back the import, not what you had before.
+
+### Older files still import
+
+A file exported before uploaded assets existed has no art in it — importing
+one is exactly like it always was, except your asset library is now cleared
+too (there's nothing in the file to replace it with, and import always
+replaces). Files this app has ever exported keep opening in every later
+version.
 
 ## More than one project
 

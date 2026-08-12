@@ -126,7 +126,7 @@ describe("ResetToDemoButton (§6.2 two-step confirm)", () => {
       <ResetToDemoButton onReset={() => {}} initialConfirming />,
     );
     const text = stripTags(markup);
-    expect(text).toContain("Replace your project with the demo?");
+    expect(text).toContain("Replace your project (and your uploaded assets) with the demo?");
     expect(text).toContain("Reset");
     expect(text).toContain("Keep");
     expect(markup).toContain("text-red-400"); // the destructive click is marked

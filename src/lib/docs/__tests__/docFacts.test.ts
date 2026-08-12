@@ -51,6 +51,7 @@ import {
 } from "@/app/editor/_components/pdfLayout";
 import { RASTER_DPI } from "@/app/editor/_components/pdfRaster";
 import { PERSIST_DEBOUNCE_MS } from "@/app/editor/_store/persistence";
+import { ASSET_MAX_BYTES } from "@/app/editor/_store/assetStore";
 import { loadDocPages } from "@/lib/docs/pages";
 
 const pages = loadDocPages();
@@ -147,6 +148,11 @@ const NUMERIC_CLAIMS: {
   label: string;
   patterns: RegExp[];
   expected: number;
+  /** Defaults to the whole wiki (ALL_TEXT). Scope narrower when a claim only
+   * makes sense on specific pages (adversarial m9) — a wiki-global scan can
+   * accidentally match an unrelated "**N MB**" sentence some other page adds
+   * later, silently guarding the WRONG claim under this test's name. */
+  text?: () => string;
 }[] = [
   {
     label: "Dicier icon code count",
@@ -182,6 +188,15 @@ const NUMERIC_CLAIMS: {
     expected: RASTER_DPI,
   },
   {
+    label: "Uploaded asset cap (stated in MB)",
+    patterns: [/\*\*(\d[\d,]*) MB\*\*/g],
+    expected: ASSET_MAX_BYTES / (1024 * 1024),
+    // Scoped to the two pages that actually state the cap (adversarial m9)
+    // — templates-and-shapes' Image/assets section and the limits page —
+    // rather than the whole wiki, so this test only ever guards THIS claim.
+    text: () => `${pageText("templates-and-shapes")}\n${pageText("limits")}`,
+  },
+  {
     label: "TextBox default line_height (× size)",
     patterns: [/default is \*\*([\d.]+)\*\* × size/g],
     expected: DEFAULT_LINE_HEIGHT,
@@ -201,8 +216,9 @@ const NUMERIC_CLAIMS: {
 describe("numeric claims match their constants", () => {
   for (const claim of NUMERIC_CLAIMS) {
     it(`${claim.label} is stated as ${claim.expected}`, () => {
+      const text = claim.text ? claim.text() : ALL_TEXT;
       const found = claim.patterns.flatMap((pattern) =>
-        [...ALL_TEXT.matchAll(pattern)].map((m) => Number(m[1].replace(/,/g, ""))),
+        [...text.matchAll(pattern)].map((m) => Number(m[1].replace(/,/g, ""))),
       );
       expect(
         found.length,

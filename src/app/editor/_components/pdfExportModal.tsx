@@ -76,6 +76,7 @@ import type { ResolvedImage } from "@/app/editor/_components/cardSvg";
 import {
   imageUrlsUsed,
   rasterizeFaces,
+  remoteImageUrlsUsed,
   resolveImageSources,
   type RasterizeFaces,
   type ResolveImages,
@@ -242,17 +243,32 @@ export function PdfExportModal({
   const previewIndex = clampIndex(pageIndex, layout.pages.length);
   const previewPage = layout.pages[previewIndex];
 
-  // PRE-FLIGHT image check (§3.3, M2): the spec's "N images could not be
-  // embedded" warning must appear BEFORE export, so the exported faces' image
-  // URLs are probed when the modal opens (and when the option-dependent URL
-  // set changes — e.g. backs: none drops the back faces' images). Export is
-  // held until the probe settles; failures only WARN — the deck always
-  // exports, with failed images as marked placeholder boxes. The key is
-  // JSON (URLs come from cell data and could contain any character), and the
-  // resolved map remembers which key it answered so an in-flight option
-  // change can never pair stale results with a new URL set.
+  // PRE-FLIGHT image check (§3.3 M2; §7.1b): the spec's "N images could not
+  // be embedded" warning must appear BEFORE export, so the exported faces'
+  // image sources are probed when the modal opens (and when the option-
+  // dependent set changes — e.g. backs: none drops the back faces' images).
+  // Export is held until the probe settles; failures only WARN — the deck
+  // always exports, with failed images as marked placeholder boxes. The key
+  // is JSON (sources come from cell data and could contain any character),
+  // and the resolved map remembers which key it answered so an in-flight
+  // option change can never pair stale results with a new source set.
+  //
+  // resolveImages(urls) still receives the FULL set — `asset:` sources
+  // included — because `resolveImageSources` (its real implementation) is
+  // what actually resolves them (from the IndexedDB library to a data URI)
+  // and their failures must still count toward "N images could not be
+  // embedded" and toward the rasterizer's image map. `remoteImageUrlsUsed`
+  // (§7.1b) instead governs the "Checking N images…" WORDING specifically:
+  // that message describes a network-sensitive CORS check, which is only
+  // true of remote URLs — an uploaded asset resolves from local IDB bytes,
+  // never touches the network, and so was never part of "the CORS pre-
+  // flight" this notice names (adversarial M2 — a test pins this).
   const imageUrlsKey = useMemo(
     () => JSON.stringify(imageUrlsUsed(layout.faceSpecs)),
+    [layout.faceSpecs],
+  );
+  const remoteImageCount = useMemo(
+    () => remoteImageUrlsUsed(layout.faceSpecs).length,
     [layout.faceSpecs],
   );
   const [resolvedImages, setResolvedImages] = useState<{
@@ -438,7 +454,7 @@ export function PdfExportModal({
               layout={layout}
               marginValid={marginValid}
               spacingValid={spacingValid}
-              checkingImages={!imagesReady ? imageUrls.length : 0}
+              checkingImages={!imagesReady ? remoteImageCount : 0}
               failedImages={failedImages}
             />
 
@@ -539,7 +555,10 @@ function Notices({
   layout: ReturnType<typeof layoutPdf>;
   marginValid: boolean;
   spacingValid: boolean;
-  /** Number of image URLs still being probed (0 = settled or none). */
+  /** Number of REMOTE image URLs still being probed (0 = settled or none) —
+   * §7.1b: `asset:` sources resolve locally and never appear in this count,
+   * since "Checking…" specifically describes the network-sensitive CORS
+   * pre-flight (remoteImageUrlsUsed), not asset resolution. */
   checkingImages: number;
   failedImages: number;
 }): ReactElement | null {

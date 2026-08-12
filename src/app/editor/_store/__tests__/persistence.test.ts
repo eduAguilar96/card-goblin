@@ -24,6 +24,7 @@ import {
   attachPersistence,
   initEditorPersistence,
   parsePersisted,
+  parseSheetsPayload,
   PERSIST_DEBOUNCE_MS,
   PERSIST_KEY,
   PERSIST_VERSION,
@@ -34,9 +35,16 @@ import {
   type PersistenceController,
   type ProjectStorage,
 } from "../persistence";
+import {
+  assetStore,
+  attachAssetAdapterForTests,
+  createInMemoryAssetAdapter,
+  resetAssetStoreForTests,
+} from "../assetStore";
 
 afterEach(() => {
   vi.useRealTimers();
+  resetAssetStoreForTests();
 });
 
 /** In-memory ProjectStorage that counts writes (a save = one setItem). */
@@ -199,6 +207,53 @@ describe("invalid stored payloads", () => {
     };
     expect(readStoredSeed(storage)).toBeNull();
     expect(storage.map.get(PERSIST_KEY)).toBe("{not json");
+  });
+});
+
+// -- parseSheetsPayload: __proto__ hardening (adversarial m11) --------------
+//
+// Shared by TWO callers now (§7.1b): parsePersisted (this file, the v1
+// autosave/project-file shape) AND projectFile.tsx's v2 parser. A
+// hand-crafted payload with a "__proto__" sheet name must become an OWN
+// property of the returned SheetsState, never a prototype-chain write that
+// would silently vanish (or, worse, leak) — the doc comment's claim, pinned
+// directly against both entry points.
+
+describe('parseSheetsPayload: a "__proto__" sheet name is a plain own key', () => {
+  // Built from a raw JSON STRING deliberately, not a `{ __proto__: ... }`
+  // object literal: JS literal syntax special-cases a literal `__proto__:`
+  // key to SET THE PROTOTYPE at parse time (it never becomes an own
+  // property), which would silently defeat this entire test. `JSON.parse`
+  // has no such special case (it uses [[DefineOwnProperty]]) — a
+  // `"__proto__"` key in JSON text always becomes a genuine own property,
+  // which is exactly the hand-crafted-payload hazard the doc comment names.
+  const rawSheets = '{"__proto__": {"rows": [{"a": "1"}], "editedRows": [true]}}';
+
+  it('the JSON.parse premise: "__proto__" lands as a real own key, not the prototype', () => {
+    const parsed = JSON.parse(rawSheets) as Record<string, unknown>;
+    expect(Object.hasOwn(parsed, "__proto__")).toBe(true);
+    expect(Object.getPrototypeOf(parsed)).toBe(Object.prototype); // NOT reassigned
+  });
+
+  it("parseSheetsPayload returns it as an own key, and Object.prototype stays untouched", () => {
+    const before = Object.getPrototypeOf({});
+    const parsedPayload = JSON.parse(rawSheets) as Record<string, unknown>;
+    const sheets = parseSheetsPayload(parsedPayload);
+    expect(sheets).not.toBeNull();
+    expect(Object.hasOwn(sheets ?? {}, "__proto__")).toBe(true);
+    // The returned SheetsState is itself `Object.create(null)` (module
+    // note), so plain dot access reads the own data property here rather
+    // than triggering `Object.prototype`'s `__proto__` accessor.
+    expect(sheets?.__proto__?.rows).toEqual([{ a: "1" }]);
+    expect(Object.getPrototypeOf({})).toBe(before); // global prototype untouched
+  });
+
+  it("caller 1 — parsePersisted (v1 autosave/project-file shape) round-trips it safely", () => {
+    const raw = `{"version":${PERSIST_VERSION},"code":"","sheets":${rawSheets}}`;
+    const seed = parsePersisted(raw);
+    expect(seed).not.toBeNull();
+    expect(Object.hasOwn(seed?.sheets ?? {}, "__proto__")).toBe(true);
+    expect(seed?.sheets.__proto__?.rows).toEqual([{ a: "1" }]);
   });
 });
 
@@ -392,6 +447,33 @@ describe("resetToDemo", () => {
     controller.resetToDemo();
     expect(store.getState().sheets.Monsters.rows[0].name).toBe("Dragon");
   });
+
+  // -- §7.1b: the asset library is independent of the localStorage keys
+  // above, but a reset clears it too (module-level `assetStore` singleton —
+  // resetToDemo doesn't take it as a parameter, so these tests seed the
+  // singleton directly via the test-only attach seam).
+  it("also clears the §7.1b asset library (the singleton, independent of localStorage)", async () => {
+    attachAssetAdapterForTests(
+      createInMemoryAssetAdapter([{ name: "dragon", mime: "image/png", bytes: new Uint8Array([1]) }]),
+    );
+    await assetStore.refresh();
+    expect(assetStore.getAssetNames()).toEqual(new Set(["dragon"]));
+
+    const { controller } = persistedStore();
+    controller.resetToDemo();
+    // clear() is async; the store's public surface stays synchronous-reading
+    // from an in-memory cache, so awaiting a microtask settles it.
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(assetStore.getAssetNames().size).toBe(0);
+  });
+
+  it("a disabled/empty library is a harmless no-op on reset", async () => {
+    // Default singleton state (module note above `attachAssetAdapterForTests`):
+    // empty, not disabled — reset must not throw against it.
+    const { controller } = persistedStore();
+    expect(() => controller.resetToDemo()).not.toThrow();
+  });
 });
 
 // -- SSR path ----------------------------------------------------------------
@@ -409,5 +491,17 @@ describe("without a window (SSR / this test env)", () => {
     expect(() => resetEditorToDemo()).not.toThrow();
     expect(editorStore.getState().sheets.Monsters.rows[0].name).toBe("Dragon");
     expect(editorStore.getState().lastGoodModel?.model.decks[0].cards).toHaveLength(9);
+  });
+
+  it("resetEditorToDemo's fallback path clears the asset library too", async () => {
+    attachAssetAdapterForTests(
+      createInMemoryAssetAdapter([{ name: "imp", mime: "image/png", bytes: new Uint8Array([2]) }]),
+    );
+    await assetStore.refresh();
+    expect(assetStore.getAssetNames().size).toBe(1);
+    resetEditorToDemo();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(assetStore.getAssetNames().size).toBe(0);
   });
 });

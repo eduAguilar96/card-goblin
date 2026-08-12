@@ -37,12 +37,14 @@
 
 import { useState, type ReactElement } from "react";
 import { buildFlagIndex } from "@/app/editor/_components/gridModel";
+import { AssetsDrawerButton } from "@/app/editor/_components/assetsDrawer";
 import {
   exportEditorProject,
   importEditorProject,
   ProjectFileButtons,
 } from "@/app/editor/_components/projectFile";
 import { resetEditorToDemo } from "@/app/editor/_store/persistence";
+import type { StoredAsset } from "@/app/editor/_store/assetStore";
 import {
   useEditorStore,
   type CompileState,
@@ -74,8 +76,8 @@ export interface StatusBarContentProps {
   isStale: boolean;
   autosaveDisabled: boolean;
   onReset(): void;
-  onExportProject(): void;
-  onImportProject(seed: EditorSeed): void;
+  onExportProject(): void | Promise<void>;
+  onImportProject(seed: EditorSeed, assets: readonly StoredAsset[]): void;
 }
 
 const plural = (n: number, noun: string): string => `${n} ${noun}${n === 1 ? "" : "s"}`;
@@ -130,6 +132,7 @@ export function StatusBarContent({
             autosave off
           </span>
         )}
+        <AssetsDrawerButton />
         <ProjectFileButtons onExport={onExportProject} onImport={onImportProject} />
         <ResetToDemoButton onReset={onReset} />
       </span>
@@ -164,7 +167,9 @@ export function ResetToDemoButton({
   }
   return (
     <span className="flex items-center gap-1.5">
-      <span className="text-amber-400">Replace your project with the demo?</span>
+      <span className="text-amber-400">
+        Replace your project (and your uploaded assets) with the demo?
+      </span>
       <button
         type="button"
         onClick={() => {

@@ -56,6 +56,7 @@ import {
   QR_LEVELS,
   TEXTBOX_OVERFLOWS,
   parseAnchor,
+  parseAssetSrc,
 } from "./model";
 import { CSS_COLOR_NAMES } from "./css-colors";
 import { DICIER_CODES } from "./dicier-codes";
@@ -218,12 +219,20 @@ export function compareDiagnostics(a: Diagnostic, b: Diagnostic): number {
   );
 }
 
-/** Bind + type check a parsed program. Never throws (⚑8): expression depth is
+/**
+ * Bind + type check a parsed program. Never throws (⚑8): expression depth is
  * budgeted (MAX_EXPR_DEPTH), and any residual internal failure degrades to a
- * single synthetic diagnostic instead of an exception. */
-export function check(program: Program): CheckResult {
+ * single synthetic diagnostic instead of an exception.
+ *
+ * `assetNames` (§7.1b, additive): the Assets-drawer library's current names,
+ * for W005 ("unknown asset"). Omitted (not just empty) — the overwhelming
+ * majority of callers, including every pre-§7.1b test — means W005 never
+ * fires, exactly like `code:`'s W004 needs no such gate (its DICIER_CODES
+ * list is a compiler constant, not caller state).
+ */
+export function check(program: Program, assetNames?: ReadonlySet<string>): CheckResult {
   try {
-    return new Checker().run(program);
+    return new Checker(assetNames).run(program);
   } catch (err) {
     // Last resort — never-throws is structural, not best-effort. E000 is
     // deliberately OUTSIDE the §3.8 catalog: it marks a checker bug, never a
@@ -370,6 +379,11 @@ class Checker {
   /** Declarations whose name collided (E005): suppress their W002 — one
    * mistake, one diagnostic. */
   private readonly collided = new Set<EnumDecl | SheetDecl | TemplateDecl | CardDecl>();
+
+  /** §7.1b W005: undefined means "no asset library in scope" — the literal
+   * `asset:` check in `case "src":` is skipped entirely, not run against an
+   * empty set (see the `check()` doc comment). */
+  constructor(private readonly assetNames?: ReadonlySet<string>) {}
 
   run(program: Program): CheckResult {
     this.collectDeclarations(program);
@@ -1014,12 +1028,27 @@ class Checker {
       case "text":
         this.checkValue(value, EXP_TEXT, ctx, false);
         return;
-      case "src":
+      case "src": {
         // Image only (ELEMENT_SPECS): a Text expression with the usual §3.5
         // coercions — URLs routinely come from a sheet column or an
         // interpolated string, so no literal-shape restriction applies.
         this.checkValue(value, EXP_TEXT, ctx, false);
+        // W005 (§7.1b): mirrors W004's shape exactly — a LITERAL src (no
+        // interpolation, literalStringValue's contract) starting with the
+        // asset: scheme is checked against the current library; computed
+        // srcs (interpolated, [refs], conditionals) are runtime territory,
+        // same rationale as computed icon codes not getting W004. Skipped
+        // entirely when no library was supplied (see check()'s doc comment)
+        // — never a false "unknown asset" for a caller with no library.
+        if (this.assetNames) {
+          const literal = literalStringValue(value);
+          const name = literal !== null ? parseAssetSrc(literal) : null;
+          if (name !== null && !this.assetNames.has(name)) {
+            this.warn("W005", `Unknown asset '${name}'`, value.range);
+          }
+        }
         return;
+      }
       case "data":
         // Qr only (ELEMENT_SPECS): a Text expression with the usual §3.5
         // coercions, exactly like src: — QR content routinely comes from a

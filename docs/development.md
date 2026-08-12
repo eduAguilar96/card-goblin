@@ -40,13 +40,15 @@ src/lib/lang/            the compiler (pure, no React)
 src/app/editor/
   _store/editorStore.ts  Zustand store: debounced compile, keep-last-good, rename migration
   _store/persistence.ts  localStorage autosave: debounced save, quarantined restore, reset
+  _store/assetStore.ts   IndexedDB local-asset library: CRUD, 2 MB cap, disabled posture (§7.1b)
   _components/           Monaco window (windowCode), SVG preview (windowPreview,
                          cardSvg, deckSection, previewSingle, previewVirtual),
                          bespoke grid
                          (windowSpreadsheet, gridModel), statusBar, panelLayout,
                          PDF export (pdfExportModal, pdfLayout, pdfPagePreview,
                          pdfRaster, pdfAssemble), project file export/import
-                         (projectFile), shared prev/next control (pager)
+                         (projectFile), the Assets drawer (assetsDrawer, §7.1b),
+                         shared prev/next control (pager)
   _lib/goblinLanguage.ts Monaco language registration (Monarch)
 src/lib/content/         frontmatter parsing shared by the wiki and the blog
 src/lib/docs/            the wiki content layer (pure + one fs module)

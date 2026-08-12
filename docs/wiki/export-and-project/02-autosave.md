@@ -22,11 +22,22 @@ save button and nothing to configure.
 What you had is what you get back. If you reload mid-edit with broken code, the
 editor restores the broken code, squiggles and all — not some older working version.
 
+## Uploaded assets save differently
+
+Images you upload through the **Assets** drawer aren't part of the save above —
+they write to this browser's storage **the moment you upload them**, not on the
+1-second debounce, and they survive a reload the same way the rest of your
+project does. The distinction only matters for one thing: **Reset to demo**
+below and a project-file **import** both clear the code-and-sheets slot AND the
+asset library together, but they're two separate stores under the hood (which
+is also why an old, asset-free project file can still restore your code even
+though it clears your uploads — see [Project files](project-files.md)).
+
 ## Reset to demo
 
-**Reset to demo** in the status bar wipes the saved project and loads the demo deck.
-It asks before doing it, because there is only one project slot: the demo *replaces*
-your work.
+**Reset to demo** in the status bar wipes the saved project and your uploaded assets,
+then loads the demo deck. It asks before doing it, because there is only one project
+slot and one asset library: the demo *replaces* your work.
 
 ## The limits
 

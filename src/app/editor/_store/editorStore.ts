@@ -51,6 +51,7 @@ import type {
 } from "@/lib/lang";
 import { compileProject } from "@/lib/lang";
 import { DEMO_PROJECT_ROWS, DEMO_PROJECT_SOURCE } from "@/lib/lang/demoProject";
+import { assetStore, type AssetStore } from "@/app/editor/_store/assetStore";
 
 /** Live-compile debounce (§4.2 ⚑8): trailing, bursts collapse to one run. */
 export const COMPILE_DEBOUNCE_MS = 300;
@@ -372,10 +373,19 @@ const toCompileState = (result: ProjectResult): CompileState => ({
   excludedPristineRows: result.excludedPristineRows,
 });
 
-/** Build a store (headless-usable — tests create one per case). Runs the
+/**
+ * Build a store (headless-usable — tests create one per case). Runs the
  * first compile eagerly so seeded content renders without waiting for an
- * edit. */
-export function createEditorStore(seed: EditorSeed = demoSeed()): EditorStore {
+ * edit. `assetSource` (§7.1b, additive) defaults to the real `assetStore`
+ * singleton — tests that care about the asset-library compile input or the
+ * recompile-on-change wiring inject their own (e.g.
+ * `createAssetStore(createInMemoryAssetAdapter(...))`) so they never share
+ * state with the app singleton or with each other.
+ */
+export function createEditorStore(
+  seed: EditorSeed = demoSeed(),
+  assetSource: AssetStore = assetStore,
+): EditorStore {
   const seedSheets = normalizeSeedSheets(seed.sheets);
   // Debounce state lives per store, in this closure — never module-shared,
   // so test stores cannot leak timers into each other.
@@ -392,7 +402,12 @@ export function createEditorStore(seed: EditorSeed = demoSeed()): EditorStore {
     const runCompile = (): void => {
       const state = get();
       let sheets = state.sheets;
-      let result = compileProject(state.code, rowsOf(sheets), editedOf(sheets));
+      let result = compileProject(
+        state.code,
+        rowsOf(sheets),
+        editedOf(sheets),
+        assetSource.getAssetNames(),
+      );
 
       if (!isGood(result.diagnostics)) {
         // BAD compile: keep both last-goods (§4.2 †). The diagnostics still
@@ -414,7 +429,12 @@ export function createEditorStore(seed: EditorSeed = demoSeed()): EditorStore {
           // against the reconciled data (same code → same diagnostics/schema;
           // no further reconciliation can trigger, so this cannot loop).
           sheets = reconciled;
-          result = compileProject(state.code, rowsOf(sheets), editedOf(sheets));
+          result = compileProject(
+            state.code,
+            rowsOf(sheets),
+            editedOf(sheets),
+            assetSource.getAssetNames(),
+          );
         }
       }
 
@@ -438,6 +458,14 @@ export function createEditorStore(seed: EditorSeed = demoSeed()): EditorStore {
         runCompile();
       }, COMPILE_DEBOUNCE_MS);
     };
+
+    // §7.1b: the asset library is a compile input now (W005) — a put/
+    // rename/delete/clear/replaceAll recompiles, same debounce as setCell
+    // (a burst of drawer edits collapses to one run, same as a burst of
+    // keystrokes). Never unsubscribed: this store's lifetime IS the app's
+    // lifetime for the singleton `assetStore`, and test stores that inject
+    // their own `assetSource` are short-lived and GC'd with their listener.
+    assetSource.subscribe(() => schedule());
 
     return {
       code: seed.code,

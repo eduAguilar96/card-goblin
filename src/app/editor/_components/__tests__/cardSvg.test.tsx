@@ -5,7 +5,7 @@
  * the §3.4 ascent realization, and icons carry the Dicier family with all
  * four ligature features (§4.2 † — dlig is required for double-digit codes).
  */
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import {
   compileProject,
@@ -33,11 +33,22 @@ import {
   cardSvgPropsEqual,
   faceHasTextBoxOverflow,
   imagePlaceholderStroke,
+  imageStatusOf,
+  resetImageStatusesForTests,
   resolveImageBox,
+  setImageProbeForTests,
+  subscribeImageStatus,
   textBoxLineX,
   type CardSvgProps,
+  type ImageLoadStatus,
   type ResolvedImages,
 } from "@/app/editor/_components/cardSvg";
+import {
+  attachAssetAdapterForTests,
+  createInMemoryAssetAdapter,
+  resetAssetStoreForTests,
+  type StoredAsset,
+} from "@/app/editor/_store/assetStore";
 
 // -- fixtures ----------------------------------------------------------------
 
@@ -889,5 +900,142 @@ describe("cardSvgPropsEqual (the §4.2 memo comparator)", () => {
     expect(cardSvgPropsEqual(withError, { ...base, error })).toBe(true);
     expect(cardSvgPropsEqual(withError, { ...base, error: { ...error } })).toBe(false);
     expect(cardSvgPropsEqual(base, withError)).toBe(false);
+  });
+});
+
+// -- asset: resolution, live preview (§7.1b) ---------------------------------
+//
+// `renderToStaticMarkup` never reaches this machinery (LiveImage's
+// useSyncExternalStore reads getServerSnapshot — the "loading" placeholder —
+// without ever calling `subscribe`, exactly like the pre-existing URL image
+// path, which has never been component-tested for the same reason). What CAN
+// run headless is the resolution logic itself: `resolveAssetObjectUrl` only
+// needs `Blob`/`URL.createObjectURL` (present in Node 22), and `imageProbe`
+// is the existing injectable seam that keeps the real `Image`/network probe
+// out of these tests. So these tests call the exported machinery directly —
+// the real production code path `LiveImage` drives, not a parallel one.
+
+const dragonBytes = new Uint8Array([1, 2, 3, 4]);
+const dragonAsset: StoredAsset = { name: "dragon", mime: "image/png", bytes: dragonBytes };
+
+/** Wait for one full microtask+macrotask turn — long enough for the
+ * (synchronous-resolving, in this test setup) getBytes → probe chain to
+ * settle, regardless of how many `.then()` hops it takes. */
+const flush = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
+
+/** Subscribe and resolve once `imageStatusOf(src)` stops being "loading". */
+async function settledStatus(src: string): Promise<ImageLoadStatus> {
+  const unsubscribe = subscribeImageStatus(src, () => {});
+  await flush();
+  unsubscribe();
+  return imageStatusOf(src);
+}
+
+beforeEach(() => {
+  resetImageStatusesForTests();
+  resetAssetStoreForTests();
+  // Stub probe (module note): always "succeeds" at a fixed natural size,
+  // whatever href it's given (a blob: URL for assets, a plain URL string for
+  // the pre-existing path) — the real `Image`/network probe stays out of
+  // these tests, same seam pdfRaster.tsx's tests would use if it had any
+  // node-testable DOM-dependent surface.
+  setImageProbeForTests(async () => ({ naturalWidth: 200, naturalHeight: 100 }));
+});
+
+afterEach(() => {
+  setImageProbeForTests(null);
+  resetImageStatusesForTests();
+  resetAssetStoreForTests();
+});
+
+describe("asset: resolution — cache per name, revoke/re-resolve on change (§7.1b)", () => {
+  it("resolves a known asset to a loaded status carrying a blob: href and the probed natural size", async () => {
+    attachAssetAdapterForTests(createInMemoryAssetAdapter([dragonAsset]));
+    const status = await settledStatus("asset:dragon");
+    expect(status).toMatchObject({ state: "loaded", naturalWidth: 200, naturalHeight: 100 });
+    expect(status.state === "loaded" && status.href.startsWith("blob:")).toBe(true);
+  });
+
+  it("a missing asset name resolves to failed — the existing broken-image placeholder path", async () => {
+    attachAssetAdapterForTests(createInMemoryAssetAdapter([])); // no "dragon"
+    const status = await settledStatus("asset:dragon");
+    expect(status).toEqual({ state: "failed" });
+  });
+
+  it("a plain URL src still resolves through imageProbe directly (unaffected by §7.1b)", async () => {
+    attachAssetAdapterForTests(createInMemoryAssetAdapter([]));
+    const status = await settledStatus("https://example.com/a.png");
+    expect(status).toMatchObject({
+      state: "loaded",
+      href: "https://example.com/a.png",
+      naturalWidth: 200,
+      naturalHeight: 100,
+    });
+  });
+
+  it("rename invalidates the OLD name (now broken) via the assetStore subscription", async () => {
+    attachAssetAdapterForTests(createInMemoryAssetAdapter([dragonAsset]));
+    const loaded = await settledStatus("asset:dragon");
+    expect(loaded.state).toBe("loaded");
+
+    // Simulate a still-mounted card: subscribe and stay subscribed through
+    // the rename, exactly like a live LiveImage instance would.
+    const unsubscribe = subscribeImageStatus("asset:dragon", () => {});
+    const { assetStore } = await import("@/app/editor/_store/assetStore");
+    await assetStore.refresh(); // rename validates against the store's own meta cache
+    await assetStore.rename("dragon", "wyrm");
+    await flush();
+    unsubscribe();
+
+    expect(imageStatusOf("asset:dragon")).toEqual({ state: "failed" });
+    const wyrm = await settledStatus("asset:wyrm");
+    expect(wyrm.state).toBe("loaded");
+  });
+
+  it("delete invalidates a mounted reference to failed", async () => {
+    attachAssetAdapterForTests(createInMemoryAssetAdapter([dragonAsset]));
+    await settledStatus("asset:dragon");
+    const { assetStore } = await import("@/app/editor/_store/assetStore");
+    const unsubscribe = subscribeImageStatus("asset:dragon", () => {});
+    await assetStore.remove("dragon");
+    await flush();
+    unsubscribe();
+    expect(imageStatusOf("asset:dragon")).toEqual({ state: "failed" });
+  });
+
+  it("replace (re-upload the same name) re-resolves rather than keeping the stale object URL", async () => {
+    attachAssetAdapterForTests(createInMemoryAssetAdapter([dragonAsset]));
+    const first = await settledStatus("asset:dragon");
+    const firstHref = first.state === "loaded" ? first.href : null;
+    expect(firstHref).not.toBeNull();
+
+    const unsubscribe = subscribeImageStatus("asset:dragon", () => {});
+    const { assetStore } = await import("@/app/editor/_store/assetStore");
+    await assetStore.upload("dragon", "image/png", new Uint8Array([9, 9, 9]));
+    await flush();
+    unsubscribe();
+
+    const second = imageStatusOf("asset:dragon");
+    expect(second.state).toBe("loaded");
+    // A fresh object URL — the stale one from before the replace was revoked
+    // and dropped from the cache, not reused.
+    expect(second.state === "loaded" && second.href).not.toBe(firstHref);
+  });
+
+  it("clear() invalidates every cached asset src at once", async () => {
+    const impAsset: StoredAsset = { name: "imp", mime: "image/png", bytes: new Uint8Array([1]) };
+    attachAssetAdapterForTests(createInMemoryAssetAdapter([dragonAsset, impAsset]));
+    await settledStatus("asset:dragon");
+    await settledStatus("asset:imp");
+    const u1 = subscribeImageStatus("asset:dragon", () => {});
+    const u2 = subscribeImageStatus("asset:imp", () => {});
+    const { assetStore } = await import("@/app/editor/_store/assetStore");
+    await assetStore.refresh(); // clear() no-ops on an empty meta cache
+    await assetStore.clear();
+    await flush();
+    u1();
+    u2();
+    expect(imageStatusOf("asset:dragon")).toEqual({ state: "failed" });
+    expect(imageStatusOf("asset:imp")).toEqual({ state: "failed" });
   });
 });

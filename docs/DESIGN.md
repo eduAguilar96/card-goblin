@@ -299,6 +299,7 @@ grid keeps last good schema — §4.2):
 | W002 | unused declaration |
 | W003 | explicit `y_units` makes units non-square (suppressed when the value exactly equals the square `auto` value) |
 | W004 | unknown icon code literal — may still be a valid glyph; the curated list is non-exhaustive † |
+| W005 | unknown asset — a literal `asset:` Image `src:` whose name isn't in the current Assets-drawer library (§7.1b); never an error, since the asset may be about to be uploaded |
 
 *(E006 existed in the original revision as "unknown icon code (error)"; downgraded to
 W004 in Revision A because the code list is provably incomplete.)*
@@ -712,6 +713,38 @@ template gives every card its own QR.
   checker `ELEMENT_SPECS`, evaluator, `Shape` union, renderer, Monaco
   autocomplete + E008 pins, wiki, docFacts guard) — the same shape as the
   Image-element batch, plus the encoder wrapper and its structural tests.
+
+### 7.1b Local image assets — agreed spec, P0 (2026-08-11)
+
+**Requirement (edu):** use images local to the user's machine — no hosting —
+to unblock prototyping.
+
+- **Storage: IndexedDB** (not localStorage — string-only, ~5–10 MB quota;
+  IDB stores Blobs natively with large quotas). Asset = {name (identifier
+  rules, §3.1), mime, bytes}. Uploads capped at **2 MB per asset**
+  (pre-encoding) with a clear message; quota/unavailable degrades exactly
+  like autosave's pattern (disabled + quiet indicator). The IDB adapter is
+  injectable for headless tests (hand-rolled thin wrapper, no new deps).
+- **Reference: the `asset:` scheme inside Image `src:`** — zero language
+  change: `src: "asset:dragon"`, per-row via a column holding asset
+  references, interpolation (`"asset:[art]"`). Renderer resolves names to
+  object URLs (cached, revoked on replace/delete); missing asset → the
+  existing broken-image placeholder. Compile-time nicety: `compileProject`
+  gains an optional additive `assetNames` set; a LITERAL `asset:` src whose
+  name isn't in the library → new **W005 "unknown asset"** warning (never an
+  error — the asset may be about to be uploaded).
+- **UI: an Assets drawer off the status bar** (button beside Export/Import;
+  count badge): upload via picker + drag-drop, thumbnail list, rename (
+  identifier-validated), delete (confirm), copy-reference. No fourth panel.
+- **PDF export:** asset images resolve from IDB bytes to data URIs — always
+  embeddable, never part of the remote-URL CORS pre-flight count.
+- **Project file v2:** `{version: 2, code, sheets, assets: {name: {mime,
+  bytes: base64}}}` — self-contained and shareable, art included. v1 files
+  import forever (assets absent). Import REPLACES the whole project
+  including the asset library (v1 import → empty library) — consistent with
+  replace semantics; the destructive confirm says so. Reset-to-demo clears
+  the library too. The autosave slot is UNCHANGED (code+sheets in
+  localStorage); assets persist in IDB at upload time — upload IS the save.
 
 ### 7.2 Text wrapping (TextBox) — agreed direction (2026-08-10; shipped M3 2026-08-10 — normative spec in the §3.3 row and §3.1 escapes)
 

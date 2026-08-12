@@ -36,6 +36,11 @@ plus pixel) via `style:` — see [Icons](icons.md).
 control and PDF embedding. See
 [Templates & shapes](templates-and-shapes.md).
 
+**Uploaded assets.** An Assets drawer for images local to your machine — upload,
+rename, delete, and reference them with `asset:<name>` in any `src:`, no hosting
+required. Bundled into [project files](project-files.md) so art travels with the
+project. See [Templates & shapes](templates-and-shapes.md).
+
 **Project files.** Export the project as a file and import it back — backup,
 moving between browsers, and keeping more than one project. See
 [Project files](project-files.md).
@@ -54,7 +59,8 @@ giving every card in a deck its own code on the back. See
 
 - **Accounts and sharing** — projects that live in the cloud and decks you can
   share by link, past today's [file-based story](project-files.md).
-- **Uploaded assets** — your own images and fonts, stored with the project.
+- **Custom fonts** — uploaded assets cover images; fonts for `Text`/`TextBox`
+  are a separate, later piece.
 - **Rich text in boxes** — bold runs and inline icons inside a `TextBox`
   (run-based layout, a deliberate later design round).
 

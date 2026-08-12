@@ -30,10 +30,20 @@
  * or canvas taint rasterizes as the §3.3 marked placeholder box — the deck
  * always exports; the modal's pre-flight warns "N images could not be
  * embedded" BEFORE the export runs.
+ *
+ * `asset:` sources (§7.1b) are a SEPARATE image path with no CORS concern at
+ * all: the art is already local (the Assets-drawer's IndexedDB library), so
+ * it is read as bytes and re-encoded the same way, but never fetched over
+ * the network and never needs `crossorigin`. `resolveImageSources` below
+ * routes each src by `parseAssetSrc` before deciding which loader to use — a
+ * missing asset name still resolves to `null` (the same marked placeholder,
+ * the same modal warning count), it just never touches `loadImageData`'s
+ * CORS-sensitive fetch.
  */
 
 import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
+import { parseAssetSrc } from "@/lib/lang";
 import {
   CardFaceSvg,
   ICON_FONT_FAMILIES,
@@ -41,6 +51,7 @@ import {
   type ResolvedImages,
 } from "@/app/editor/_components/cardSvg";
 import type { FaceRasterSpec } from "@/app/editor/_components/pdfLayout";
+import { assetStore } from "@/app/editor/_store/assetStore";
 
 /** §6.1: rasterize at 300 DPI — px = mm × 300 / 25.4. */
 export const RASTER_DPI = 300;
@@ -205,9 +216,11 @@ async function getFontEmbedCss(specs: ReadonlyMap<string, FaceRasterSpec>): Prom
 // ---------------------------------------------------------------------------
 
 /**
- * Every distinct image URL the faces being exported draw, sorted. Pure and
- * exported for unit tests — the modal's pre-flight check and the rasterizer
- * both start from this list.
+ * Every distinct image `src` the faces being exported draw — URL or
+ * `asset:name` alike — sorted. Pure and exported for unit tests — the
+ * modal's pre-flight check and the rasterizer both start from this list (it
+ * is what gets resolved AND what the "N images could not be embedded"
+ * warning counts, §7.1b included).
  */
 export function imageUrlsUsed(specs: ReadonlyMap<string, FaceRasterSpec>): string[] {
   const urls = new Set<string>();
@@ -217,6 +230,18 @@ export function imageUrlsUsed(specs: ReadonlyMap<string, FaceRasterSpec>): strin
     }
   }
   return [...urls].sort();
+}
+
+/**
+ * The subset of `imageUrlsUsed` that is an actual remote URL — i.e. what
+ * NEEDS the CORS-sensitive `crossorigin=anonymous` fetch (§7.1b: "never
+ * counted in the remote CORS pre-flight"). `asset:` sources resolve from the
+ * local Assets-drawer library (loadAssetData) instead and never appear here.
+ * Pure and exported so the exclusion is testable without the DOM-only
+ * loaders themselves.
+ */
+export function remoteImageUrlsUsed(specs: ReadonlyMap<string, FaceRasterSpec>): string[] {
+  return imageUrlsUsed(specs).filter((src) => parseAssetSrc(src) === null);
 }
 
 /** The pre-flight/embedding seam (injectable like RasterizeFaces): resolve
@@ -280,12 +305,69 @@ function getImageData(url: string): Promise<ResolvedImage | null> {
   return cached;
 }
 
-/** The real (browser) ResolveImages — concurrent per URL, cache-backed. */
+/**
+ * Load one LOCAL asset (§7.1b) for embedding: bytes come straight from the
+ * Assets-drawer's IndexedDB library (`assetStore.getBytes`), no network and
+ * no `crossorigin` — a same-origin object URL never taints the canvas the
+ * way an uncooperative remote host would. Missing name → null, exactly like
+ * `loadImageData`'s failure outcomes (the §3.3 marked placeholder box, and
+ * the modal's "N images could not be embedded" count).
+ */
+async function loadAssetData(name: string): Promise<ResolvedImage | null> {
+  const asset = await assetStore.getBytes(name);
+  if (!asset) return null;
+  // See cardSvg.tsx's identical cast note: Uint8Array is a valid BlobPart at
+  // runtime everywhere this ships; lib.dom's type just can't prove it.
+  const blob =
+    asset.bytes instanceof Blob ? asset.bytes : new Blob([asset.bytes as BlobPart], { type: asset.mime });
+  const url = URL.createObjectURL(blob);
+  try {
+    const img = await loadImage(url);
+    if (img.naturalWidth === 0 || img.naturalHeight === 0) return null;
+    const canvas = document.createElement("canvas");
+    canvas.width = img.naturalWidth;
+    canvas.height = img.naturalHeight;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null;
+    ctx.drawImage(img, 0, 0);
+    return {
+      href: canvas.toDataURL("image/png"),
+      naturalWidth: img.naturalWidth,
+      naturalHeight: img.naturalHeight,
+    };
+  } catch {
+    return null; // no asset by this name, or a decode failure — placeholder box
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+/** Per-name session cache, same eviction posture as `imageDataCache` — a
+ * failed lookup retries next time (the asset may get uploaded mid-session). */
+const assetDataCache = new Map<string, Promise<ResolvedImage | null>>();
+
+function getAssetData(name: string): Promise<ResolvedImage | null> {
+  let cached = assetDataCache.get(name);
+  if (cached === undefined) {
+    cached = loadAssetData(name).then((data) => {
+      if (data === null) assetDataCache.delete(name);
+      return data;
+    });
+    assetDataCache.set(name, cached);
+  }
+  return cached;
+}
+
+/** The real (browser) ResolveImages — concurrent per src, cache-backed.
+ * Routes by `parseAssetSrc` (§7.1b): a URL src takes the CORS-fetch path
+ * (`getImageData`), an `asset:name` src takes the local IndexedDB path
+ * (`getAssetData`) and never touches the network. */
 export const resolveImageSources: ResolveImages = async (urls) => {
   const out = new Map<string, ResolvedImage | null>();
   await Promise.all(
-    urls.map(async (url) => {
-      out.set(url, await getImageData(url));
+    urls.map(async (src) => {
+      const assetName = parseAssetSrc(src);
+      out.set(src, assetName !== null ? await getAssetData(assetName) : await getImageData(src));
     }),
   );
   return out;

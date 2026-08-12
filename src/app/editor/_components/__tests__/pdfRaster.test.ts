@@ -1,9 +1,18 @@
 /**
- * pdfRaster's PURE part (§6.1, §3.3 M2). The rasterization itself is DOM-only
- * and excluded from vitest by injection (see pdfRaster.tsx); what IS testable
- * is the font-coverage derivation: the embed CSS must cover exactly the
- * Dicier faces the exported shapes use — all ten families exist, but only the
- * used ones may be inlined (each is ~100 KB of base64 per rasterized SVG).
+ * pdfRaster's PURE part (§6.1, §3.3 M2, §7.1b). The rasterization itself is
+ * DOM-only and excluded from vitest by injection (see pdfRaster.tsx); what IS
+ * testable is the font-coverage derivation: the embed CSS must cover exactly
+ * the Dicier faces the exported shapes use — all ten families exist, but only
+ * the used ones may be inlined (each is ~100 KB of base64 per rasterized
+ * SVG) — plus, since §7.1b, which image `src`s are "remote" at all.
+ *
+ * `loadAssetData` (the asset: → data-URI path) is DOM-only for the same
+ * reason `loadImageData` always has been (canvas/Image, no `document` here)
+ * — on the manual browser checklist, not a gap introduced by this change.
+ * What §7.1b actually needs guarded by a test is the ROUTING decision —
+ * `remoteImageUrlsUsed` below is the pure predicate `resolveImageSources`
+ * dispatches on, so the "never counted in the remote CORS pre-flight" claim
+ * is checked directly rather than by proxy.
  */
 import { describe, expect, it } from "vitest";
 import { createElement } from "react";
@@ -11,7 +20,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import type { IconStyle, ImageShape, Shape } from "@/lib/lang";
 import { CardFaceSvg, type ResolvedImages } from "../cardSvg";
 import type { FaceRasterSpec } from "../pdfLayout";
-import { iconFamiliesUsed, imageUrlsUsed } from "../pdfRaster";
+import { iconFamiliesUsed, imageUrlsUsed, remoteImageUrlsUsed } from "../pdfRaster";
 
 const icon = (style: IconStyle): Shape => ({
   kind: "icon",
@@ -121,6 +130,38 @@ describe("imageUrlsUsed (§3.3 M2)", () => {
     expect(imageUrlsUsed(new Map([["a:front", spec([banner])]]))).toEqual([
       "https://x/banner.png",
     ]);
+  });
+
+  it("includes asset: sources too (§7.1b) — they're still checked/counted, just not fetched", () => {
+    const specs = new Map<string, FaceRasterSpec>([
+      ["a:front", spec([image("asset:dragon"), image("https://x/a.png")])],
+    ]);
+    expect(imageUrlsUsed(specs)).toEqual(["asset:dragon", "https://x/a.png"]);
+  });
+});
+
+describe("remoteImageUrlsUsed (§7.1b: the CORS pre-flight excludes asset:)", () => {
+  it("drops asset: sources, keeps URLs, same dedup/sort as imageUrlsUsed", () => {
+    const specs = new Map<string, FaceRasterSpec>([
+      [
+        "a:front",
+        spec([image("asset:dragon"), image("https://x/b.png"), image("https://x/a.png")]),
+      ],
+      ["a:back", spec([image("asset:dragon"), image("asset:imp")])],
+    ]);
+    expect(remoteImageUrlsUsed(specs)).toEqual(["https://x/a.png", "https://x/b.png"]);
+  });
+
+  it("all-asset faces → an empty remote list (nothing to CORS pre-flight)", () => {
+    const specs = new Map([["a:front", spec([image("asset:dragon")])]]);
+    expect(remoteImageUrlsUsed(specs)).toEqual([]);
+    expect(imageUrlsUsed(specs)).toEqual(["asset:dragon"]); // still in the full list
+  });
+
+  it("no image shapes → both lists empty", () => {
+    const specs = new Map([["a:front", spec([text, icon("pixel")])]]);
+    expect(remoteImageUrlsUsed(specs)).toEqual([]);
+    expect(imageUrlsUsed(specs)).toEqual([]);
   });
 });
 

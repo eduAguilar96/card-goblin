@@ -38,6 +38,8 @@ import type {
   TextAnchor,
   TextBoxShape,
 } from "@/lib/lang";
+import { parseAssetSrc } from "@/lib/lang";
+import { assetStore, type AssetChangeEvent } from "@/app/editor/_store/assetStore";
 
 // ---------------------------------------------------------------------------
 // Font realization constants (§3.4 m10)
@@ -221,37 +223,41 @@ export function resolveImageBox(
 }
 
 /**
- * Loading/failure of an image URL is RENDERER state, never the model's
+ * Loading/failure of an image `src` is RENDERER state, never the model's
  * (§3.3: no D-code — the model stays pure). This module-level store tracks
- * one status per URL for the live preview — including the natural size on
- * success, which is what `auto` dimensions resolve against;
+ * one status per `src` string for the live preview — including the natural
+ * size on success, which is what `auto` dimensions resolve against;
  * `useSyncExternalStore` in LiveImage keeps SSR/static output on the
  * "loading" placeholder and lets the real image swap in after the browser
  * probe settles. Status objects are minted once per settle, so snapshots
- * stay referentially stable.
+ * stay referentially stable. `href` (§7.1b) is what actually gets drawn —
+ * for a URL `src` it's the src itself; for an `asset:` src it's the object
+ * URL resolved from the Assets-drawer library (resolveAssetObjectUrl below).
  */
 export type ImageLoadStatus =
   | { state: "loading" }
-  | ({ state: "loaded" } & ImageNaturalSize)
+  | ({ state: "loaded"; href: string } & ImageNaturalSize)
   | { state: "failed" };
 
 /** Probe seam: browser-only image loading stays OUT of vitest by injection
  * (same policy as the PDF rasterizer) — tests replace this with a stub.
- * Resolves the art's natural size, or null on failure. */
-export type ImageProbe = (src: string) => Promise<ImageNaturalSize | null>;
+ * Resolves the art's natural size, or null on failure. Takes the resolved
+ * HREF (a URL src verbatim, or an asset's object URL), never the raw
+ * `asset:` scheme string. */
+export type ImageProbe = (href: string) => Promise<ImageNaturalSize | null>;
 
-const browserImageProbe: ImageProbe = (src) =>
+const browserImageProbe: ImageProbe = (href) =>
   new Promise((resolve) => {
     const img = new Image();
     img.onload = () =>
       resolve({ naturalWidth: img.naturalWidth, naturalHeight: img.naturalHeight });
     img.onerror = () => resolve(null);
-    img.src = src;
+    img.src = href;
   });
 
 let imageProbe: ImageProbe = browserImageProbe;
-/** The one "loading" status — a singleton so getSnapshot is stable for URLs
- * the store has not settled (or even seen) yet. */
+/** The one "loading" status — a singleton so getSnapshot is stable for
+ * sources the store has not settled (or even seen) yet. */
 const LOADING_STATUS: ImageLoadStatus = { state: "loading" };
 const imageStatuses = new Map<string, ImageLoadStatus>();
 const imageListeners = new Map<string, Set<() => void>>();
@@ -261,36 +267,168 @@ export function setImageProbeForTests(probe: ImageProbe | null): void {
   imageProbe = probe ?? browserImageProbe;
 }
 
-/** Test seam: forget every probed status so cases don't leak into each other. */
+/** Test seam: forget every probed status AND cached asset object URL so
+ * cases don't leak into each other. */
 export function resetImageStatusesForTests(): void {
   imageStatuses.clear();
   imageListeners.clear();
+  for (const url of assetObjectUrls.values()) {
+    if (url !== null) URL.revokeObjectURL(url);
+  }
+  assetObjectUrls.clear();
+  assetObjectUrlPromises.clear();
 }
 
-function imageStatusOf(src: string): ImageLoadStatus {
+/** Exported ONLY for tests: the live resolution machinery (this whole
+ * section) is otherwise browser-only glue reached exclusively through
+ * `useSyncExternalStore` in `LiveImage`, which `renderToStaticMarkup` never
+ * invokes (it reads `getServerSnapshot` instead — see LiveImage below), so
+ * component tests can't exercise it. `resolveAssetObjectUrl` needs only
+ * `Blob`/`URL.createObjectURL` (present in Node, unlike `Image`/canvas), so
+ * asset resolution specifically CAN run headless via this direct call —
+ * real production code path, not a parallel test implementation. */
+export function imageStatusOf(src: string): ImageLoadStatus {
   return imageStatuses.get(src) ?? LOADING_STATUS;
 }
 
-/** Subscribe to one URL's status, kicking off the probe on first interest.
- * Subscription only ever happens client-side (React calls it on mount), so
- * the probe never runs during SSR/static rendering. */
-function subscribeImageStatus(src: string, onChange: () => void): () => void {
+function notifySrc(src: string): void {
+  for (const cb of imageListeners.get(src) ?? []) cb();
+}
+
+// ---------------------------------------------------------------------------
+// asset: resolution (§7.1b) — name → object URL, cached per name
+// ---------------------------------------------------------------------------
+
+/** Asset name → its object URL, or `null` once resolution settled on "no
+ * such asset" (missing name — same terminal outcome as a failed URL fetch).
+ * Kept separate from `imageStatuses` (keyed by the raw `src` string) because
+ * invalidation is per NAME (a rename/delete/replace in the drawer), while
+ * `imageStatuses`/`imageListeners` are keyed by whatever `src` string shapes
+ * actually carry (always `"asset:" + name` for the asset scheme, since the
+ * scheme has no other variation). */
+const assetObjectUrls = new Map<string, string | null>();
+const assetObjectUrlPromises = new Map<string, Promise<string | null>>();
+
+function revokeAssetUrl(name: string): void {
+  const existing = assetObjectUrls.get(name);
+  if (existing) URL.revokeObjectURL(existing);
+  assetObjectUrls.delete(name);
+  assetObjectUrlPromises.delete(name);
+}
+
+/** Resolve one asset name to an object URL (cached; concurrent callers for
+ * the same name share one in-flight promise). `null` = no such asset in the
+ * library — the caller renders the failed placeholder, exactly like a URL
+ * that failed to load (§7.1b: "missing asset → existing failed/broken
+ * placeholder path"). */
+function resolveAssetObjectUrl(name: string): Promise<string | null> {
+  if (assetObjectUrls.has(name)) return Promise.resolve(assetObjectUrls.get(name) ?? null);
+  let pending = assetObjectUrlPromises.get(name);
+  if (!pending) {
+    pending = assetStore.getBytes(name).then((asset) => {
+      if (!asset) {
+        assetObjectUrls.set(name, null);
+        return null;
+      }
+      // Cast: Uint8Array is a structurally valid BlobPart at runtime in every
+      // engine (and in Node 22, per the manual check backing this feature),
+      // but lib.dom's BlobPart narrows ArrayBufferView to an ArrayBuffer
+      // (not SharedArrayBuffer) backing store, which TS can't prove here.
+      const blob =
+        asset.bytes instanceof Blob
+          ? asset.bytes
+          : new Blob([asset.bytes as BlobPart], { type: asset.mime });
+      const url = URL.createObjectURL(blob);
+      assetObjectUrls.set(name, url);
+      return url;
+    });
+    assetObjectUrlPromises.set(name, pending);
+  }
+  return pending;
+}
+
+/** Kick off resolution for one `src` (URL or `asset:name`), settling
+ * `imageStatuses` and notifying that src's listeners. Shared by first-
+ * subscribe and by asset-change re-resolution. */
+function beginResolution(src: string): void {
+  imageStatuses.set(src, LOADING_STATUS);
+  const settle = (natural: ImageNaturalSize | null, href: string | null): void => {
+    imageStatuses.set(
+      src,
+      natural && href !== null ? { state: "loaded", href, ...natural } : { state: "failed" },
+    );
+    notifySrc(src);
+  };
+  const assetName = parseAssetSrc(src);
+  if (assetName !== null) {
+    void resolveAssetObjectUrl(assetName).then((url) => {
+      if (url === null) {
+        settle(null, null);
+        return;
+      }
+      void imageProbe(url).then((natural) => settle(natural, url));
+    });
+  } else {
+    void imageProbe(src).then((natural) => settle(natural, src));
+  }
+}
+
+/** Drop a `src`'s cached status and, if anything is still watching it,
+ * re-resolve immediately (rather than waiting for a future subscribe) so a
+ * mounted card heals/breaks live as the drawer changes the library. */
+function invalidateSrc(src: string): void {
+  imageStatuses.delete(src);
+  if ((imageListeners.get(src)?.size ?? 0) > 0) beginResolution(src);
+}
+
+/** Assets-drawer changes → invalidate exactly the affected `asset:` src(s)
+ * (§7.1b: "cache per name; revoke + re-resolve on rename/delete/replace").
+ * Subscribed once at module load — this module's whole lifetime is the
+ * app's, like `imageStatuses` itself. */
+function onAssetChange(event: AssetChangeEvent): void {
+  switch (event.type) {
+    case "put":
+    case "delete":
+      revokeAssetUrl(event.name);
+      invalidateSrc(`asset:${event.name}`);
+      return;
+    case "rename":
+      revokeAssetUrl(event.from);
+      invalidateSrc(`asset:${event.from}`);
+      // The target name may have been a previously-unknown (W005) reference
+      // that's now satisfied — clear any cached "missing" outcome for it too.
+      revokeAssetUrl(event.to);
+      invalidateSrc(`asset:${event.to}`);
+      return;
+    case "clear":
+    case "replaceAll":
+      for (const name of [...assetObjectUrls.keys()]) revokeAssetUrl(name);
+      for (const src of [...imageStatuses.keys()]) {
+        if (parseAssetSrc(src) !== null) invalidateSrc(src);
+      }
+      return;
+    case "disabled":
+      // Nothing cached becomes valid; existing loading/failed states already
+      // describe the right outcome (an asset store that never answers reads
+      // as "missing", same as before it was disabled).
+      return;
+  }
+}
+
+assetStore.subscribe(onAssetChange);
+
+/** Subscribe to one `src`'s status, kicking off resolution on first
+ * interest. Subscription only ever happens client-side (React calls it on
+ * mount), so probes never run during SSR/static rendering. Exported for
+ * tests — see `imageStatusOf`'s comment. */
+export function subscribeImageStatus(src: string, onChange: () => void): () => void {
   let listeners = imageListeners.get(src);
   if (!listeners) {
     listeners = new Set();
     imageListeners.set(src, listeners);
   }
   listeners.add(onChange);
-  if (!imageStatuses.has(src)) {
-    imageStatuses.set(src, LOADING_STATUS);
-    void imageProbe(src).then((natural) => {
-      imageStatuses.set(
-        src,
-        natural ? { state: "loaded", ...natural } : { state: "failed" },
-      );
-      for (const cb of imageListeners.get(src) ?? []) cb();
-    });
-  }
+  if (!imageStatuses.has(src)) beginResolution(src);
   return () => {
     listeners.delete(onChange);
   };
@@ -394,7 +532,7 @@ function LiveImage({ shape, index }: { shape: ImageShape; index: number }): Reac
     () => LOADING_STATUS,
   );
   if (status.state === "loaded") {
-    return renderImageTag(shape, index, shape.src, resolveImageBox(shape, status));
+    return renderImageTag(shape, index, status.href, resolveImageBox(shape, status));
   }
   return renderImagePlaceholder(
     shape,
