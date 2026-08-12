@@ -19,7 +19,7 @@ import type {
   TextBoxShape,
   TextShape,
 } from "../index";
-import { GEIST_METRICS, compileProject, generateModel, measureText } from "../index";
+import { GEIST_METRICS, SIZE_PRESETS, compileProject, generateModel, measureText } from "../index";
 import { parse } from "../parser";
 import { encodeQr } from "../qr";
 
@@ -326,6 +326,48 @@ describe("geometry resolution: full / half / middle, fractional y (⚑7†)", ()
       { kind: "rect", x: 0, y: 0, width: 20, height: 28, color: "white", anchor: { h: "left", v: "top" } },
     ]);
   });
+});
+
+// -- the built-in presets (§3.4) --------------------------------------------
+
+describe("every size preset reaches the RenderModel intact (§3.4)", () => {
+  // Sweeps the map rather than naming presets: a size added to SIZE_PRESETS
+  // gets these guarantees automatically, which is the point — a preset that
+  // isn't exact in mm-hundredths would be a size the language ships but its
+  // own custom-size rule rejects, and `y_units: auto` would stop being square.
+  for (const [name, preset] of SIZE_PRESETS) {
+    it(`${name} → ${preset.widthMm}×${preset.heightMm} mm, square auto units`, () => {
+      const p = projectOf(
+        src(
+          ...sheetLines(["t: Text"]),
+          ...textTemplate("[t]"),
+          "Card: C",
+          "  sheet: Sh",
+          `  size: ${name}`,
+          "  x_units: 20",
+          "  y_units: auto",
+          "  Front: T",
+        ),
+        { Sh: [{ t: "x" }] },
+      );
+      const deck = p.model.decks[0];
+      expect(deck.widthMm).toBe(preset.widthMm);
+      expect(deck.heightMm).toBe(preset.heightMm);
+
+      // Exact in hundredths of a millimetre — the floor custom sizes are held
+      // to (E008), and what keeps the unit math off non-finite numbers.
+      for (const mm of [preset.widthMm, preset.heightMm]) {
+        expect(mm * 100, `${name}: ${mm} mm`).toBe(Math.round(mm * 100));
+        expect(mm).toBeGreaterThanOrEqual(0.01);
+      }
+
+      // ⚑7†: auto y_units is exactly x_units × height/width in mm-hundredths.
+      expect(deck.yUnits).toBe(
+        (20 * Math.round(preset.heightMm * 100)) / Math.round(preset.widthMm * 100),
+      );
+      expect(Number.isFinite(deck.yUnits)).toBe(true);
+    });
+  }
 });
 
 // -- custom card sizes (§3.4, M2) -------------------------------------------

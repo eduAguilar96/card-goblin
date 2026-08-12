@@ -241,6 +241,31 @@ describe("the card-sizes table matches SIZE_PRESETS", () => {
     });
   }
 
+  it("states inches that are the millimetres converted", () => {
+    // The inch column is a convenience restatement (a reader comparing a
+    // sleeve pack), rounded to 2 dp — so it drifts silently unless derived.
+    const table = tableWithHeader(text, "Physical");
+    const col = table.header.findIndex((cell) => plain(cell).toLowerCase() === "inches");
+    expect(col, "the card-sizes table lost its Inches column").toBeGreaterThan(0);
+
+    for (const cells of table.rows) {
+      const preset = SIZE_PRESETS.get(plain(cells[0]));
+      expect(preset, `unknown preset "${plain(cells[0])}"`).toBeDefined();
+      if (preset === undefined) continue;
+
+      const stated = /^([\d.]+) × ([\d.]+) in$/.exec(plain(cells[col] ?? ""));
+      expect(stated, `${preset.name}: inches must read "W × H in"`).not.toBeNull();
+      if (stated === null) continue;
+
+      for (const [i, mm] of [preset.widthMm, preset.heightMm].entries()) {
+        expect(
+          Math.abs(Number(stated[i + 1]) - mm / 25.4),
+          `${preset.name}: wiki says ${stated[i + 1]} in, ${mm} mm ÷ 25.4 = ${mm / 25.4}`,
+        ).toBeLessThan(0.006); // 2-dp rounding, nothing looser
+      }
+    }
+  });
+
   it("states unit heights that match the square-unit derivation", () => {
     // The other table claims `x_units: 20` → N units tall per preset. N is
     // 20 × height/width; a wrong ratio here misleads anyone laying out a

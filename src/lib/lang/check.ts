@@ -138,13 +138,25 @@ export interface SizePreset {
   heightMm: number;
 }
 
-/** The five presets (§3.4). Exported for the evaluator/renderer. */
+/** The built-in presets (§3.4), widest-use first — completion offers them in
+ * this order. Exported for the evaluator/renderer. Every entry must be exact
+ * in hundredths of a millimetre, like a custom pair: the unit math downstream
+ * works in integer mm-hundredths. */
 export const SIZE_PRESETS: ReadonlyMap<string, SizePreset> = new Map([
   ["poker", { name: "poker", widthMm: 63.5, heightMm: 88.9 }],
   ["bridge", { name: "bridge", widthMm: 57.15, heightMm: 88.9 }],
+  ["american", { name: "american", widthMm: 56, heightMm: 87 }],
   ["tarot", { name: "tarot", widthMm: 70, heightMm: 120 }],
   ["square", { name: "square", widthMm: 70, heightMm: 70 }],
   ["mini", { name: "mini", widthMm: 44, heightMm: 63.5 }],
+  ["domino", { name: "domino", widthMm: 44.45, heightMm: 88.9 }],
+]);
+
+/** "poker, bridge, …, or domino" — derived, so adding a preset can never leave
+ * a stale list behind in the E008 message. */
+const SIZE_PRESET_LIST = ((names) =>
+  `${names.slice(0, -1).join(", ")}, or ${names[names.length - 1]}`)([
+  ...SIZE_PRESETS.keys(),
 ]);
 
 export interface LoopBinding {
@@ -617,14 +629,14 @@ class Checker {
             }
             this.error(
               "E008",
-              `Unknown size preset '${value.name}' — expected poker, bridge, tarot, square, or mini`,
+              `Unknown size preset '${value.name}' — expected ${SIZE_PRESET_LIST}`,
               value.range,
             );
             break;
           }
           this.error(
             "E008",
-            `size: must be one of poker, bridge, tarot, square, mini`,
+            `size: must be one of ${SIZE_PRESET_LIST}`,
             value.range,
           );
           break;

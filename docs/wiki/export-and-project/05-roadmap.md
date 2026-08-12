@@ -27,7 +27,7 @@ names, property names, enum cases, color names, icon codes. See
 [The editor](the-editor.md).
 
 **Custom card sizes.** `width_mm:` + `height_mm:` on a Card, beyond the
-[five presets](card-sizes.md).
+[built-in presets](card-sizes.md).
 
 **Icon styles.** All ten Dicier faces (flat/block/round × dark/light/heavy,
 plus pixel) via `style:` — see [Icons](icons.md).

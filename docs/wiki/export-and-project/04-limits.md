@@ -48,7 +48,8 @@ with a note rather than failing.
 
 - Colors are RGB; no CMYK conversion or color management.
 - No bleed or safe-zone guides — cut lines and crop marks only.
-- Card sizes are the [five presets](card-sizes.md); no custom dimensions yet.
+- A card bigger than the page can't be split across sheets — [export](pdf-export.md)
+  reports it instead of tiling it.
 
 ## Editing
 

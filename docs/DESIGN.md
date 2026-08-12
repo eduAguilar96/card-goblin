@@ -173,7 +173,16 @@ Repeat: [health] as i
 ### 3.4 Geometry (⚑7†)
 
 - `size:` picks a physical preset: `poker` 63.5×88.9 mm, `bridge` 57.15×88.9,
-  `tarot` 70×120, `square` 70×70, `mini` 44×63.5. **Custom sizes (M2, agreed
+  `american` 56×87, `tarot` 70×120, `square` 70×70, `mini` 44×63.5,
+  `domino` 44.45×88.9. **`american` + `domino` (M3, added 2026-08-11):** the two
+  stock sizes the sleeve market treats as standard that the original five missed.
+  Both are named in inches in the wild (2.2″×3.43″ and 1.75″×3.5″), but the
+  preset table stays **millimetre-authoritative**: `domino` converts exactly
+  (1.75″ = 44.45, 3.5″ = 88.9), while `american` takes the round 56×87 the
+  industry actually cuts and sleeves to rather than the 55.88×87.12 a literal
+  conversion gives — a 0.12 mm difference no printer resolves, against a number
+  no one would recognize. Every preset must stay exact in hundredths of a
+  millimetre for the same reason custom sizes must (below). **Custom sizes (M2, agreed
   2026-08-09):** a Card may *instead* declare `width_mm:` + `height_mm:` (positive
   number literals, both required together; combining them with `size:`, or giving
   only one, is E008). Values must be **exact in hundredths of a millimetre with a

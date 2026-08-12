@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import type { DataRef, ElementNode, Program, RepeatNode, TemplateDecl } from "../ast";
 import type { CheckResult } from "../check";
-import { check } from "../check";
+import { check, SIZE_PRESETS } from "../check";
 import type { Anchor } from "../index";
 import {
   ANCHOR_TOKENS,
@@ -505,10 +505,12 @@ describe("E008 required properties", () => {
     expect(ds.find((d) => d.code === "E008")?.message).toContain("'Front:'");
   });
 
-  it("size must be one of the five presets", () => {
+  it("size must name a built-in preset", () => {
     const ds = diagsOf(withCard(["sheet: Monsters", "size: jumbo", ...CARD_ITEMS.slice(2)]));
     expect(ds.map((d) => d.code)).toEqual(["E008"]);
     expect(ds[0].message).toContain("Unknown size preset 'jumbo'");
+    // The list of what WAS expected is derived, so it can't go stale.
+    for (const name of SIZE_PRESETS.keys()) expect(ds[0].message).toContain(name);
     expect(codesOf(withCard(["sheet: Monsters", "size: 5", ...CARD_ITEMS.slice(2)]))).toEqual([
       "E008",
     ]);

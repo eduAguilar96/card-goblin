@@ -1,7 +1,7 @@
 ---
 title: Card sizes
 status: stable
-summary: The five physical card presets — and custom millimetre sizes — in exact millimetres.
+summary: The built-in physical card presets — and custom millimetre sizes — in exact millimetres.
 ---
 
 # Card sizes
@@ -9,13 +9,18 @@ summary: The five physical card presets — and custom millimetre sizes — in e
 `size:` on a [Card block](cards-and-generation.md) picks the physical card. Sizes are
 exact millimetres, which is what makes PDF export print true to size.
 
-| `size:` | Physical | Good for |
-|---|---|---|
-| `poker` | 63.5 × 88.9 mm | standard playing cards |
-| `bridge` | 57.15 × 88.9 mm | narrow hands, trick-takers |
-| `tarot` | 70 × 120 mm | big art, oracle decks |
-| `square` | 70 × 70 mm | tiles, tokens |
-| `mini` | 44 × 63.5 mm | resource cards, dense layouts |
+| `size:` | Physical | Inches | Good for |
+|---|---|---|---|
+| `poker` | 63.5 × 88.9 mm | 2.5 × 3.5 in | standard playing cards |
+| `bridge` | 57.15 × 88.9 mm | 2.25 × 3.5 in | narrow hands, trick-takers |
+| `american` | 56 × 87 mm | 2.2 × 3.43 in | board-game decks, the common sleeve size |
+| `tarot` | 70 × 120 mm | 2.76 × 4.72 in | big art, oracle decks |
+| `square` | 70 × 70 mm | 2.76 × 2.76 in | tiles, tokens |
+| `mini` | 44 × 63.5 mm | 1.73 × 2.5 in | resource cards, dense layouts |
+| `domino` | 44.45 × 88.9 mm | 1.75 × 3.5 in | tall narrow cards, tarot-style minis |
+
+The millimetres are the real definition; the inches are those values rounded, so
+they're what to compare against a sleeve pack, not what to print from.
 
 ## Units and size
 
@@ -34,9 +39,11 @@ card's aspect ratio. It isn't always a whole number:
 |---|---|
 | `poker` | 28 exactly |
 | `bridge` | 31.111… |
+| `american` | 31.071… |
 | `tarot` | 34.285… |
 | `square` | 20 |
 | `mini` | 28.863… |
+| `domino` | 40 exactly |
 
 `full` on the vertical axis means that value, whatever it is — so `height: full`
 always spans the card.
