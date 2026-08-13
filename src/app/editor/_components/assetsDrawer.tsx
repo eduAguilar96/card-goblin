@@ -53,6 +53,24 @@ import {
  * `_2`, `_3`, … to dodge a collision with `existing`. Pure and exported for
  * tests — always returns a name `isValidAssetName` accepts.
  */
+/**
+ * Read a file input's selection, THEN clear it — the order is load-bearing.
+ * `input.files` is a LIVE FileList bound to the element, so clearing `value`
+ * (which we do so re-picking the SAME file still fires `change`) also empties
+ * the FileList you are still holding: reading after the reset silently yields
+ * zero files and the upload does nothing at all, with no error anywhere.
+ * Copying into a plain array first is the whole fix. The drag-drop path never
+ * hit this — `dataTransfer.files` is detached from any input.
+ *
+ * Typed structurally (not as HTMLInputElement) so the DOM-free test suite can
+ * drive it with a fake that reproduces the live-FileList semantics.
+ */
+export function takePickedFiles(input: { files: ArrayLike<File> | null; value: string }): File[] {
+  const files = Array.from(input.files ?? []);
+  input.value = "";
+  return files;
+}
+
 export function deriveAssetName(filename: string, existing: ReadonlySet<string>): string {
   const stem = filename.replace(/\.[^./]+$/, "");
   let base = stem.replace(/[^a-zA-Z0-9_]+/g, "_").replace(/^_+/, "");
@@ -333,6 +351,23 @@ export function AssetsDrawerContent({
           </button>
         </div>
 
+        {/* Storage-reality banner: assets live in THIS browser's site storage
+            (IndexedDB) on THIS device. CardGoblin has no backend, so nothing
+            here is a cloud backup — and "Clear cookies and site data" wipes it.
+            The project file is the only durable copy, hence the export nudge. */}
+        <p className="mb-3 rounded border border-amber-700/60 bg-amber-950/40 px-3 py-2 text-xs leading-relaxed text-amber-200">
+          <span className="font-semibold">These images stay on this computer.</span>{" "}
+          They&apos;re saved in this browser&apos;s storage for CardGoblin — nothing is
+          uploaded to a server, and there is no cloud copy. Another browser, another
+          device, or a private window won&apos;t see them, and clearing your browsing
+          data (&ldquo;cookies and site data&rdquo;) deletes them.{" "}
+          <span className="font-semibold">
+            Export a project file before you finish
+          </span>{" "}
+          — it embeds your images, so it&apos;s your backup and the way to move a
+          project between machines.
+        </p>
+
         {disabled && (
           <p
             role="status"
@@ -362,9 +397,8 @@ export function AssetsDrawerContent({
             multiple
             className="hidden"
             onChange={(event) => {
-              const files = event.currentTarget.files;
-              event.currentTarget.value = "";
-              if (files && files.length > 0) void handleFiles(files);
+              const files = takePickedFiles(event.currentTarget);
+              if (files.length > 0) void handleFiles(files);
             }}
           />
         </div>

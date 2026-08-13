@@ -12,6 +12,7 @@ import {
   AssetsDrawerContent,
   assetReference,
   deriveAssetName,
+  takePickedFiles,
   type AssetsDrawerActions,
 } from "../assetsDrawer";
 import type { AssetMeta } from "@/app/editor/_store/assetStore";
@@ -194,5 +195,47 @@ describe("AssetsDrawerContent — rename (test seam, identifier-validated)", () 
     );
     expect(markup).toContain('role="alert"');
     expect(stripTags(markup)).toContain("starting with a letter");
+  });
+});
+
+describe("takePickedFiles — the picker regression (file input's live FileList)", () => {
+  /** A fake input with the browser's real semantics: clearing `value` empties
+   * the selection, because `files` is live rather than a snapshot. */
+  function fakeInput(names: string[]) {
+    const input = {
+      _files: names.map((n) => new File([new Uint8Array([1])], n, { type: "image/png" })),
+      get files(): File[] {
+        return this._files;
+      },
+      _value: "",
+      get value(): string {
+        return this._value;
+      },
+      set value(v: string) {
+        this._value = v;
+        if (v === "") this._files = []; // the browser behavior that caused the bug
+      },
+    };
+    return input as unknown as { files: ArrayLike<File> | null; value: string } & {
+      _files: File[];
+    };
+  }
+
+  it("returns the picked files even though reading clears the input", () => {
+    const input = fakeInput(["dragon.png", "imp.png"]);
+    const files = takePickedFiles(input);
+    expect(files.map((f) => f.name)).toEqual(["dragon.png", "imp.png"]);
+  });
+
+  it("still resets the input, so re-picking the SAME file fires change again", () => {
+    const input = fakeInput(["dragon.png"]);
+    takePickedFiles(input);
+    expect(input.value).toBe("");
+    expect(input._files).toHaveLength(0);
+  });
+
+  it("an empty or null selection yields no files and never throws", () => {
+    expect(takePickedFiles(fakeInput([]))).toEqual([]);
+    expect(takePickedFiles({ files: null, value: "x" })).toEqual([]);
   });
 });
