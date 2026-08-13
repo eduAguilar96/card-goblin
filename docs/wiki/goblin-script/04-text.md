@@ -30,6 +30,9 @@ feature.
 `anchor:` follows the same nine-point vocabulary every shape uses — see
 [Anchors](templates-and-shapes.md) on Templates & shapes.
 
+`font:` picks the typeface — `geist` (the default) or one of eight bundled serif
+and monospace faces. See [Fonts](#fonts) below for the full list.
+
 ## `TextBox` — wrapped, multi-line text
 
 `Text` draws one line, always. When a description, a rules paragraph, or flavor
@@ -56,6 +59,9 @@ and the [exported PDF](pdf-export.md) show the exact same line breaks, always.
 - `line_height:` is a multiplier on `size` for the distance between baselines.
   The default is **1.3** × size; it must be a plain positive number, not an
   expression.
+- `font:` picks the typeface — see [Fonts](#fonts) below. Because wrapping
+  measures actual letterforms, the SAME text in the SAME box can wrap onto a
+  different number of lines depending on `font:`.
 
 ### Line breaks you write yourself
 
@@ -99,3 +105,42 @@ One box is one look: a single font, size, and color for the whole box.
 Interpolation (`text: "[name]: [rules]"`) substitutes before wrapping, so mixed
 cell data wraps as one paragraph. Bold runs and inline icons are a
 [roadmap](roadmap.md) topic.
+
+## Fonts
+
+Both `Text` and `TextBox` take an optional `font:` — nine bundled faces, picked
+by name:
+
+```goblin
+Text: "Title"
+  x: middle
+  y: 0.7
+  size: 1.6
+  font: garamond_bold
+  text: [name]
+```
+
+| `font:` | Face |
+|---|---|
+| `geist` | the app's clean sans-serif — **the default** |
+| `garamond` | Cormorant Garamond, an elegant serif — regular |
+| `garamond_bold` | Cormorant Garamond — bold |
+| `garamond_italic` | Cormorant Garamond — italic |
+| `garamond_bold_italic` | Cormorant Garamond — bold italic |
+| `courier` | Courier Prime, a typewriter monospace — regular |
+| `courier_bold` | Courier Prime — bold |
+| `courier_italic` | Courier Prime — italic |
+| `courier_bold_italic` | Courier Prime — bold italic |
+
+Like `style:` on [`Icon`](icons.md), this is a **closed list**: an unrecognized
+value is an error, not a warning. It's a deliberately small, fixed set for
+now — two typefaces bundled with the app, not a general font-upload system —
+chosen to cover a serif and a monospace need without opening a whole asset
+pipeline. If you need a font that isn't here, that's currently out of reach.
+
+**Wrapping is measured per font.** `TextBox` wraps by measuring each font's own
+letterforms, so the SAME text in the SAME box can break onto different lines
+depending on `font:` — Courier's fixed-width letters and Cormorant Garamond's
+narrower serif shapes don't take up the same room per character. There's
+nothing to configure for this; it's why the wrapping stays correct — and the
+preview matches the exported PDF exactly — no matter which face a box uses.

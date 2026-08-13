@@ -22,7 +22,7 @@ npm install
 | `npm run lint` | ESLint (prints a `next lint` deprecation notice — needs migration before Next 16) |
 | `npm run build` | production build — must stay green with `/editor` static. **Stop `npm run dev` first:** both write to `.next/`, and a production build removes the manifests the dev server is holding open, which makes every route 500 with `ENOENT … routes-manifest.json`. Recovery is `rm -rf .next` + restart dev. |
 | `npm run generate:dicier` | regenerate `src/lib/lang/dicier-codes.ts` from the vendored codes file |
-| `npm run generate:geist-metrics` | regenerate `src/lib/lang/geist-metrics.ts` from `src/app/fonts/GeistVF.woff` |
+| `npm run generate:font-metrics` | regenerate `src/lib/lang/geist-metrics.ts` (from `src/app/fonts/GeistVF.woff`) and `src/lib/lang/font-metrics.ts` (the eight `font:` faces, ◆41) |
 
 ## Code map
 
@@ -32,8 +32,9 @@ src/lib/lang/            the compiler (pure, no React)
   parser.ts              error-tolerant recursive descent + Pratt expressions → AST
   check.ts               binder + type checker → diagnostics + Bindings
   eval.ts, generate.ts   evaluator + card-set generator → RenderModel
-  wrap.ts                TextBox wrap engine (pure; measures against geist-metrics.ts)
-  geist-metrics.ts       GENERATED Geist advance widths (npm run generate:geist-metrics)
+  wrap.ts                TextBox wrap engine (pure; measures against geist-metrics.ts/font-metrics.ts)
+  geist-metrics.ts       GENERATED Geist advance widths (npm run generate:font-metrics)
+  font-metrics.ts        GENERATED advances + ascent for the eight font: faces (◆41), same command
   model.ts               RenderModel types (the renderer's entire input)
   index.ts               compileSource / compileProject entry points
   demoProject.ts         the seeded demo (kept byte-identical to DESIGN.md §3.9)

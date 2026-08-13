@@ -85,6 +85,87 @@
   font-display: block;
 }
 
+/* Text/TextBox `font:` faces (DESIGN.md §3.3, ◆41) — a pragmatic unblock:
+   two repo-bundled typefaces (Cormorant Garamond, Courier Prime) at their
+   four static weight/style files each, under src/app/fonts/. Family names
+   are the vendor filename stems ("CormorantGaramond-Bold"), same convention
+   as the Dicier block above, and must match TEXT_FONT_FAMILIES in
+   cardSvg.tsx.
+
+   EIGHT DISTINCT FAMILIES, not one family + font-weight/font-style
+   descriptors (documented choice): pdfRaster.tsx's embed scraper matches
+   `@font-face` rules by FAMILY NAME ONLY — it has no notion of "the bold
+   variant of this family". One shared family per typeface would make the
+   scraper inline every sibling weight/style whenever ANY of them is used
+   (these TTFs are ~70 KB–670 KB each), exactly the over-embedding §3.3
+   already avoids for Dicier via iconFamiliesUsed. A distinct family per
+   RESOLVED font: token keeps "families used by this export" == "faces used
+   by this export", one rule each — mirrored on the renderer side by
+   textFontFamiliesUsed.
+
+   `font-display: swap` (unlike Dicier's `block`): a fallback system font is
+   still LEGIBLE text (unlike Dicier's raw ligature codes, §3.3's own
+   comment on why that block uses `block`), so showing it briefly and
+   swapping in the real face is the better on-screen experience; PDF export
+   is unaffected either way (rasterizeFaces awaits `document.fonts.ready`
+   before serializing, §6.1). */
+@font-face {
+  font-family: "CormorantGaramond-Regular";
+  src: url("./fonts/CormorantGaramond/CormorantGaramond-Regular.ttf") format("truetype");
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "CormorantGaramond-Bold";
+  src: url("./fonts/CormorantGaramond/CormorantGaramond-Bold.ttf") format("truetype");
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "CormorantGaramond-Italic";
+  src: url("./fonts/CormorantGaramond/CormorantGaramond-Italic.ttf") format("truetype");
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "CormorantGaramond-BoldItalic";
+  src: url("./fonts/CormorantGaramond/CormorantGaramond-BoldItalic.ttf") format("truetype");
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "CourierPrime-Regular";
+  src: url("./fonts/CourierPrime/CourierPrime-Regular.ttf") format("truetype");
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "CourierPrime-Bold";
+  src: url("./fonts/CourierPrime/CourierPrime-Bold.ttf") format("truetype");
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "CourierPrime-Italic";
+  src: url("./fonts/CourierPrime/CourierPrime-Italic.ttf") format("truetype");
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "CourierPrime-BoldItalic";
+  src: url("./fonts/CourierPrime/CourierPrime-BoldItalic.ttf") format("truetype");
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+
 :root {
   --background: #ffffff;
   --foreground: #171717;

@@ -27,11 +27,13 @@ import { DICIER_CODES } from "@/lib/lang/dicier-codes";
 import {
   ANCHOR_TOKENS,
   DEFAULT_ANCHOR,
+  DEFAULT_FONT,
   DEFAULT_ICON_STYLE,
   DEFAULT_IMAGE_FIT,
   DEFAULT_LINE_HEIGHT,
   DEFAULT_QR_LEVEL,
   DEFAULT_TEXTBOX_OVERFLOW,
+  FONT_FACES,
   ICON_STYLES,
   IMAGE_FITS,
   QR_LEVELS,
@@ -451,6 +453,33 @@ describe("the overflow table matches TEXTBOX_OVERFLOWS", () => {
         /default/i.test(what),
         `"${mode}" default marking must match DEFAULT_TEXTBOX_OVERFLOW (${DEFAULT_TEXTBOX_OVERFLOW})`,
       ).toBe(mode === DEFAULT_TEXTBOX_OVERFLOW);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Text/TextBox fonts (◆41)
+// ---------------------------------------------------------------------------
+
+describe("the font table matches FONT_FACES (◆41)", () => {
+  const text = pageText("text");
+  /** `geist` → its Face-column prose, from the table with a "font" header. */
+  const documented = new Map(
+    tableWithHeader(text, "font").rows.map(
+      (cells) => [plain(cells[0]), plain(cells[1] ?? "")] as const,
+    ),
+  );
+
+  it("documents every face — a new face can't ship undocumented", () => {
+    expect([...documented.keys()].sort()).toEqual([...FONT_FACES].sort());
+  });
+
+  it("marks exactly the code's default face as the default", () => {
+    for (const [face, what] of documented) {
+      expect(
+        /default/i.test(what),
+        `"${face}" default marking must match DEFAULT_FONT (${DEFAULT_FONT})`,
+      ).toBe(face === DEFAULT_FONT);
     }
   });
 });

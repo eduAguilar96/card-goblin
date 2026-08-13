@@ -1,10 +1,13 @@
 /**
- * pdfRaster's PURE part (§6.1, §3.3 M2, §7.1b). The rasterization itself is
- * DOM-only and excluded from vitest by injection (see pdfRaster.tsx); what IS
- * testable is the font-coverage derivation: the embed CSS must cover exactly
- * the Dicier faces the exported shapes use — all ten families exist, but only
- * the used ones may be inlined (each is ~100 KB of base64 per rasterized
- * SVG) — plus, since §7.1b, which image `src`s are "remote" at all.
+ * pdfRaster's PURE part (§6.1, §3.3 M2, §7.1b, M3 ◆41). The rasterization
+ * itself is DOM-only and excluded from vitest by injection (see
+ * pdfRaster.tsx); what IS testable is the font-coverage derivation: the
+ * embed CSS must cover exactly the Dicier faces AND the ◆41 Text/TextBox
+ * faces the exported shapes use — all ten Dicier families and all eight ◆41
+ * families exist, but only the used ones may be inlined (Dicier ~100 KB,
+ * the ◆41 TTFs ~70 KB–670 KB, of base64 per rasterized SVG) — plus, since
+ * §7.1b, which image `src`s are "remote" at all, and, since ◆41, the CSS
+ * `src:` format-detection fix (`parseFontSrc`).
  *
  * `loadAssetData` (the asset: → data-URI path) is DOM-only for the same
  * reason `loadImageData` always has been (canvas/Image, no `document` here)
@@ -17,10 +20,16 @@
 import { describe, expect, it } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import type { IconStyle, ImageShape, Shape } from "@/lib/lang";
+import type { FontFace, IconStyle, ImageShape, Shape } from "@/lib/lang";
 import { CardFaceSvg, type ResolvedImages } from "../cardSvg";
 import type { FaceRasterSpec } from "../pdfLayout";
-import { iconFamiliesUsed, imageUrlsUsed, remoteImageUrlsUsed } from "../pdfRaster";
+import {
+  iconFamiliesUsed,
+  imageUrlsUsed,
+  parseFontSrc,
+  remoteImageUrlsUsed,
+  textFontFamiliesUsed,
+} from "../pdfRaster";
 
 const icon = (style: IconStyle): Shape => ({
   kind: "icon",
@@ -52,6 +61,7 @@ const text: Shape = {
   color: "black",
   text: "hi",
   anchor: { h: "left", v: "top" },
+  font: "geist",
 };
 
 const textbox: Shape = {
@@ -68,7 +78,12 @@ const textbox: Shape = {
   lines: ["wrapped", "lines"],
   clipped: false,
   shrunk: false,
+  font: "geist",
 };
+
+/** Like `text`/`textbox` above but with a chosen `font:` (§3.3 M3, ◆41). */
+const textFont = (font: FontFace): Shape => ({ ...text, font });
+const textboxFont = (font: FontFace): Shape => ({ ...textbox, font });
 
 function spec(face: Shape[]): FaceRasterSpec {
   return { xUnits: 20, yUnits: 28, widthMm: 63.5, heightMm: 88.9, face };
@@ -100,6 +115,93 @@ describe("iconFamiliesUsed", () => {
     );
     expect(markup).toContain(">wrapped</tspan>");
     expect(markup).toContain(">lines</tspan>");
+  });
+});
+
+describe("textFontFamiliesUsed (§3.3 M3, ◆41)", () => {
+  it("collects exactly the ◆41 families drawn, deduped and sorted, on Text AND TextBox", () => {
+    const specs = new Map<string, FaceRasterSpec>([
+      ["a:front", spec([textFont("garamond_bold"), textFont("courier"), icon("pixel")])],
+      ["a:back", spec([textboxFont("courier")])],
+    ]);
+    expect(textFontFamiliesUsed(specs)).toEqual([
+      "CormorantGaramond-Bold",
+      "CourierPrime-Regular",
+    ]);
+  });
+
+  it("geist (explicit or omitted) requests NO ◆41 family — every export already embeds it", () => {
+    // Mirrors the "TextBox needs no font additions" Dicier test above:
+    // geist's family is a CSS var(), not a real @font-face family name
+    // findFontFaces could match, and geistFamilies() covers it unconditionally.
+    expect(textFontFamiliesUsed(new Map([["a:front", spec([text, textbox])]]))).toEqual([]);
+    expect(
+      textFontFamiliesUsed(new Map([["a:front", spec([textFont("geist"), textboxFont("geist")])]])),
+    ).toEqual([]);
+  });
+
+  it("no text/textbox shapes → no ◆41 families requested at all", () => {
+    expect(textFontFamiliesUsed(new Map([["a:front", spec([icon("pixel")])]]))).toEqual([]);
+  });
+
+  it("a mix across faces still dedupes to one entry per family", () => {
+    const specs = new Map<string, FaceRasterSpec>([
+      ["a:front", spec([textFont("courier"), textboxFont("courier")])],
+    ]);
+    expect(textFontFamiliesUsed(specs)).toEqual(["CourierPrime-Regular"]);
+  });
+});
+
+describe("parseFontSrc (§3.3 M3, ◆41 — the format-detection fix)", () => {
+  it("reads the DECLARED format, never hardcoding woff2 (the bug this fixes)", () => {
+    const entries = parseFontSrc(
+      `url("./fonts/CormorantGaramond/CormorantGaramond-Bold.ttf") format("truetype")`,
+      "https://example.com/styles.css",
+    );
+    expect(entries).toEqual([
+      { url: "https://example.com/fonts/CormorantGaramond/CormorantGaramond-Bold.ttf", format: "truetype" },
+    ]);
+  });
+
+  it("infers the format from the URL's extension when format() is omitted", () => {
+    const entries = parseFontSrc(`url(./a.woff2)`, "https://example.com/styles.css");
+    expect(entries).toEqual([{ url: "https://example.com/a.woff2", format: "woff2" }]);
+  });
+
+  it("returns EVERY declared source in order, not just the first (the other half of the fix)", () => {
+    const entries = parseFontSrc(
+      `url("./a.woff2") format("woff2"), url("./a.woff") format("woff"), url("./a.ttf") format("truetype")`,
+      "https://example.com/styles.css",
+    );
+    expect(entries.map((e) => e.format)).toEqual(["woff2", "woff", "truetype"]);
+    expect(entries.map((e) => e.url)).toEqual([
+      "https://example.com/a.woff2",
+      "https://example.com/a.woff",
+      "https://example.com/a.ttf",
+    ]);
+  });
+
+  it("resolves a relative url() against the stylesheet's own href", () => {
+    const entries = parseFontSrc(
+      `url(../fonts/CourierPrime/CourierPrime-Italic.ttf) format("truetype")`,
+      "https://example.com/assets/styles.css",
+    );
+    expect(entries[0].url).toBe("https://example.com/fonts/CourierPrime/CourierPrime-Italic.ttf");
+  });
+
+  it("handles unquoted, single-, and double-quoted url()/format() forms alike", () => {
+    for (const src of [
+      `url(a.ttf) format(truetype)`,
+      `url('a.ttf') format('truetype')`,
+      `url("a.ttf") format("truetype")`,
+    ]) {
+      const entries = parseFontSrc(src, "https://example.com/styles.css");
+      expect(entries, src).toEqual([{ url: "https://example.com/a.ttf", format: "truetype" }]);
+    }
+  });
+
+  it("a src with no url() at all yields no entries", () => {
+    expect(parseFontSrc("local(Arial)", "https://example.com/styles.css")).toEqual([]);
   });
 });
 

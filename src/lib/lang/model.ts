@@ -121,6 +121,56 @@ export type ImageFit = (typeof IMAGE_FITS)[number];
 export const DEFAULT_IMAGE_FIT: ImageFit = "contain";
 
 /**
+ * Text/TextBox `font:` vocabulary (§3.3, M3 — ◆41): a closed set of
+ * repo-bundled faces, resolved by expected type exactly like Icon `style:`
+ * (its closest stencil) — an unknown value or a non-identifier expression is
+ * E008 naming this array. `geist` is the pre-existing default (unchanged
+ * output when `font:` is omitted); the other eight map to two bundled
+ * families — Cormorant Garamond and Courier Prime — at the four weight/style
+ * combinations each ships as a static (non-variable) file:
+ * `CormorantGaramond-{Regular,Bold,Italic,BoldItalic}.ttf` and
+ * `CourierPrime-{Regular,Bold,Italic,BoldItalic}.ttf` under src/app/fonts/.
+ *
+ * PRAGMATIC UNBLOCK, NOT A FONT SYSTEM (◆41): the owner dropped these two
+ * families into the repo to unblock real card designs now; a general
+ * per-project uploaded-font system (the §7.1b asset-library shape, but for
+ * fonts) is deliberately future work — wrapping needs a metrics table per
+ * face (font-metrics.ts), and building that pipeline for arbitrary uploads
+ * is a bigger project than this unblock. Closed set like ICON_STYLES/
+ * IMAGE_FITS — the checker's vocabulary, the renderer's font-family map
+ * (cardSvg.tsx), the wrap engine's per-face metrics (wrap.ts,
+ * font-metrics.ts), and the wiki's font table (docFacts) all pin to this
+ * array.
+ *
+ * ADDING A FACE: Cormorant Garamond ships six MORE weights in
+ * src/app/fonts/CormorantGaramond/ (Light, Medium, SemiBold + their
+ * italics) that are deliberately NOT exposed here — the vocabulary is
+ * curated, not "every file in the folder". Exposing one is a table entry
+ * here (plus the matching @font-face in globals.css and the
+ * ICON_FONT_FAMILIES-style map in cardSvg.tsx) and a metrics regen
+ * (`npm run generate:font-metrics`, which reads every file already listed
+ * in scripts/generate-font-metrics.mjs's BUNDLED_FACES) — nothing else.
+ */
+export const FONT_FACES = [
+  "geist",
+  "garamond",
+  "garamond_bold",
+  "garamond_italic",
+  "garamond_bold_italic",
+  "courier",
+  "courier_bold",
+  "courier_italic",
+  "courier_bold_italic",
+] as const;
+
+export type FontFace = (typeof FONT_FACES)[number];
+
+/** §3.3: `font:` is optional; the default is `geist` — the language's
+ * behavior before this property existed, so an omitted `font:` renders and
+ * hashes identically to before (§3.3, ◆41). */
+export const DEFAULT_FONT: FontFace = "geist";
+
+/**
  * Local-asset scheme for Image `src:` (§7.1b, M3): `"asset:dragon"` refers to
  * an upload in the Assets drawer's IndexedDB library by name, rather than a
  * URL. Zero language change — `src:` stays a plain Text expression, so the
@@ -287,6 +337,10 @@ export interface TextShape {
   /** Nine-point (§3.4): `h` renders via text-anchor, `v` via em-box math.
    * Default top-left ≡ the legacy `anchor: left`. */
   anchor: Anchor;
+  /** Which face draws the text (§3.3, M3 — ◆41); `geist` when omitted, the
+   * pre-existing default. Affects both the renderer's font-family AND (on
+   * TextBox) the wrap engine's per-character advances — see wrap.ts. */
+  font: FontFace;
 }
 
 export interface IconShape {
@@ -334,10 +388,12 @@ export interface ImageShape {
 
 /**
  * Wrapped multi-line text in a box (§3.3, M3 — §7.2). THE COMPILER IS THE
- * WRAPPING AUTHORITY: the evaluator wraps against the generated Geist
- * advance-widths table (wrap.ts / geist-metrics.ts) and the model carries the
- * RESOLVED lines — the renderer never re-wraps, so preview and PDF agree by
- * construction. `size` is the FINAL size after any `overflow: shrink` steps.
+ * WRAPPING AUTHORITY: the evaluator wraps against the generated advance-
+ * widths table OF THE CHOSEN FONT (wrap.ts's metricsForFace — geist-metrics.ts
+ * for the default, font-metrics.ts for the eight ◆41 faces) and the model
+ * carries the RESOLVED lines — the renderer never re-wraps, so preview and
+ * PDF agree by construction. `size` is the FINAL size after any
+ * `overflow: shrink` steps.
  */
 export interface TextBoxShape {
   kind: "textbox";
@@ -369,6 +425,10 @@ export interface TextBoxShape {
    * Carried explicitly because the badge must fire for shrink-that-fits and
    * the shape does not carry the declared size to derive it from. */
   shrunk: boolean;
+  /** Which face both wrapping (this box's own `lines`, already resolved
+   * against this font's advances) and rendering use (§3.3, M3 — ◆41);
+   * `geist` when omitted, the pre-existing default. */
+  font: FontFace;
 }
 
 /**

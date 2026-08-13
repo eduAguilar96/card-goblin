@@ -9,9 +9,11 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import {
   compileProject,
+  FONT_METRICS,
   type Anchor,
   type DataDiagnostic,
   type Deck,
+  type FontFace,
   type IconShape,
   type ImageShape,
   type QrShape,
@@ -220,6 +222,84 @@ describe("CardSVG: icon style picks the Dicier face family", () => {
   });
 });
 
+// -- Text font: → per-face family AND ascent (§3.3 M3, ◆41) ------------------
+
+describe("CardSVG: Text font: picks the family and the per-face ascent (§3.3 M3, ◆41)", () => {
+  it("font: garamond_bold renders CormorantGaramond-Bold at its OWN ascent, not TEXT_ASCENT", () => {
+    const fontedDeck = demoDeck(
+      DEMO_PROJECT_SOURCE.replace("text: [name]", "text: [name]\n    font: garamond_bold"),
+    );
+    const markup = renderFace("front", fontedDeck.cards[0], fontedDeck);
+    const title = textTags(markup).find((t) => t.content === "Dragon")!;
+    expect(title.attrs["font-family"]).toBe("CormorantGaramond-Bold");
+
+    // The shape's declared y is 0.7, size 1.6, top anchor (§3.4 default):
+    // baseline = y + ascent × size — with garamond_bold's OWN generated
+    // ascent, which must differ from Geist's hand-tuned 0.73 (the whole
+    // point of ascentOf's per-face routing).
+    const garamondAscent = FONT_METRICS.garamond_bold.ascent;
+    expect(garamondAscent).not.toBe(TEXT_ASCENT);
+    expect(Number(title.attrs.y)).toBeCloseTo(0.7 + garamondAscent * 1.6, 12);
+
+    // The un-fonted "Cost: 5" text on the same face keeps rendering Geist,
+    // at the unchanged TEXT_ASCENT — font: is per-element, not per-card.
+    const cost = textTags(markup).find((t) => t.content === "Cost: 5")!;
+    expect(cost.attrs["font-family"]).toBe("var(--font-geist-sans), sans-serif");
+    expect(Number(cost.attrs.y)).toBeCloseTo(0.9 + TEXT_ASCENT * 1.2, 12);
+  });
+
+  it("omitted font: keeps rendering Geist at TEXT_ASCENT exactly as before ◆41 (byte-identical)", () => {
+    const markup = renderFace("front");
+    const title = textTags(markup).find((t) => t.content === "Dragon")!;
+    expect(title.attrs["font-family"]).toBe("var(--font-geist-sans), sans-serif");
+    expect(Number(title.attrs.y)).toBe(0.7 + TEXT_ASCENT * 1.6);
+  });
+});
+
+// -- TextBox font: → per-face family AND ascent (§3.3 M3, ◆41) ---------------
+
+describe("CardFaceSvg: TextBox font: picks the family and the per-face ascent (§3.3 M3, ◆41)", () => {
+  const boxShape = (font: FontFace): TextBoxShape => ({
+    kind: "textbox",
+    x: 2,
+    y: 3,
+    width: 10,
+    height: 6,
+    size: 1.5,
+    color: "navy",
+    align: "left",
+    anchor: { h: "left", v: "top" },
+    lineHeight: 1.3,
+    lines: ["first", "second"],
+    clipped: false,
+    shrunk: false,
+    font,
+  });
+
+  const render = (shape: TextBoxShape): string =>
+    renderToStaticMarkup(<CardFaceSvg xUnits={20} yUnits={28} face={[shape]} />);
+
+  it("font: courier renders CourierPrime-Regular, tspans offset by courier's own ascent", () => {
+    const markup = render(boxShape("courier"));
+    const textTag = /<text\b([^>]*)>/.exec(markup)!;
+    expect(parseAttrs(textTag[1])["font-family"]).toBe("CourierPrime-Regular");
+
+    const courierAscent = FONT_METRICS.courier.ascent;
+    expect(courierAscent).not.toBe(TEXT_ASCENT);
+    const tspans = [...markup.matchAll(/<tspan\b([^>]*)>/g)].map((m) => parseAttrs(m[1]));
+    expect(Number(tspans[0].y)).toBeCloseTo(3 + courierAscent * 1.5, 12);
+    expect(Number(tspans[1].y)).toBeCloseTo(3 + courierAscent * 1.5 + 1.3 * 1.5, 12);
+  });
+
+  it("font: geist (explicit or omitted) renders exactly as before ◆41", () => {
+    const markup = render(boxShape("geist"));
+    const textTag = /<text\b([^>]*)>/.exec(markup)!;
+    expect(parseAttrs(textTag[1])["font-family"]).toBe("var(--font-geist-sans), sans-serif");
+    const tspans = [...markup.matchAll(/<tspan\b([^>]*)>/g)].map((m) => parseAttrs(m[1]));
+    expect(Number(tspans[0].y)).toBe(3 + TEXT_ASCENT * 1.5);
+  });
+});
+
 // -- error placeholder (⚑8) --------------------------------------------------
 
 describe("CardSVG: error placeholder", () => {
@@ -287,6 +367,7 @@ describe("CardFaceSvg: TextBox shapes (§3.3 M3)", () => {
     lines: ["first", "second", "third"],
     clipped: false,
     shrunk: false,
+    font: "geist",
     ...over,
   });
 
@@ -390,6 +471,7 @@ describe("CardSVG: the clipped/shrunk badge (§3.3 M3)", () => {
     lines: ["a"],
     clipped: false,
     shrunk: false,
+    font: "geist",
     ...over,
   });
 
@@ -663,6 +745,7 @@ describe("CardFaceSvg: nine-point anchors (§3.4 M3)", () => {
       color: "black",
       text: "mid",
       anchor: anchor("center", "center"),
+      font: "geist",
     };
     const t = textTags(render([shape])).find((x) => x.content === "mid")!;
     expect(t.attrs["text-anchor"]).toBe("middle");
@@ -683,6 +766,7 @@ describe("CardFaceSvg: nine-point anchors (§3.4 M3)", () => {
         color: "black",
         text: "t",
         anchor: anchor("left", v),
+        font: "geist",
       };
       return textTags(render([shape]))[0].attrs.y;
     };
@@ -775,6 +859,7 @@ describe("CardFaceSvg: nine-point anchors (§3.4 M3)", () => {
       lines: ["a", "b"],
       clipped: false,
       shrunk: false,
+      font: "geist",
     };
     const markup = render([shape]);
     // Box origin: (12 − 10, 9 − 6) = (2, 3); align middle → line x = 2 + 10/2.

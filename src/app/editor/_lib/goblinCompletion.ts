@@ -25,6 +25,7 @@ import {
   ANCHOR_TOKENS,
   CSS_COLOR_NAMES,
   DEFAULT_ANCHOR,
+  DEFAULT_FONT,
   DEFAULT_ICON_STYLE,
   DEFAULT_IMAGE_FIT,
   DEFAULT_LINE_HEIGHT,
@@ -32,6 +33,7 @@ import {
   DEFAULT_TEXTBOX_OVERFLOW,
   DICIER_CODES,
   DICIER_CODE_CATEGORIES,
+  FONT_FACES,
   ICON_STYLES,
   IMAGE_FITS,
   QR_LEVELS,
@@ -203,6 +205,7 @@ const ELEMENT_KEYS: Record<ElementKind, { key: string; detail: string }[]> = {
     { key: "text", detail: "Text" },
     { key: "color", detail: "Color (optional, default black)" },
     ANCHOR_KEY,
+    { key: "font", detail: `bundled font face (optional, default ${DEFAULT_FONT})` },
   ],
   TextBox: [
     { key: "x", detail: "Number — units" },
@@ -216,6 +219,7 @@ const ELEMENT_KEYS: Record<ElementKind, { key: string; detail: string }[]> = {
     { key: "line_height", detail: `number × size (optional, default ${DEFAULT_LINE_HEIGHT})` },
     { key: "overflow", detail: `${TEXTBOX_OVERFLOWS.join(" | ")} (optional, default ${DEFAULT_TEXTBOX_OVERFLOW})` },
     ANCHOR_KEY,
+    { key: "font", detail: `bundled font face (optional, default ${DEFAULT_FONT}) — wraps per font` },
   ],
   Icon: [
     { key: "x", detail: "Number — units (or middle)" },
@@ -1082,6 +1086,17 @@ function valueSuggestions(
         insertText: s,
         kind: "value" as const,
         detail: s === DEFAULT_ICON_STYLE ? "Dicier face (the default)" : "Dicier face",
+        group: 0 as const,
+      }));
+    case "font":
+      // Text/TextBox only (§3.3, M3 — ◆41): the nine repo-bundled faces
+      // (geist + eight uploaded by the owner as a pragmatic unblock),
+      // closed vocabulary like style/fit/level.
+      return FONT_FACES.map((f) => ({
+        label: f,
+        insertText: f,
+        kind: "value" as const,
+        detail: f === DEFAULT_FONT ? "font face (the default)" : "font face",
         group: 0 as const,
       }));
     case "fit":

@@ -15,14 +15,26 @@
  * The font trap this file exists to handle: an SVG loaded through `<img>`
  * renders in an isolated document that can neither see the page's loaded
  * fonts nor fetch external resources. `document.fonts.ready` alone is NOT
- * enough — Dicier (and Geist) must be re-declared INSIDE the SVG as
- * `@font-face` rules with data: URIs. `getFontEmbedCss` scrapes the page's
- * own @font-face rules for the needed families — Geist plus exactly the
- * Dicier faces the exported shapes use (iconFamiliesUsed) — inlines their
- * sources, and also pins the `--font-geist-sans` variable (cardSvg's text
+ * enough — Dicier, the ◆41 Text/TextBox faces, and Geist must be re-declared
+ * INSIDE the SVG as `@font-face` rules with data: URIs. `getFontEmbedCss`
+ * scrapes the page's own @font-face rules for the needed families — Geist
+ * plus exactly the Dicier faces (iconFamiliesUsed) and ◆41 text faces
+ * (textFontFamiliesUsed) the exported shapes use — inlines their sources,
+ * and also pins the `--font-geist-sans` variable (cardSvg's Geist text
  * family is `var(--font-geist-sans), sans-serif`, and CSS variables don't
  * cross into the img document either). Any scrape/fetch failure degrades to
  * fallback fonts rather than failing the export.
+ *
+ * Format handling (§3.3, ◆41): a `src` descriptor may list several
+ * `url(...) format(...)` sources (a browser fallback chain — Dicier and the
+ * ◆41 faces each declare exactly one, but next/font's Geist output isn't
+ * this module's to assume about forever) and `findFontFaces` now reads every
+ * one, trying them IN ORDER until one actually fetches — fixing the former
+ * single-point-of-failure where only the first `url()` was ever tried.
+ * `buildFamilyCss` embeds the format the RULE declares (`format("woff2")`,
+ * `format("truetype")`, …), not a hardcoded `woff2` — the ◆41 faces are
+ * `format("truetype")` in globals.css, and mislabeling their data: URI as
+ * `font/woff2` would make some browsers refuse to parse it.
  *
  * Image shapes (§3.3, M2) hit the same wall: the img document fetches
  * nothing, so their URLs are pre-loaded here with `crossorigin=anonymous`
@@ -47,6 +59,7 @@ import { parseAssetSrc } from "@/lib/lang";
 import {
   CardFaceSvg,
   ICON_FONT_FAMILIES,
+  TEXT_FONT_FAMILIES,
   type ResolvedImage,
   type ResolvedImages,
 } from "@/app/editor/_components/cardSvg";
@@ -72,17 +85,76 @@ export type RasterizeFaces = (
 /** Strip quotes from a CSS font-family token. */
 const unquote = (s: string): string => s.trim().replace(/^["']|["']$/g, "");
 
-/** First url(...) of a CSS `src` descriptor, resolved against the stylesheet
- * URL (Next serves the font CSS same-origin). */
-function firstFontUrl(src: string, baseHref: string | null): string | null {
-  const match = /url\(\s*(?:"([^"]+)"|'([^']+)'|([^)"']+))\s*\)/.exec(src);
-  const raw = match?.[1] ?? match?.[2] ?? match?.[3];
-  if (!raw) return null;
-  try {
-    return new URL(raw, baseHref ?? window.location.href).href;
-  } catch {
-    return null;
+/** CSS `format()` token → the MIME type its data: URI needs. `truetype` is
+ * what globals.css declares for the ◆41 faces (§3.3) — mislabeling it
+ * `font/woff2` (the old hardcoded value) risks a browser refusing to parse
+ * the embedded face. Unrecognized/absent formats fall back to an octet
+ * stream rather than guessing wrong. */
+const FONT_MIME: Readonly<Record<string, string>> = {
+  woff2: "font/woff2",
+  woff: "font/woff",
+  truetype: "font/ttf",
+  opentype: "font/otf",
+};
+
+/** `format()` inferred from a URL's extension, for a source that omits the
+ * hint (legal CSS — the browser is supposed to sniff). */
+function formatFromExtension(url: string): string | null {
+  const ext = /\.([a-z0-9]+)(?:[?#].*)?$/i.exec(url)?.[1]?.toLowerCase();
+  switch (ext) {
+    case "woff2":
+      return "woff2";
+    case "woff":
+      return "woff";
+    case "ttf":
+      return "truetype";
+    case "otf":
+      return "opentype";
+    default:
+      return null;
   }
+}
+
+export interface FontSrcEntry {
+  url: string;
+  /** Lower-cased `format()` token (e.g. "woff2", "truetype"), from the rule
+   * or inferred from the URL's extension — never hardcoded. */
+  format: string;
+}
+
+/**
+ * Every `url(...) format(...)?` entry in a CSS `src` descriptor, resolved
+ * against the stylesheet URL (Next serves the font CSS same-origin). A `src`
+ * may legally list several sources as a browser fallback chain; returning
+ * ALL of them (not just the first) is what lets `buildFamilyCss` below try
+ * each in turn instead of giving up on the first one's fetch failure — the
+ * fragility the DESIGN.md task for this file calls out by name.
+ *
+ * Exported for direct unit tests: unlike `findFontFaces`/`buildFamilyCss`,
+ * this function touches no DOM API as long as `baseHref` is non-null (its
+ * only DOM reference, `window.location.href`, is purely a same-origin-page
+ * fallback for a null `baseHref`) — so the format-detection fix (the actual
+ * bug this task fixes) is testable without a browser.
+ */
+export function parseFontSrc(src: string, baseHref: string | null): FontSrcEntry[] {
+  const out: FontSrcEntry[] = [];
+  const re =
+    /url\(\s*(?:"([^"]+)"|'([^']+)'|([^)"']+))\s*\)(?:\s*format\(\s*(?:"([^"]+)"|'([^']+)'|([^)"']+))\s*\))?/g;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(src))) {
+    const raw = match[1] ?? match[2] ?? match[3];
+    if (!raw) continue;
+    let url: string;
+    try {
+      url = new URL(raw, baseHref ?? window.location.href).href;
+    } catch {
+      continue;
+    }
+    const declared = match[4] ?? match[5] ?? match[6];
+    const format = (declared ?? formatFromExtension(raw) ?? "woff2").toLowerCase();
+    out.push({ url, format });
+  }
+  return out;
 }
 
 function bytesToBase64(bytes: Uint8Array): string {
@@ -96,7 +168,7 @@ function bytesToBase64(bytes: Uint8Array): string {
 
 interface FontFaceSource {
   family: string;
-  url: string;
+  entries: FontSrcEntry[];
 }
 
 /** Scan the page's stylesheets for @font-face rules whose family is in
@@ -116,8 +188,8 @@ function findFontFaces(families: readonly string[]): FontFaceSource[] {
       if (!(rule instanceof CSSFontFaceRule)) continue;
       const family = unquote(rule.style.getPropertyValue("font-family"));
       if (!wanted.has(family.toLowerCase())) continue;
-      const url = firstFontUrl(rule.style.getPropertyValue("src"), sheet.href);
-      if (url) out.push({ family, url });
+      const entries = parseFontSrc(rule.style.getPropertyValue("src"), sheet.href);
+      if (entries.length > 0) out.push({ family, entries });
     }
   }
   return out;
@@ -150,26 +222,55 @@ export function iconFamiliesUsed(specs: ReadonlyMap<string, FaceRasterSpec>): st
   return [...families].sort();
 }
 
-/** Data-URI @font-face rules for ONE family, scraped from the page's own
- * stylesheets (a family may own several rules — Geist can). A fetch failure
- * degrades that rule to fallback fonts instead of blocking the export. */
+/**
+ * The Text/TextBox `font:` families the faces being exported ACTUALLY draw
+ * (§3.3, M3 — ◆41), mirroring iconFamiliesUsed exactly. `geist` is excluded
+ * — its family is already covered by `geistFamilies()` unconditionally
+ * (every export needs it), and TEXT_FONT_FAMILIES.geist is a CSS var()
+ * expression, not a real @font-face family name findFontFaces could match.
+ * Skipping it here is what keeps a Geist-only deck from requesting all eight
+ * ~70 KB–670 KB TTFs it never draws. Pure and exported for unit tests.
+ */
+export function textFontFamiliesUsed(specs: ReadonlyMap<string, FaceRasterSpec>): string[] {
+  const families = new Set<string>();
+  for (const spec of specs.values()) {
+    for (const shape of spec.face) {
+      if ((shape.kind === "text" || shape.kind === "textbox") && shape.font !== "geist") {
+        families.add(TEXT_FONT_FAMILIES[shape.font]);
+      }
+    }
+  }
+  return [...families].sort();
+}
+
+/**
+ * Data-URI @font-face rules for ONE family, scraped from the page's own
+ * stylesheets (a family may own several RULES — Geist can — and each rule
+ * may list several SOURCES, a fallback chain). Every source of every rule is
+ * tried in declared order until one actually fetches, embedding the FORMAT
+ * that source declares (never a hardcoded one) — fixing the two fragilities
+ * the old single-url/hardcoded-woff2 version had. A source that fails to
+ * fetch falls through to the next; a rule with no fetchable source at all
+ * degrades to fallback fonts instead of blocking the export.
+ */
 async function buildFamilyCss(family: string): Promise<string> {
   const parts: string[] = [];
-  for (const { family: found, url } of findFontFaces([family])) {
-    try {
-      const response = await fetch(url);
-      if (!response.ok) continue;
-      const bytes = new Uint8Array(await response.arrayBuffer());
-      // Known fragility (review-noted): only the FIRST url() source is inlined
-      // and it is labeled woff2 unconditionally — fine for next/font and the
-      // bundled Dicier today, wrong the day a face lists another format first.
-      parts.push(
-        `@font-face{font-family:'${found}';src:url(data:font/woff2;base64,${bytesToBase64(
-          bytes,
-        )}) format('woff2');}`,
-      );
-    } catch {
-      // Degrade: the face renders with fallback fonts instead of blocking.
+  for (const { family: found, entries } of findFontFaces([family])) {
+    for (const entry of entries) {
+      try {
+        const response = await fetch(entry.url);
+        if (!response.ok) continue;
+        const bytes = new Uint8Array(await response.arrayBuffer());
+        const mime = FONT_MIME[entry.format] ?? "application/octet-stream";
+        parts.push(
+          `@font-face{font-family:'${found}';src:url(data:${mime};base64,${bytesToBase64(
+            bytes,
+          )}) format('${entry.format}');}`,
+        );
+        break; // this rule is embedded — no need to try its other sources
+      } catch {
+        // Try this rule's next declared source before giving up on it.
+      }
     }
   }
   return parts.join("\n");
@@ -194,14 +295,14 @@ function getFamilyCss(family: string): Promise<string> {
 
 /**
  * Build the `<style>` CSS injected into every rasterized SVG of one export:
- * data-URI @font-face rules for the icon families these faces use + the
- * page's Geist, plus a `--font-geist-sans` definition so cardSvg's var()
- * resolves inside the img document.
+ * data-URI @font-face rules for the icon families AND the ◆41 text families
+ * these faces use + the page's Geist, plus a `--font-geist-sans` definition
+ * so cardSvg's var() resolves inside the img document.
  */
 async function getFontEmbedCss(specs: ReadonlyMap<string, FaceRasterSpec>): Promise<string> {
   const geist = geistFamilies();
   const parts: string[] = [];
-  for (const family of [...geist, ...iconFamiliesUsed(specs)]) {
+  for (const family of [...geist, ...iconFamiliesUsed(specs), ...textFontFamiliesUsed(specs)]) {
     const css = await getFamilyCss(family);
     if (css) parts.push(css);
   }

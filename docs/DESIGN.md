@@ -82,6 +82,7 @@ the section that elaborates it:
 | ◆38 | String escapes (§3.1) | `\n` (newline) and `\\` (literal backslash) are the lexer's **only** escapes besides `[[`; any other `\`-sequence is E001 | TextBox hard breaks need a way to write a newline inside a string literal; a minimal, closed escape set keeps errors loud on typos |
 | ◆39 | QR codes (§7.3) | A drawable **`Qr:` element**, not the sketched `QR(...)` call form; encoded at eval time so the shape carries the resolved module matrix, never the source data | The language has no call grammar, and custom sizes already rejected inventing one; an element reuses the practiced element pipeline (checker, evaluator, autocomplete) end to end |
 | ◆40 | Local image assets (§7.4) | **IndexedDB** (not localStorage) + an **`asset:` scheme** inside Image `src:` + a **project-file v2** that bundles asset bytes as base64 | localStorage is string-only with a small quota; IDB stores Blobs natively, and v2 keeps art traveling with the file without inventing a second file format |
+| ◆41 | Text/TextBox fonts (§3.3) | **Repo-bundled closed vocabulary**: `geist` (default, unchanged) + eight faces — Cormorant Garamond and Courier Prime, four weights/styles each — resolved like Icon `style:`, each with its own generated metrics table | A deliberate PRAGMATIC unblock, not a font system: the owner needed these two families now; per-project **uploaded** fonts are real future work, deferred because wrapping needs a metrics table per face and building that pipeline for arbitrary uploads is a bigger project than unblocking two known families |
 
 ---
 
@@ -175,8 +176,8 @@ own subsection below.
 | Element | Properties | Summary |
 |---|---|---|
 | `Rectangle` | `x y width height color anchor` | A filled box — §3.3.1. |
-| `Text` | `x y size color text anchor` | One line of text — §3.3.2. |
-| `TextBox` | `x y width height text size color align line_height overflow anchor` | Wrapped, multi-line text in a box — §3.3.3. |
+| `Text` | `x y size color text anchor font` | One line of text — §3.3.2. |
+| `TextBox` | `x y width height text size color align line_height overflow anchor font` | Wrapped, multi-line text in a box — §3.3.3. |
 | `Icon` | `x y size color code anchor style` | A Dicier glyph, one of ten style faces — §3.3.4. |
 | `Image` | `x y width height src fit anchor` | Raster art from a URL or uploaded asset — §3.3.5. |
 | `Qr` | `x y size data color background level anchor` | A scannable QR code — §3.3.6. |
@@ -195,21 +196,35 @@ nine-point — §3.4, M3 2026-08-10). A filled box.
 top row. Newline characters in the resolved text render as spaces (M3 2026-08-10)
 — hard breaks belong to `TextBox`.
 
+`font:` (M3 2026-08-13, ◆41) is an optional bare identifier — `geist` (default,
+unchanged), `garamond`, `garamond_bold`, `garamond_italic`, `garamond_bold_italic`,
+`courier`, `courier_bold`, `courier_italic`, `courier_bold_italic` — resolved by
+expected type like Icon `style:` (§3.3.4); an unknown value or a non-identifier
+expression is E008 naming the vocabulary. A closed, repo-bundled set (◆41): the two
+families ship as static TTFs under `src/app/fonts/`, each face's advance widths and
+ascent generated into `font-metrics.ts` by `scripts/generate-font-metrics.mjs`.
+`TextBox` (§3.3.3) shares this same property and vocabulary.
+
 #### 3.3.3 TextBox
 
 (M3, agreed 2026-08-10 — §7.2) Wrapped, multi-line text in a box; ◆24 stays intact
 for `Text`. `x y width height text size` required; `color` (default `black`),
 `align: left | middle | right` (default `left`), `line_height` (positive number
-LITERAL, default 1.3), and `overflow: clip | shrink` (default `clip`) are optional.
+LITERAL, default 1.3), `overflow: clip | shrink` (default `clip`), and `font:`
+(M3 2026-08-13, ◆41 — the same nine-value vocabulary as Text, §3.3.2, default
+`geist`) are optional.
 
 `align` lays lines within the box's width; the nine-point `anchor:` of §3.4 moves
 the box itself, and `x: middle` stays Text/Icon-only (E007 on `TextBox`).
 `line_height` means × `size` — baseline advance in units is `line_height × size`.
 
 **The compiler is the wrapping authority**: the evaluator wraps deterministically
-against a generated Geist advance-widths table (`geist-metrics.ts`, the
+against a generated advance-widths table **of the chosen `font:`** (`geist-metrics.ts`
+for the default, `font-metrics.ts` for the other eight, ◆41 — both the
 dicier-codes pattern) with a 2% measurement safety margin, and the model carries
-the resolved `lines` — preview and PDF agree by construction.
+the resolved `lines` — preview and PDF agree by construction. A box's `font:`
+changes which table it wraps against — Courier text wraps against Courier's own
+advances, not Geist's, so line breaks stay correct per font.
 
 Wrap semantics: split on hard breaks (real `\n` in the resolved text — from the
 §3.1 escapes or from cell data) first; within a segment, greedy word-wrap on
@@ -940,7 +955,10 @@ instance, left this list for §7.2).
 
 - Auto-layout containers (`Row`/`Stack`) as sugar over `Repeat` (⚑9).
 - Template composition (templates using templates) and inline templates under `Front:`.
-- Custom fonts for `Text` (v1 renders Geist only).
+- Per-project UPLOADED fonts for `Text`/`TextBox` (◆41 shipped a closed,
+  repo-bundled nine-face set instead — real future work, deferred because it
+  needs a generated metrics table per uploaded face, §7.1b's asset library
+  shape but bigger).
 - Print specifics: bleed, safe zones, DPI for raster images.
 - Whether `sheet:` becomes optional for loop-only Cards (⚑13 relaxation — the
   zero-column-sheet idiom is the v1 answer).

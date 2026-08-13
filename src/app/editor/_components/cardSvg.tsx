@@ -30,6 +30,7 @@ import type {
   AnchorH,
   AnchorV,
   DataDiagnostic,
+  FontFace,
   IconStyle,
   ImageFit,
   ImageShape,
@@ -38,7 +39,7 @@ import type {
   TextAnchor,
   TextBoxShape,
 } from "@/lib/lang";
-import { parseAssetSrc } from "@/lib/lang";
+import { FONT_METRICS, parseAssetSrc } from "@/lib/lang";
 import { assetStore, type AssetChangeEvent } from "@/app/editor/_store/assetStore";
 
 // ---------------------------------------------------------------------------
@@ -51,18 +52,65 @@ import { assetStore, type AssetChangeEvent } from "@/app/editor/_store/assetStor
  * — baseline y = shape.y + ASCENT × size — instead of `dominant-baseline`,
  * which is inconsistent across browsers (§4.2).
  *
- * VISUAL-TUNING CONSTANTS (task 7): both values below are starting points to
- * be eyeballed against real cards during the acceptance pass. Geist's metrics
- * put its ascender around 0.73 em; Dicier's glyphs are drawn tall on the em
- * square, so it starts a bit higher.
+ * VISUAL-TUNING CONSTANT (task 7): a starting point to be eyeballed against
+ * real cards during the acceptance pass. Geist's OWN metrics put its
+ * ascender around 0.8 em (hhea-derived, like the ◆41 faces below) — 0.73 is
+ * a deliberately tuned visual constant, kept EXACTLY as-is (§3.3, ◆41):
+ * every existing card's Text/TextBox y-position was designed against it, so
+ * changing it now would shift every one of them. See `ascentOf` below for
+ * how this interacts with the eight ◆41 faces, which have no such history
+ * to preserve and so use their true hhea ascent instead — a documented
+ * inconsistency, not an oversight.
  */
 export const TEXT_ASCENT = 0.73;
 
 /** Dicier's ascent/em — see TEXT_ASCENT's tuning note (task 7). */
 export const ICON_ASCENT = 0.8;
 
-/** v1 renders Geist only (§8); the CSS variable comes from the root layout. */
+/** Geist's CSS variable comes from the root layout (next/font/local). */
 const TEXT_FONT_FAMILY = "var(--font-geist-sans), sans-serif";
+
+/**
+ * CSS font-family per Text/TextBox `font:` (§3.3, M3 — ◆41). NAMING SCHEME:
+ * the family is the vendor's TTF filename stem
+ * ("CormorantGaramond-BoldItalic"), same convention as ICON_FONT_FAMILIES
+ * below — must match the @font-face families in globals.css, whose header
+ * comment explains why these are eight DISTINCT families rather than one
+ * family per typeface with weight/style descriptors (the PDF embed
+ * scraper's family-name matching, mirrored here by textFontFamiliesUsed in
+ * pdfRaster.tsx). The Record type keeps this total when a face is added.
+ */
+export const TEXT_FONT_FAMILIES: Record<FontFace, string> = {
+  geist: TEXT_FONT_FAMILY,
+  garamond: "CormorantGaramond-Regular",
+  garamond_bold: "CormorantGaramond-Bold",
+  garamond_italic: "CormorantGaramond-Italic",
+  garamond_bold_italic: "CormorantGaramond-BoldItalic",
+  courier: "CourierPrime-Regular",
+  courier_bold: "CourierPrime-Bold",
+  courier_italic: "CourierPrime-Italic",
+  courier_bold_italic: "CourierPrime-BoldItalic",
+};
+
+/**
+ * Per-face baseline ascent (§3.4 m10, ◆41) — the ASCENT that
+ * `anchoredBaselineY` multiplies by `size`. KNOWN INCONSISTENCY, documented
+ * as a follow-up rather than fixed now: `geist` keeps the hand-tuned
+ * TEXT_ASCENT constant (0.73) UNCHANGED — retuning it would shift the
+ * y-position of every existing Text/TextBox on every existing card, and
+ * this feature's job is to add fonts, not relitigate Geist's baseline. The
+ * eight ◆41 faces have no such installed base to protect, so they use their
+ * ACTUAL hhea ascender ÷ unitsPerEm from the generated font-metrics.ts
+ * table (garamond ≈ 0.924, courier ≈ 0.781) — truer to each font's own
+ * design, and there is nothing to keep byte-identical for a property that
+ * didn't exist before this milestone. A future pass could revisit whether
+ * Geist should also switch to its hhea-derived ascent (~0.8) for
+ * consistency; that is a visual change to every card and is out of scope
+ * here.
+ */
+export function ascentOf(font: FontFace): number {
+  return font === "geist" ? TEXT_ASCENT : FONT_METRICS[font].ascent;
+}
 
 /**
  * CSS font-family per Icon `style:` (§3.3, M2). NAMING SCHEME (documented
@@ -689,15 +737,18 @@ function renderShape(shape: Shape, index: number, images?: ResolvedImages): Reac
     case "text":
       // §3.4: horizontal anchoring via text-anchor, vertical via the em-box
       // formula in anchoredBaselineY (top row ≡ the pre-M3 markup).
+      // §3.3 (◆41): family AND ascent follow the chosen font: — geist's
+      // ascent stays the tuned TEXT_ASCENT, the other eight use their own
+      // generated ascent (ascentOf's doc comment).
       return (
         <text
           key={index}
           x={shape.x}
-          y={anchoredBaselineY(shape, TEXT_ASCENT)}
+          y={anchoredBaselineY(shape, ascentOf(shape.font))}
           fontSize={shape.size}
           fill={shape.color}
           textAnchor={SVG_ANCHOR_H[shape.anchor.h]}
-          fontFamily={TEXT_FONT_FAMILY}
+          fontFamily={TEXT_FONT_FAMILIES[shape.font]}
         >
           {shape.text}
         </text>
@@ -749,8 +800,9 @@ export function textBoxLineX(box: { x: number; width: number }, align: TextAncho
  * so each line's position is independent, testable arithmetic (documented
  * decision). The model already wrapped and clip/shrunk (§7.2: the compiler
  * is the wrapping authority) — this function draws lines, nothing more.
- * Line i's baseline: box top + the §3.4 ascent realization (TEXT_ASCENT ×
- * final size, same constant as Text) + i × lineHeight × size of advance.
+ * Line i's baseline: box top + the §3.4 ascent realization (the chosen
+ * font's ascent × final size, same realization as Text — ascentOf, ◆41) +
+ * i × lineHeight × size of advance.
  */
 function renderTextBox(shape: TextBoxShape, index: number): ReactElement {
   // Nine-point anchor (§3.4): the WHOLE box moves — x/y name its anchor
@@ -760,19 +812,20 @@ function renderTextBox(shape: TextBoxShape, index: number): ReactElement {
   // the moved origin.
   const origin = anchoredBoxOrigin(shape, shape);
   const x = textBoxLineX({ x: origin.x, width: shape.width }, shape.align);
+  const ascent = ascentOf(shape.font);
   return (
     <text
       key={index}
       fontSize={shape.size}
       fill={shape.color}
       textAnchor={SVG_ALIGN[shape.align]}
-      fontFamily={TEXT_FONT_FAMILY}
+      fontFamily={TEXT_FONT_FAMILIES[shape.font]}
     >
       {shape.lines.map((line, i) => (
         <tspan
           key={i}
           x={x}
-          y={origin.y + TEXT_ASCENT * shape.size + i * shape.lineHeight * shape.size}
+          y={origin.y + ascent * shape.size + i * shape.lineHeight * shape.size}
         >
           {line}
         </tspan>

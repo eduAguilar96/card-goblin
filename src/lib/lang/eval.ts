@@ -37,6 +37,7 @@ import type { CardBindings, ResolvableNode, Resolution } from "./check";
 import type {
   Anchor,
   DataDiagnostic,
+  FontFace,
   IconStyle,
   ImageFit,
   LoopCaseBinding,
@@ -47,6 +48,7 @@ import type {
 } from "./model";
 import {
   DEFAULT_ANCHOR,
+  DEFAULT_FONT,
   DEFAULT_ICON_STYLE,
   DEFAULT_IMAGE_FIT,
   DEFAULT_LINE_HEIGHT,
@@ -55,7 +57,7 @@ import {
 } from "./model";
 import { DICIER_CODES } from "./dicier-codes";
 import { encodeQr } from "./qr";
-import { GEIST_METRICS, layoutTextBox } from "./wrap";
+import { layoutTextBox, metricsForFace } from "./wrap";
 
 // ---------------------------------------------------------------------------
 // Values and errors
@@ -488,18 +490,23 @@ function evalElement(el: ElementNode, ctx: EvalContext): Shape {
         // and every renderer agree on the visible text.
         text: toText(evalExpr(requireProp(el, "text"), ctx, null)).replace(/\n/g, " "),
         anchor,
+        font: fontOf(el, ctx),
       };
     }
     case "TextBox": {
       // §3.3 (M3, §7.2): THE COMPILER IS THE WRAPPING AUTHORITY — the box
-      // wraps here, against the generated Geist metrics, and the shape
-      // carries the resolved lines + the FINAL size, so preview and PDF
-      // agree by construction. Size resolves full/half on the X axis like
-      // Text; width on X, height on Y like Rectangle.
+      // wraps here, against the CHOSEN FONT'S generated metrics (◆41:
+      // metricsForFace routes geist to geist-metrics.ts and every other
+      // face to its own table in font-metrics.ts — a Courier box must wrap
+      // against Courier's advances, not Geist's), and the shape carries the
+      // resolved lines + the FINAL size, so preview and PDF agree by
+      // construction. Size resolves full/half on the X axis like Text;
+      // width on X, height on Y like Rectangle.
       const width = numberProp(el, "width", ctx, ctx.xUnits);
       const height = numberProp(el, "height", ctx, ctx.yUnits);
       const size = numberProp(el, "size", ctx, ctx.xUnits);
       const lineHeight = lineHeightOf(el);
+      const font = fontOf(el, ctx);
       const layout = layoutTextBox({
         text: toText(evalExpr(requireProp(el, "text"), ctx, null)),
         width,
@@ -507,7 +514,7 @@ function evalElement(el: ElementNode, ctx: EvalContext): Shape {
         size,
         lineHeight,
         overflow: overflowOf(el, ctx),
-        metrics: GEIST_METRICS,
+        metrics: metricsForFace(font),
       });
       return {
         kind: "textbox",
@@ -523,6 +530,7 @@ function evalElement(el: ElementNode, ctx: EvalContext): Shape {
         lines: layout.lines,
         clipped: layout.clipped,
         shrunk: layout.shrunk,
+        font,
       };
     }
     case "Icon": {
@@ -702,6 +710,17 @@ function styleOf(el: ElementNode, ctx: EvalContext): IconStyle {
   const res = ctx.card.resolutions.get(expr);
   if (res?.kind !== "iconStyle") return poisoned();
   return res.style;
+}
+
+/** Text/TextBox `font:` (§3.3, M3 — ◆41): checker-blessed identifier or the
+ * geist default — the same follow-the-resolution shape as styleOf. */
+function fontOf(el: ElementNode, ctx: EvalContext): FontFace {
+  const expr = findProp(el, "font");
+  if (!expr) return DEFAULT_FONT;
+  if (expr.kind !== "Identifier") return poisoned();
+  const res = ctx.card.resolutions.get(expr);
+  if (res?.kind !== "font") return poisoned();
+  return res.face;
 }
 
 /** TextBox `align:` (§3.3, M3): checker-blessed identifier or the left

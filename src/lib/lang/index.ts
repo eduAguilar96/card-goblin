@@ -41,11 +41,13 @@ export {
   ANCHOR_TOKENS,
   ASSET_SRC_SCHEME,
   DEFAULT_ANCHOR,
+  DEFAULT_FONT,
   DEFAULT_ICON_STYLE,
   DEFAULT_IMAGE_FIT,
   DEFAULT_LINE_HEIGHT,
   DEFAULT_QR_LEVEL,
   DEFAULT_TEXTBOX_OVERFLOW,
+  FONT_FACES,
   ICON_STYLES,
   IMAGE_FITS,
   QR_LEVELS,
@@ -65,6 +67,7 @@ export type {
   DataDiagnostic,
   DataDiagnosticCode,
   Deck,
+  FontFace,
   IconShape,
   IconStyle,
   ImageFit,
@@ -87,9 +90,12 @@ export {
   WIDTH_SAFETY_MARGIN,
   layoutTextBox,
   measureText,
+  metricsForFace,
   wrapText,
 } from "./wrap";
 export type { FontMetrics, TextBoxLayout, TextBoxLayoutInput } from "./wrap";
+export { FONT_METRICS } from "./font-metrics";
+export type { BundledFontFace, GeneratedFontMetrics } from "./font-metrics";
 
 export interface CompileResult {
   program: Program;

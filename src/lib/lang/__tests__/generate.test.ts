@@ -19,7 +19,14 @@ import type {
   TextBoxShape,
   TextShape,
 } from "../index";
-import { GEIST_METRICS, SIZE_PRESETS, compileProject, generateModel, measureText } from "../index";
+import {
+  GEIST_METRICS,
+  SIZE_PRESETS,
+  compileProject,
+  generateModel,
+  measureText,
+  metricsForFace,
+} from "../index";
 import { parse } from "../parser";
 import { CARD_CAP } from "../generate";
 import { encodeQr, resetQrCacheForTests } from "../qr";
@@ -172,6 +179,7 @@ describe("demo fixture end to end (§3.9)", () => {
       color: "black",
       text: "Dragon",
       anchor: { h: "center", v: "top" }, // the sugar centers horizontally (§3.4)
+      font: "geist", // no font: in the demo → the §3.3 default (◆41)
     });
   });
 
@@ -216,6 +224,21 @@ describe("demo fixture end to end (§3.9)", () => {
   it("has no data diagnostics and no pristine exclusions", () => {
     expect(p.dataDiagnostics).toEqual([]);
     expect(p.excludedPristineRows).toEqual({});
+  });
+
+  it("BYTE-IDENTICAL demo output (§3.3, ◆41): the fixture writes no font:, so every Text shape defaults to geist", () => {
+    // The demo source itself is unchanged (demo.test.ts pins it byte-for-byte
+    // against demoProject.ts) and has no `font:` anywhere — this is the other
+    // half of that guarantee: recompiling it must not silently CHANGE what
+    // gets drawn, only ADD the new field at its pre-existing default. Every
+    // text-bearing shape across every card must agree on exactly "geist".
+    for (const card of deck.cards) {
+      for (const shape of [...card.front, ...card.back]) {
+        if (shape.kind === "text" || shape.kind === "textbox") {
+          expect(shape.font).toBe("geist");
+        }
+      }
+    }
   });
 });
 
@@ -454,6 +477,152 @@ describe("Icon style: flows to the shape (§3.3 M2)", () => {
     const flat = iconProject(["style: flat_dark"]).model.decks[0].cards[0];
     const pixel = iconProject(["style: pixel"]).model.decks[0].cards[0];
     expect(flat.contentHash).not.toBe(pixel.contentHash);
+  });
+});
+
+// -- Text/TextBox font: (§3.3 M3, ◆41) — Icon style: is the closest stencil --
+
+describe("Text/TextBox font: flows to the shape (§3.3 M3, ◆41)", () => {
+  const textProject = (fontLine: string[]): ProjectResult =>
+    projectOf(
+      src(
+        ...sheetLines(["t: Text"]),
+        "Template: T",
+        "  Text:",
+        "    x: 1",
+        "    y: 1",
+        "    size: 2",
+        '    text: "hello"',
+        ...fontLine.map((l) => `    ${l}`),
+        ...CARD_LINES,
+        "  Front: T",
+      ),
+      { Sh: [{ t: "x" }] },
+    );
+
+  const boxProject = (fontLine: string[]): ProjectResult =>
+    projectOf(
+      src(
+        ...sheetLines(["t: Text"]),
+        "Template: T",
+        "  TextBox:",
+        "    x: 1",
+        "    y: 1",
+        "    width: 10",
+        "    height: 6",
+        '    text: "hello there"',
+        "    size: 1",
+        ...fontLine.map((l) => `    ${l}`),
+        ...CARD_LINES,
+        "  Front: T",
+      ),
+      { Sh: [{ t: "x" }] },
+    );
+
+  it("a declared font reaches the TextShape", () => {
+    const text = textProject(["font: garamond_bold"]).model.decks[0].cards[0]
+      .front[0] as TextShape;
+    expect(text.font).toBe("garamond_bold");
+  });
+
+  it("omitted font defaults to geist on Text (§3.3, ◆41 — unchanged pre-existing behavior)", () => {
+    const text = textProject([]).model.decks[0].cards[0].front[0] as TextShape;
+    expect(text.font).toBe("geist");
+  });
+
+  it("a font change changes the contentHash on Text (fonts are visible content)", () => {
+    const geist = textProject(["font: geist"]).model.decks[0].cards[0];
+    const courier = textProject(["font: courier"]).model.decks[0].cards[0];
+    expect(geist.contentHash).not.toBe(courier.contentHash);
+  });
+
+  it("explicit font: geist ≡ omitted on Text — same contentHash (the style/fit precedent)", () => {
+    expect(textProject(["font: geist"]).model.decks[0].cards[0].contentHash).toBe(
+      textProject([]).model.decks[0].cards[0].contentHash,
+    );
+  });
+
+  it("a declared font reaches the TextBoxShape", () => {
+    const box = boxProject(["font: courier"]).model.decks[0].cards[0].front[0] as TextBoxShape;
+    expect(box.font).toBe("courier");
+  });
+
+  it("omitted font defaults to geist on TextBox (§3.3, ◆41 — unchanged pre-existing behavior)", () => {
+    const box = boxProject([]).model.decks[0].cards[0].front[0] as TextBoxShape;
+    expect(box.font).toBe("geist");
+  });
+
+  it("a font change changes the contentHash on TextBox (fonts are visible content)", () => {
+    const geist = boxProject(["font: geist"]).model.decks[0].cards[0];
+    const garamond = boxProject(["font: garamond"]).model.decks[0].cards[0];
+    expect(geist.contentHash).not.toBe(garamond.contentHash);
+  });
+
+  it("explicit font: geist ≡ omitted on TextBox — same contentHash", () => {
+    expect(boxProject(["font: geist"]).model.decks[0].cards[0].contentHash).toBe(
+      boxProject([]).model.decks[0].cards[0].contentHash,
+    );
+  });
+
+  /** A TextBox with ONLY width/text/font varying — the wrapping-correctness
+   * test below needs full control over width and text, unlike boxProject
+   * (fixed width 10 / text "hello there") above. */
+  const wrapProject = (font: string): ProjectResult =>
+    projectOf(
+      src(
+        ...sheetLines(["t: Text"]),
+        "Template: T",
+        "  TextBox:",
+        "    x: 1",
+        "    y: 1",
+        "    width: 5",
+        "    height: 6",
+        '    text: "mint mint mint"',
+        "    size: 1",
+        `    font: ${font}`,
+        ...CARD_LINES,
+        "  Front: T",
+      ),
+      { Sh: [{ t: "x" }] },
+    );
+
+  // -- THE test that proves the feature works: identical text, identical box,
+  // wraps to a DIFFERENT number of lines depending on font: — because eval.ts
+  // routes metricsForFace(font) into layoutTextBox, not a hardcoded Geist
+  // table (§7.2's "compiler is the wrapping authority" only holds if the
+  // authority actually consults the right font). Hand-verified against the
+  // committed tables (metrics.test.ts pins their byte-identity), independent
+  // of wrapText/measureText's own logic:
+  //   GEIST (unitsPerEm 1000):   m=877 i=244 n=581 t=395 space=250
+  //   COURIER (unitsPerEm 2048): every one of those = 1228 (monospace)
+  // "mint" measures (× 1.02 margin ÷ unitsPerEm): Geist 2.139, Courier 2.446.
+  // "mint mint": Geist 4.533 (fits a 5-unit box), Courier 5.504 (does NOT).
+  // So at width 5, size 1: Geist fits two "mint"s per line (2 lines total);
+  // Courier's wider, uniformly-spaced glyphs fit only one (3 lines total).
+  it("the SAME text in the SAME box wraps differently in Courier vs Geist (§7.2)", () => {
+    const geistBox = wrapProject("geist").model.decks[0].cards[0].front[0] as TextBoxShape;
+    const courierBox = wrapProject("courier").model.decks[0].cards[0].front[0] as TextBoxShape;
+
+    expect(geistBox.lines).toEqual(["mint mint", "mint"]);
+    expect(courierBox.lines).toEqual(["mint", "mint", "mint"]);
+    expect(geistBox.lines.length).not.toBe(courierBox.lines.length);
+    expect(geistBox.clipped).toBe(false);
+    expect(courierBox.clipped).toBe(false);
+
+    // Cross-check with the wrap engine's OWN measurement (belt and suspenders
+    // — the hand math above and measureText must agree on why each line fits).
+    for (const line of geistBox.lines) {
+      expect(measureText(line, 1, metricsForFace("geist"))).toBeLessThanOrEqual(5);
+    }
+    for (const line of courierBox.lines) {
+      expect(measureText(line, 1, metricsForFace("courier"))).toBeLessThanOrEqual(5);
+    }
+    // And the DECISIVE cross-check: "mint mint" fits Geist's own table but
+    // overflows Courier's — that asymmetry is the entire reason the two
+    // faces wrap differently, so assert it directly rather than just trusting
+    // the line arrays above.
+    expect(measureText("mint mint", 1, metricsForFace("geist"))).toBeLessThanOrEqual(5);
+    expect(measureText("mint mint", 1, metricsForFace("courier"))).toBeGreaterThan(5);
   });
 });
 
@@ -903,7 +1072,7 @@ describe("TextBox evaluates to a wrapped TextBoxShape (§3.3 M3)", () => {
 
   const WIDE = ["width: 18", "height: 20", "size: 1"];
 
-  it("materializes every default: black, left, 1.3, unclipped — and geometry verbatim", () => {
+  it("materializes every default: black, left, 1.3, unclipped, geist font — and geometry verbatim", () => {
     const shape = boxOf(boxProject(WIDE));
     expect(shape).toEqual({
       kind: "textbox",
@@ -919,6 +1088,7 @@ describe("TextBox evaluates to a wrapped TextBoxShape (§3.3 M3)", () => {
       lines: ["aaa aaa aaa"], // fits an 18-unit box on one line
       clipped: false,
       shrunk: false,
+      font: "geist", // no font: → the §3.3 default (◆41)
     });
   });
 

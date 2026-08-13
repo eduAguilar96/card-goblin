@@ -48,9 +48,10 @@ import type {
   TemplateNode,
 } from "./ast";
 import type { Diagnostic, Range, Severity } from "./diagnostics";
-import type { Anchor, IconStyle, ImageFit, QrLevel, TextBoxOverflow } from "./model";
+import type { Anchor, FontFace, IconStyle, ImageFit, QrLevel, TextBoxOverflow } from "./model";
 import {
   ANCHOR_TOKENS,
+  FONT_FACES,
   ICON_STYLES,
   IMAGE_FITS,
   QR_LEVELS,
@@ -107,6 +108,9 @@ export type Resolution =
   | { kind: "align"; keyword: "left" | "middle" | "right" }
   | { kind: "iconStyle"; style: IconStyle }
   | { kind: "imageFit"; fit: ImageFit }
+  /** Text/TextBox `font:` (§3.3, M3 — ◆41): resolved by expected type like
+   * style/fit — the closed nine-face vocabulary (FONT_FACES). */
+  | { kind: "font"; face: FontFace }
   /** TextBox `overflow:` (§3.3, M3): clip | shrink, resolved like fit. */
   | { kind: "overflow"; value: TextBoxOverflow }
   /** Qr `level:` (§7.1a): l | m | q | h, resolved like fit/style. */
@@ -306,6 +310,10 @@ const ICON_STYLE_SET: ReadonlySet<string> = new Set(ICON_STYLES);
 /** Membership set over the §3.3 IMAGE_FITS vocabulary (three fit modes). */
 const IMAGE_FIT_SET: ReadonlySet<string> = new Set(IMAGE_FITS);
 
+/** Membership set over the §3.3 FONT_FACES vocabulary (◆41: geist + eight
+ * bundled faces). */
+const FONT_FACE_SET: ReadonlySet<string> = new Set(FONT_FACES);
+
 /** Membership set over the §3.3 TEXTBOX_OVERFLOWS vocabulary (clip/shrink). */
 const TEXTBOX_OVERFLOW_SET: ReadonlySet<string> = new Set(TEXTBOX_OVERFLOWS);
 
@@ -320,15 +328,15 @@ interface ElementSpec {
 /** §3.3 property tables. Text/Icon color defaults to black; Icon style
  * defaults to flat_dark, Image fit to contain (M2); TextBox align defaults
  * to left, line_height to 1.3 × size, overflow to clip (M3); Qr color
- * defaults to black, background to white, level to m (§7.1a). EVERY
- * drawable element takes an optional nine-point `anchor:` (§3.4, M3;
- * default top_left). */
+ * defaults to black, background to white, level to m (§7.1a); Text/TextBox
+ * font defaults to geist (M3 — ◆41). EVERY drawable element takes an
+ * optional nine-point `anchor:` (§3.4, M3; default top_left). */
 const ELEMENT_SPECS: Record<ElementNode["element"], ElementSpec> = {
   Rectangle: { required: ["x", "y", "width", "height", "color"], optional: ["anchor"] },
-  Text: { required: ["x", "y", "size", "text"], optional: ["color", "anchor"] },
+  Text: { required: ["x", "y", "size", "text"], optional: ["color", "anchor", "font"] },
   TextBox: {
     required: ["x", "y", "width", "height", "text", "size"],
-    optional: ["color", "align", "line_height", "overflow", "anchor"],
+    optional: ["color", "align", "line_height", "overflow", "anchor", "font"],
   },
   Icon: { required: ["x", "y", "size", "code"], optional: ["color", "anchor", "style"] },
   Image: { required: ["x", "y", "width", "height", "src"], optional: ["fit", "anchor"] },
@@ -1159,6 +1167,23 @@ class Checker {
           return;
         }
         this.error("E008", `style: must be one of ${ICON_STYLES.join(", ")}`, value.range);
+        return;
+      }
+      case "font": {
+        // Text/TextBox only (ELEMENT_SPECS): a bare identifier from the
+        // closed nine-face vocabulary, resolved by expected type exactly
+        // like Icon's style: (§3.3, M3 — ◆41). Like style (and unlike codes'
+        // open W004 list) the faces ARE the full set — unknown or a
+        // non-identifier expression is E008, not a warning.
+        if (value.kind === "Error") return;
+        if (value.kind === "Identifier" && FONT_FACE_SET.has(value.name)) {
+          this.recordResolution(ctx, value, {
+            kind: "font",
+            face: value.name as FontFace,
+          });
+          return;
+        }
+        this.error("E008", `font: must be one of ${FONT_FACES.join(", ")}`, value.range);
         return;
       }
       case "fit": {

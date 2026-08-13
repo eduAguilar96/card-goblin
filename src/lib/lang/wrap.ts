@@ -36,12 +36,13 @@
  *   the floor if none fits. The result carries the FINAL size.
  */
 
-import type { TextBoxOverflow } from "./model";
+import type { FontFace, TextBoxOverflow } from "./model";
 import {
   GEIST_ADVANCES,
   GEIST_FALLBACK_ADVANCE,
   GEIST_UNITS_PER_EM,
 } from "./geist-metrics";
+import { FONT_METRICS } from "./font-metrics";
 
 // ---------------------------------------------------------------------------
 // Metrics
@@ -58,12 +59,28 @@ export interface FontMetrics {
 }
 
 /** The real table: Geist's default instance, generated from GeistVF.woff by
- * scripts/generate-geist-metrics.mjs — what the evaluator wraps with. */
+ * scripts/generate-font-metrics.mjs — what the evaluator wraps with. */
 export const GEIST_METRICS: FontMetrics = {
   unitsPerEm: GEIST_UNITS_PER_EM,
   fallbackAdvance: GEIST_FALLBACK_ADVANCE,
   advances: GEIST_ADVANCES,
 };
+
+/**
+ * The measuring stick for one `font:` face (§3.3, M3 — ◆41). THIS is the
+ * function that makes per-font wrapping correct: `geist` (the default) uses
+ * GEIST_METRICS above; every other face uses ITS OWN generated advances from
+ * font-metrics.ts — a TextBox in Courier must wrap against Courier's
+ * advances, not Geist's, or the compiler's "wrapping authority" promise
+ * (§7.2) would be wrong for eight of the nine faces. `FONT_METRICS[face]`
+ * (not `GeneratedFontMetrics` itself) is structurally a superset of
+ * `FontMetrics` — it also carries `ascent`, which wrap.ts's measurement
+ * never reads (that's cardSvg.tsx's job) but this function does not need to
+ * strip.
+ */
+export function metricsForFace(face: FontFace): FontMetrics {
+  return face === "geist" ? GEIST_METRICS : FONT_METRICS[face];
+}
 
 /**
  * Measured widths are inflated by 2% (§3.3: "a 2% measurement safety

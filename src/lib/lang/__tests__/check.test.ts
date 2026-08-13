@@ -13,6 +13,7 @@ import type { Anchor } from "../index";
 import {
   ANCHOR_TOKENS,
   compileSource,
+  FONT_FACES,
   ICON_STYLES,
   IMAGE_FITS,
   parseAnchor,
@@ -634,6 +635,99 @@ describe("Icon style: (§3.3 M2)", () => {
     const ds = diagsOf(withElement("Text:", [...TEXT_BASE, 'text: "a"', "style: pixel"]));
     expect(ds.map((d) => d.code)).toEqual(["E008"]);
     expect(ds[0].message).toBe("Unknown property 'style:' on Text");
+  });
+});
+
+// -- Text/TextBox font: (§3.3 M3, ◆41) — Icon style: is the closest stencil --
+
+describe("Text/TextBox font: (§3.3 M3, ◆41)", () => {
+  const BOX_BASE = ["x: 1", "y: 1", "width: 10", "height: 6", 'text: "some rules text"', "size: 1"];
+
+  it("accepts every one of the nine faces on Text and records a font resolution", () => {
+    for (const font of FONT_FACES) {
+      const result = checkOf(withElement("Text:", [...TEXT_BASE, 'text: "a"', `font: ${font}`]));
+      expect(result.diagnostics, font).toEqual([]);
+      const tpl = result.bindings.templates.get("T") as TemplateDecl;
+      const prop = (tpl.children[0] as ElementNode).properties.find(
+        (p) => p.key.name === "font",
+      )!;
+      expect(result.bindings.cards[0].resolutions.get(prop.value as never)).toEqual({
+        kind: "font",
+        face: font,
+      });
+    }
+  });
+
+  it("accepts every one of the nine faces on TextBox and records a font resolution", () => {
+    for (const font of FONT_FACES) {
+      const result = checkOf(withElement("TextBox:", [...BOX_BASE, `font: ${font}`]));
+      expect(result.diagnostics, font).toEqual([]);
+      const tpl = result.bindings.templates.get("T") as TemplateDecl;
+      const prop = (tpl.children[0] as ElementNode).properties.find(
+        (p) => p.key.name === "font",
+      )!;
+      expect(result.bindings.cards[0].resolutions.get(prop.value as never)).toEqual({
+        kind: "font",
+        face: font,
+      });
+    }
+  });
+
+  it("omitting font: is legal on both — the default is the evaluator's business", () => {
+    expect(codesOf(withElement("Text:", [...TEXT_BASE, 'text: "a"']))).toEqual([]);
+    expect(codesOf(withElement("TextBox:", BOX_BASE))).toEqual([]);
+  });
+
+  it("an unknown font is E008 naming the closed vocabulary", () => {
+    const dsText = diagsOf(withElement("Text:", [...TEXT_BASE, 'text: "a"', "font: comic_sans"]));
+    expect(dsText.map((d) => d.code)).toEqual(["E008"]);
+    expect(dsText[0].message).toContain("font: must be one of geist");
+
+    const dsBox = diagsOf(withElement("TextBox:", [...BOX_BASE, "font: comic_sans"]));
+    expect(dsBox.map((d) => d.code)).toEqual(["E008"]);
+    expect(dsBox[0].message).toContain("font: must be one of geist");
+  });
+
+  it("font must be a bare identifier — strings and expressions are E008", () => {
+    for (const bad of ['font: "garamond"', "font: 1", "font: 1 + 1"]) {
+      expect(codesOf(withElement("Text:", [...TEXT_BASE, 'text: "a"', bad])), bad).toEqual([
+        "E008",
+      ]);
+      expect(codesOf(withElement("TextBox:", [...BOX_BASE, bad])), bad).toEqual(["E008"]);
+    }
+  });
+
+  it("font on Rectangle/Icon/Image/Qr is an unknown property (Text/TextBox only)", () => {
+    const rect = diagsOf(
+      withElement("Rectangle:", ["x: 0", "y: 0", "width: 1", "height: 1", "color: teal", "font: garamond"]),
+    );
+    expect(rect.map((d) => d.code)).toEqual(["E008"]);
+    expect(rect[0].message).toBe("Unknown property 'font:' on Rectangle");
+
+    const icon = diagsOf(
+      withElement("Icon:", ["x: 1", "y: 1", "size: 1", 'code: "HEARTS"', "font: garamond"]),
+    );
+    expect(icon.map((d) => d.code)).toEqual(["E008"]);
+    expect(icon[0].message).toBe("Unknown property 'font:' on Icon");
+
+    const image = diagsOf(
+      withElement("Image:", [
+        "x: 1",
+        "y: 1",
+        "width: 5",
+        "height: 5",
+        'src: "https://example.com/a.png"',
+        "font: garamond",
+      ]),
+    );
+    expect(image.map((d) => d.code)).toEqual(["E008"]);
+    expect(image[0].message).toBe("Unknown property 'font:' on Image");
+
+    const qr = diagsOf(
+      withElement("Qr:", ["x: 1", "y: 1", "size: 5", 'data: "https://example.com/a"', "font: garamond"]),
+    );
+    expect(qr.map((d) => d.code)).toEqual(["E008"]);
+    expect(qr[0].message).toBe("Unknown property 'font:' on Qr");
   });
 });
 

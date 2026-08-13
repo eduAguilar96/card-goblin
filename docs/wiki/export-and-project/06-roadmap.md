@@ -49,6 +49,11 @@ compiler itself, so the preview and the PDF always agree — with hard breaks
 (`\n` and newlines in cells), alignment, and clip/shrink overflow control. See
 [Text & TextBox](text.md).
 
+**Fonts.** Nine bundled faces on `Text` and `TextBox` — Geist (the default)
+plus eight more from Cormorant Garamond and Courier Prime — via `font:`, with
+wrapping measured against each font's own letterforms. See
+[Text & TextBox](text.md).
+
 **QR codes.** The `Qr` element: scannable codes generated straight from sheet
 data, with error-correction levels and a scan-safe quiet zone — the idiom for
 giving every card in a deck its own code on the back. See
@@ -58,8 +63,9 @@ giving every card in a deck its own code on the back. See
 
 - **Accounts and sharing** — projects that live in the cloud and decks you can
   share by link, past today's [file-based story](project-files.md).
-- **Custom fonts** — uploaded assets cover images; fonts for `Text`/`TextBox`
-  are a separate, later piece.
+- **Uploaded fonts** — `font:` currently picks from a small bundled set (see
+  [Text & TextBox](text.md)); bringing your OWN font file, the way uploaded
+  assets already work for images, is a separate, later piece.
 - **Rich text in boxes** — bold runs and inline icons inside a `TextBox`
   (run-based layout, a deliberate later design round).
 - **A browsable icon picker** — search and preview the [888 Dicier

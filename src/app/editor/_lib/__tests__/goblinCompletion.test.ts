@@ -10,10 +10,12 @@ import { describe, expect, it } from "vitest";
 import {
   ANCHOR_TOKENS,
   compileSource,
+  DEFAULT_FONT,
   DEFAULT_ICON_STYLE,
   DEFAULT_IMAGE_FIT,
   DEFAULT_QR_LEVEL,
   DICIER_CODES,
+  FONT_FACES,
   ICON_STYLES,
   IMAGE_FITS,
   QR_LEVELS,
@@ -351,9 +353,9 @@ describe("property keys", () => {
     expect(byLabel(r, "x").insertText).toBe("x: ");
   });
 
-  it("Text keys include text/anchor; Icon keys include code and style", () => {
+  it("Text keys include text/anchor/font; Icon keys include code and style", () => {
     expect(labels(at(src("Template: T", "  Text:", "    ¦")))).toEqual([
-      "x", "y", "size", "text", "color", "anchor",
+      "x", "y", "size", "text", "color", "anchor", "font",
     ]);
     expect(labels(at(src("Template: T", "  Icon:", "    ¦")))).toEqual([
       "x", "y", "size", "code", "color", "anchor", "style",
@@ -377,15 +379,16 @@ describe("property keys", () => {
     expect(byLabel(r, "level").detail).toContain("l | m | q | h");
   });
 
-  it("TextBox keys include text/align/line_height/overflow (§3.3 M3)", () => {
+  it("TextBox keys include text/align/line_height/overflow/font (§3.3 M3, ◆41)", () => {
     const r = at(src("Template: T", "  TextBox:", "    ¦"));
     expect(labels(r)).toEqual([
       "x", "y", "width", "height", "text", "size", "color", "align", "line_height", "overflow",
-      "anchor",
+      "anchor", "font",
     ]);
     expect(byLabel(r, "text").detail).toContain("hard break");
     expect(byLabel(r, "line_height").detail).toContain("1.3");
     expect(byLabel(r, "overflow").detail).toContain("clip | shrink");
+    expect(byLabel(r, "font").detail).toContain("geist");
   });
 
   it("Card keys include properties (custom-size pair too) and Front/Back face lines", () => {
@@ -527,6 +530,17 @@ describe("value positions", () => {
     const r = at(src("Template: T", "  Icon:", "    style: ¦"));
     expect(labels(r)).toEqual([...ICON_STYLES]);
     expect(byLabel(r, DEFAULT_ICON_STYLE).detail).toContain("default");
+  });
+
+  it("font: offers exactly the nine faces, default marked, on Text AND TextBox (§3.3 M3, ◆41)", () => {
+    const onText = at(src("Template: T", "  Text:", "    font: ¦"));
+    expect(labels(onText)).toEqual([...FONT_FACES]);
+    expect(byLabel(onText, DEFAULT_FONT).detail).toBe("font face (the default)");
+    expect(byLabel(onText, "courier_bold_italic").detail).toBe("font face");
+
+    const onBox = at(src("Template: T", "  TextBox:", "    font: ¦"));
+    expect(labels(onBox)).toEqual([...FONT_FACES]);
+    expect(byLabel(onBox, DEFAULT_FONT).detail).toBe("font face (the default)");
   });
 
   it("fit: offers exactly the three image fits, default marked (§3.3 M2)", () => {
@@ -853,6 +867,7 @@ describe("compiler pins (E008 probes)", () => {
     '      text: "Cost: [cost]"',
     "      color: black",
     "      anchor: middle",
+    "      font: garamond",
     "  Icon:",
     "    x: middle",
     "    y: 2",
@@ -881,6 +896,7 @@ describe("compiler pins (E008 probes)", () => {
     "    line_height: 1.3",
     "    overflow: shrink",
     "    anchor: center_right",
+    "    font: courier_bold_italic",
     "  Qr:",
     "    x: 2",
     "    y: 26",
