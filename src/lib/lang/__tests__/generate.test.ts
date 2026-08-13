@@ -165,11 +165,11 @@ describe("demo fixture end to end (§3.9)", () => {
       width: 20,
       height: 3,
       color: "grey",
-      anchor: { h: "left", v: "top" }, // §3.4 default, materialized
+      pivot: { h: "left", v: "top" }, // §3.4 default, materialized
     });
   });
 
-  it("title: `x: middle` centers at x=10 and forces anchor middle", () => {
+  it("title: `x: middle` centers at x=10 and forces pivot middle", () => {
     const title = deck.cards[0].front[1] as TextShape;
     expect(title).toEqual({
       kind: "text",
@@ -178,20 +178,20 @@ describe("demo fixture end to end (§3.9)", () => {
       size: 1.6,
       color: "black",
       text: "Dragon",
-      anchor: { h: "center", v: "top" }, // the sugar centers horizontally (§3.4)
+      pivot: { h: "center", v: "top" }, // the sugar centers horizontally (§3.4)
       font: "geist", // no font: in the demo → the §3.3 default (◆41)
     });
   });
 
-  it("cost interpolates: 'Cost: 5' right-anchored at x 19", () => {
+  it("cost interpolates: 'Cost: 5' right-pivoted at x 19", () => {
     const cost = deck.cards[0].front[2] as TextShape;
     expect(cost.text).toBe("Cost: 5");
     expect(cost.x).toBe(19);
-    expect(cost.anchor).toEqual({ h: "right", v: "top" }); // legacy alias ≡ top_right
+    expect(cost.pivot).toEqual({ h: "right", v: "top" }); // legacy alias ≡ top_right
     expect((deck.cards[6].front[2] as TextShape).text).toBe("Cost: 1");
   });
 
-  it("attack icon: SWORDS, white, default left anchor and flat_dark style", () => {
+  it("attack icon: SWORDS, white, default left pivot and flat_dark style", () => {
     const attack = deck.cards[0].front[3] as IconShape;
     expect(attack).toEqual({
       kind: "icon",
@@ -200,7 +200,7 @@ describe("demo fixture end to end (§3.9)", () => {
       size: 1.6,
       color: "white",
       code: "SWORDS",
-      anchor: { h: "left", v: "top" },
+      pivot: { h: "left", v: "top" },
       style: "flat_dark", // no style: in the demo → the §3.3 default
     });
   });
@@ -217,7 +217,7 @@ describe("demo fixture end to end (§3.9)", () => {
 
   it("PlainBack: one full-card teal rect using the exact 28-unit height", () => {
     expect(deck.cards[0].back).toEqual([
-      { kind: "rect", x: 0, y: 0, width: 20, height: 28, color: "teal", anchor: { h: "left", v: "top" } },
+      { kind: "rect", x: 0, y: 0, width: 20, height: 28, color: "teal", pivot: { h: "left", v: "top" } },
     ]);
   });
 
@@ -260,7 +260,7 @@ describe("geometry resolution: full / half / middle, fractional y (⚑7†)", ()
         "    x: middle",
         "    y: 0",
         "    size: half",
-        "    anchor: right",
+        "    pivot: right",
         "    text: [t]",
         "Card: C",
         "  sheet: Sh",
@@ -291,12 +291,12 @@ describe("geometry resolution: full / half / middle, fractional y (⚑7†)", ()
     expect(text.size).toBe(10);
   });
 
-  it("`x: middle` wins over an explicit anchor's horizontal word (documented decision)", () => {
+  it("`x: middle` wins over an explicit pivot's horizontal word (documented decision)", () => {
     const text = geoProject().model.decks[0].cards[0].front[1] as TextShape;
     expect(text.x).toBe(10);
-    // The written `anchor: right` loses its horizontal say; its vertical
+    // The written `pivot: right` loses its horizontal say; its vertical
     // component (top, from the legacy alias) stands (§3.4).
-    expect(text.anchor).toEqual({ h: "center", v: "top" });
+    expect(text.pivot).toEqual({ h: "center", v: "top" });
   });
 
   it("an explicit integer y_units flows through (W003 warning, not an error)", () => {
@@ -347,7 +347,7 @@ describe("geometry resolution: full / half / middle, fractional y (⚑7†)", ()
   it("absent Back (◆16) → a single full-card white rect generated here", () => {
     const p = textProject("[t]", ["t: Text"], [{ t: "x" }]);
     expect(p.model.decks[0].cards[0].back).toEqual([
-      { kind: "rect", x: 0, y: 0, width: 20, height: 28, color: "white", anchor: { h: "left", v: "top" } },
+      { kind: "rect", x: 0, y: 0, width: 20, height: 28, color: "white", pivot: { h: "left", v: "top" } },
     ]);
   });
 });
@@ -419,7 +419,7 @@ describe("custom card sizes flow to the RenderModel (§3.4 M2)", () => {
     expect(deck.yUnits).toBe(30);
     // The synthetic default back spans the custom grid exactly (◆16).
     expect(deck.cards[0].back).toEqual([
-      { kind: "rect", x: 0, y: 0, width: 20, height: 30, color: "white", anchor: { h: "left", v: "top" } },
+      { kind: "rect", x: 0, y: 0, width: 20, height: 30, color: "white", pivot: { h: "left", v: "top" } },
     ]);
   });
 
@@ -659,7 +659,7 @@ describe("Image flows to the shape (§3.3 M2)", () => {
       height: 28,
       src: "img/dragon.png",
       fit: "contain",
-      anchor: { h: "left", v: "top" },
+      pivot: { h: "left", v: "top" },
     });
   });
 
@@ -770,7 +770,7 @@ describe("Qr flows to the shape (§7.1a)", () => {
       size: 10, // half of 20 X units
       color: "black",
       background: "white",
-      anchor: { h: "left", v: "top" },
+      pivot: { h: "left", v: "top" },
       moduleCount: expected.moduleCount,
       modules: expected.modules,
     });
@@ -905,9 +905,9 @@ describe("QR cache — warm recompile stays inside the debounce at CARD_CAP scal
   });
 });
 
-// -- nine-point anchors (§3.4, M3) --------------------------------------------
+// -- nine-point pivots (§3.4, M3) ---------------------------------------------
 
-describe("nine-point anchor flows to the shape (§3.4 M3)", () => {
+describe("nine-point pivot flows to the shape (§3.4 M3)", () => {
   const rectProject = (extra: string[]): ProjectResult =>
     projectOf(
       src(
@@ -927,9 +927,9 @@ describe("nine-point anchor flows to the shape (§3.4 M3)", () => {
     );
   const rectCard = (extra: string[]) => rectProject(extra).model.decks[0].cards[0];
 
-  it("a declared anchor reaches the shape NORMALIZED — x/y stay as authored (no baked offset)", () => {
-    const rect = rectCard(["anchor: bottom_right"]).front[0] as RectShape;
-    expect(rect.anchor).toEqual({ h: "right", v: "bottom" });
+  it("a declared pivot reaches the shape NORMALIZED — x/y stay as authored (no baked offset)", () => {
+    const rect = rectCard(["pivot: bottom_right"]).front[0] as RectShape;
+    expect(rect.pivot).toEqual({ h: "right", v: "bottom" });
     // Eval does NOT bake the offset: the renderer applies it (§3.4 — an
     // Image `auto` box only resolves at load time, and every kind follows
     // the same rule for consistency).
@@ -937,7 +937,7 @@ describe("nine-point anchor flows to the shape (§3.4 M3)", () => {
     expect(rect.y).toBe(10);
   });
 
-  it("every shape kind materializes the top-left default when anchor: is omitted", () => {
+  it("every shape kind materializes the top-left default when pivot: is omitted", () => {
     const p = projectOf(
       src(
         ...sheetLines(["t: Text"]),
@@ -984,31 +984,31 @@ describe("nine-point anchor flows to the shape (§3.4 M3)", () => {
     const front = p.model.decks[0].cards[0].front;
     expect(front).toHaveLength(6);
     for (const shape of front) {
-      expect(shape.anchor, shape.kind).toEqual({ h: "left", v: "top" });
+      expect(shape.pivot, shape.kind).toEqual({ h: "left", v: "top" });
     }
   });
 
   it("explicit default ≡ omitted — same contentHash (the fit/style precedent)", () => {
     const omitted = rectCard([]).contentHash;
-    expect(rectCard(["anchor: top_left"]).contentHash).toBe(omitted);
+    expect(rectCard(["pivot: top_left"]).contentHash).toBe(omitted);
     // Reversed spelling of the same point too: normalization runs at check
     // time, so the model (and the hash) can't tell spellings apart.
-    expect(rectCard(["anchor: left_top"]).contentHash).toBe(omitted);
+    expect(rectCard(["pivot: left_top"]).contentHash).toBe(omitted);
   });
 
-  it("bottom_right ≠ the default — anchors are visible content", () => {
-    expect(rectCard(["anchor: bottom_right"]).contentHash).not.toBe(rectCard([]).contentHash);
+  it("bottom_right ≠ the default — pivots are visible content", () => {
+    expect(rectCard(["pivot: bottom_right"]).contentHash).not.toBe(rectCard([]).contentHash);
   });
 
   it("alias ≡ canonical on the DEMO: right ↔ top_right ↔ right_top give deep-equal models", () => {
-    // The demo fixture itself is untouched by M3 (byte-identical, `anchor:
-    // right` and all); respelling its one anchor canonically must change
+    // The demo fixture itself is untouched by M3 (byte-identical, `pivot:
+    // right` and all); respelling its one pivot canonically must change
     // NOTHING — hashes included.
     const base = compileProject(demoSource, demoRows());
     expect(base.diagnostics).toEqual([]);
     for (const spelling of ["top_right", "right_top"]) {
       const variant = compileProject(
-        demoSource.replace("anchor: right", `anchor: ${spelling}`),
+        demoSource.replace("pivot: right", `pivot: ${spelling}`),
         demoRows(),
       );
       expect(variant.diagnostics, spelling).toEqual([]);
@@ -1016,7 +1016,7 @@ describe("nine-point anchor flows to the shape (§3.4 M3)", () => {
     }
   });
 
-  it("x: middle + anchor: bottom_left → h center (sugar wins), v bottom (anchor's say)", () => {
+  it("x: middle + pivot: bottom_left → h center (sugar wins), v bottom (pivot's say)", () => {
     const p = projectOf(
       src(
         ...sheetLines(["t: Text"]),
@@ -1026,7 +1026,7 @@ describe("nine-point anchor flows to the shape (§3.4 M3)", () => {
         "    y: 26",
         "    size: 1",
         '    text: "footer"',
-        "    anchor: bottom_left",
+        "    pivot: bottom_left",
         ...CARD_LINES,
         "  Front: T",
       ),
@@ -1034,7 +1034,42 @@ describe("nine-point anchor flows to the shape (§3.4 M3)", () => {
     );
     const text = p.model.decks[0].cards[0].front[0] as TextShape;
     expect(text.x).toBe(10); // half of 20 X units
-    expect(text.anchor).toEqual({ h: "center", v: "bottom" });
+    expect(text.pivot).toEqual({ h: "center", v: "bottom" });
+  });
+
+  it("the centring recipe (x: half, y: half, pivot: center_center) centers a shape on the card (hand-computed)", () => {
+    const p = projectOf(
+      src(
+        ...sheetLines(["t: Text"]),
+        "Template: T",
+        "  Rectangle:",
+        "    x: half",
+        "    y: half",
+        "    width: 4",
+        "    height: 2",
+        "    color: teal",
+        "    pivot: center_center",
+        ...CARD_LINES,
+        "  Front: T",
+      ),
+      { Sh: [{ t: "x" }] },
+    );
+    const rect = p.model.decks[0].cards[0].front[0] as RectShape;
+    // CARD_LINES: x_units 20, y_units auto → 28 (poker's 88.9/63.5 ratio).
+    // `half` of each axis is the card's own center point: (10, 14).
+    expect(rect.x).toBe(10);
+    expect(rect.y).toBe(14);
+    expect(rect.pivot).toEqual({ h: "center", v: "center" });
+    // Hand-computed: a center_center pivot backs the drawn box off by HALF
+    // its own size on each axis (§3.4's fx/fy = ½), so the box's top-left
+    // origin is (x − width/2, y − height/2) = (10 − 4/2, 14 − 2/2) = (8, 13)
+    // — the box (4×2) therefore spans (8, 13)–(12, 15), whose own center is
+    // (10, 14): the SAME point x/y named. The shape's center, not a corner,
+    // lands on the card's center — this is the recipe for "centered on the
+    // card" the owner expected from `pivot: center_center` alone (§3.4/◆36†).
+    const handComputedOrigin = { x: 8, y: 13 };
+    const actualOrigin = { x: rect.x - rect.width / 2, y: rect.y - rect.height / 2 };
+    expect(actualOrigin).toEqual(handComputedOrigin);
   });
 });
 
@@ -1083,7 +1118,7 @@ describe("TextBox evaluates to a wrapped TextBoxShape (§3.3 M3)", () => {
       size: 1,
       color: "black",
       align: "left",
-      anchor: { h: "left", v: "top" },
+      pivot: { h: "left", v: "top" },
       lineHeight: 1.3,
       lines: ["aaa aaa aaa"], // fits an 18-unit box on one line
       clipped: false,

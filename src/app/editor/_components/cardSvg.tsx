@@ -26,14 +26,14 @@ import {
   type SVGProps,
 } from "react";
 import type {
-  Anchor,
-  AnchorH,
-  AnchorV,
   DataDiagnostic,
   FontFace,
   IconStyle,
   ImageFit,
   ImageShape,
+  Pivot,
+  PivotH,
+  PivotV,
   QrShape,
   Shape,
   TextAnchor,
@@ -94,7 +94,7 @@ export const TEXT_FONT_FAMILIES: Record<FontFace, string> = {
 
 /**
  * Per-face baseline ascent (§3.4 m10, ◆41) — the ASCENT that
- * `anchoredBaselineY` multiplies by `size`. KNOWN INCONSISTENCY, documented
+ * `pivotedBaselineY` multiplies by `size`. KNOWN INCONSISTENCY, documented
  * as a follow-up rather than fixed now: `geist` keeps the hand-tuned
  * TEXT_ASCENT constant (0.73) UNCHANGED — retuning it would shift the
  * y-position of every existing Text/TextBox on every existing card, and
@@ -147,45 +147,45 @@ const SVG_ALIGN: Record<TextAnchor, "start" | "middle" | "end"> = {
   right: "end",
 };
 
-/** Anchor horizontal component (§3.4) → SVG text-anchor for Text/Icon. */
-const SVG_ANCHOR_H: Record<AnchorH, "start" | "middle" | "end"> = {
+/** Pivot horizontal component (§3.4) → SVG text-anchor for Text/Icon. */
+const SVG_PIVOT_H: Record<PivotH, "start" | "middle" | "end"> = {
   left: "start",
   center: "middle",
   right: "end",
 };
 
 // ---------------------------------------------------------------------------
-// Nine-point anchor math (§3.4, M3)
+// Nine-point pivot math (§3.4, M3)
 // ---------------------------------------------------------------------------
 
-/** How far into the element each anchor component sits, as a fraction of its
+/** How far into the element each pivot component sits, as a fraction of its
  * extent (§3.4: fx/fy ∈ {0, ½, 1}). */
-export const ANCHOR_FRACTION_X: Record<AnchorH, number> = { left: 0, center: 0.5, right: 1 };
-export const ANCHOR_FRACTION_Y: Record<AnchorV, number> = { top: 0, center: 0.5, bottom: 1 };
+export const PIVOT_FRACTION_X: Record<PivotH, number> = { left: 0, center: 0.5, right: 1 };
+export const PIVOT_FRACTION_Y: Record<PivotV, number> = { top: 0, center: 0.5, bottom: 1 };
 
 /**
- * Top-left drawing origin of an anchored BOX shape (Rectangle, Image,
- * TextBox — §3.4): the shape's x/y name its anchor point, so the origin
+ * Top-left drawing origin of a pivoted BOX shape (Rectangle, Image,
+ * TextBox — §3.4): the shape's x/y name its pivot point, so the origin
  * backs off by (width·fx, height·fy). `box` is the CONCRETE box — for an
  * Image with an `auto` dimension callers pass the RESOLVED box
  * (resolveImageBox), so the offset applies at render time once the natural
- * size is known, and the square fallback box anchors while the ratio is
- * unknown (the same load-time rule as `auto` itself). Pure and exported for
- * the markup tests.
+ * size is known, and the square fallback box pivots on that point while the
+ * ratio is unknown (the same load-time rule as `auto` itself). Pure and
+ * exported for the markup tests.
  */
-export function anchoredBoxOrigin(
-  shape: { x: number; y: number; anchor: Anchor },
+export function pivotedBoxOrigin(
+  shape: { x: number; y: number; pivot: Pivot },
   box: { width: number; height: number },
 ): { x: number; y: number } {
   return {
-    x: shape.x - box.width * ANCHOR_FRACTION_X[shape.anchor.h],
-    y: shape.y - box.height * ANCHOR_FRACTION_Y[shape.anchor.v],
+    x: shape.x - box.width * PIVOT_FRACTION_X[shape.pivot.h],
+    y: shape.y - box.height * PIVOT_FRACTION_Y[shape.pivot.v],
   };
 }
 
 /**
- * Baseline y of an anchored Text/Icon line (§3.4 em-box semantics). The
- * shape's y names the `anchor.v` edge/center of the EM BOX, so the em TOP is
+ * Baseline y of a pivoted Text/Icon line (§3.4 em-box semantics). The
+ * shape's y names the `pivot.v` edge/center of the EM BOX, so the em TOP is
  * y − fy·size, and the baseline sits the per-family ascent below that top:
  *
  *   baseline = y − fy·size + ascent·size      (fy ∈ {0, ½, 1})
@@ -195,11 +195,11 @@ export function anchoredBoxOrigin(
  * constants as ever, never `dominant-baseline` (§4.2). Pure and exported
  * for the markup tests.
  */
-export function anchoredBaselineY(
-  shape: { y: number; size: number; anchor: Anchor },
+export function pivotedBaselineY(
+  shape: { y: number; size: number; pivot: Pivot },
   ascent: number,
 ): number {
-  return shape.y - ANCHOR_FRACTION_Y[shape.anchor.v] * shape.size + ascent * shape.size;
+  return shape.y - PIVOT_FRACTION_Y[shape.pivot.v] * shape.size + ascent * shape.size;
 }
 
 /** Error placeholders clamp the first diagnostic's message to this many
@@ -491,12 +491,12 @@ export function imagePlaceholderStroke(box: { width: number; height: number }): 
 /**
  * The §3.3 placeholder box: subtle while loading, warning-styled (amber, with
  * a diagonal cross so the mark survives rasterization without any font) when
- * the load failed. `box` is the RESOLVED geometry and the §3.4 anchor offset
+ * the load failed. `box` is the RESOLVED geometry and the §3.4 pivot offset
  * is taken from it — for concrete dimensions the placeholder occupies exactly
  * what the image would, so layout never shifts when the real art arrives; an
  * `auto` dimension resolves square here (the ratio is unknown by definition
- * while the placeholder shows), and the anchored box may shift once the true
- * ratio arrives — inherent to anchoring a load-time-sized box.
+ * while the placeholder shows), and the pivoted box may shift once the true
+ * ratio arrives — inherent to pivoting a load-time-sized box.
  */
 function renderImagePlaceholder(
   shape: ImageShape,
@@ -504,7 +504,7 @@ function renderImagePlaceholder(
   variant: "loading" | "failed",
   box: { width: number; height: number },
 ): ReactElement {
-  const origin = anchoredBoxOrigin(shape, box);
+  const origin = pivotedBoxOrigin(shape, box);
   const stroke = imagePlaceholderStroke(box);
   const failed = variant === "failed";
   return (
@@ -551,9 +551,9 @@ function renderImageTag(
   href: string,
   box: { width: number; height: number },
 ): ReactElement {
-  // §3.4: the anchor offsets the RESOLVED box — with an `auto` dimension the
+  // §3.4: the pivot offsets the RESOLVED box — with an `auto` dimension the
   // offset can only be known here, at render time, natural size in hand.
-  const origin = anchoredBoxOrigin(shape, box);
+  const origin = pivotedBoxOrigin(shape, box);
   return (
     <image
       key={index}
@@ -613,7 +613,7 @@ function roundQrCoord(n: number): number {
 }
 
 /**
- * QR modules → SVG (§7.1a). `anchoredBoxOrigin` places the size×size box
+ * QR modules → SVG (§7.1a). `pivotedBoxOrigin` places the size×size box
  * exactly like Rectangle/Image; inside it, one background `<rect>` covers
  * the whole box (including the quiet zone) and ONE `<path>` carries every
  * dark module — a single DOM node regardless of QR size, built as
@@ -624,7 +624,7 @@ function roundQrCoord(n: number): number {
  * each module's origin is rounded too — see `roundQrCoord`.
  */
 function renderQr(shape: QrShape, index: number): ReactElement {
-  const origin = anchoredBoxOrigin(shape, { width: shape.size, height: shape.size });
+  const origin = pivotedBoxOrigin(shape, { width: shape.size, height: shape.size });
   const grid = shape.moduleCount + QR_QUIET_ZONE_MODULES * 2;
   const unit = roundQrCoord(shape.size / grid);
   const unitStr = String(unit);
@@ -721,8 +721,8 @@ function renderShape(shape: Shape, index: number, images?: ResolvedImages): Reac
       return <LiveImage key={index} shape={shape} index={index} />;
     }
     case "rect": {
-      // Nine-point anchor (§3.4): x/y name the anchor point of the box.
-      const origin = anchoredBoxOrigin(shape, shape);
+      // Nine-point pivot (§3.4): x/y name the pivot point of the box.
+      const origin = pivotedBoxOrigin(shape, shape);
       return (
         <rect
           key={index}
@@ -735,8 +735,8 @@ function renderShape(shape: Shape, index: number, images?: ResolvedImages): Reac
       );
     }
     case "text":
-      // §3.4: horizontal anchoring via text-anchor, vertical via the em-box
-      // formula in anchoredBaselineY (top row ≡ the pre-M3 markup).
+      // §3.4: horizontal pivoting via SVG text-anchor, vertical via the
+      // em-box formula in pivotedBaselineY (top row ≡ the pre-M3 markup).
       // §3.3 (◆41): family AND ascent follow the chosen font: — geist's
       // ascent stays the tuned TEXT_ASCENT, the other eight use their own
       // generated ascent (ascentOf's doc comment).
@@ -744,10 +744,10 @@ function renderShape(shape: Shape, index: number, images?: ResolvedImages): Reac
         <text
           key={index}
           x={shape.x}
-          y={anchoredBaselineY(shape, ascentOf(shape.font))}
+          y={pivotedBaselineY(shape, ascentOf(shape.font))}
           fontSize={shape.size}
           fill={shape.color}
-          textAnchor={SVG_ANCHOR_H[shape.anchor.h]}
+          textAnchor={SVG_PIVOT_H[shape.pivot.h]}
           fontFamily={TEXT_FONT_FAMILIES[shape.font]}
         >
           {shape.text}
@@ -760,16 +760,16 @@ function renderShape(shape: Shape, index: number, images?: ResolvedImages): Reac
     case "icon":
       // The code IS the text content: known codes ligate into glyphs; an
       // unknown code deliberately stays raw text — that failed ligature is
-      // D005's visible indicator (§3.8 †), not a bug. Anchoring works like
+      // D005's visible indicator (§3.8 †), not a bug. Pivoting works like
       // Text, with Dicier's own ascent in the em-box formula.
       return (
         <text
           key={index}
           x={shape.x}
-          y={anchoredBaselineY(shape, ICON_ASCENT)}
+          y={pivotedBaselineY(shape, ICON_ASCENT)}
           fontSize={shape.size}
           fill={shape.color}
-          textAnchor={SVG_ANCHOR_H[shape.anchor.h]}
+          textAnchor={SVG_PIVOT_H[shape.pivot.h]}
           fontFamily={ICON_FONT_FAMILIES[shape.style]}
           style={ICON_STYLE}
         >
@@ -805,12 +805,12 @@ export function textBoxLineX(box: { x: number; width: number }, align: TextAncho
  * i × lineHeight × size of advance.
  */
 function renderTextBox(shape: TextBoxShape, index: number): ReactElement {
-  // Nine-point anchor (§3.4): the WHOLE box moves — x/y name its anchor
+  // Nine-point pivot (§3.4): the WHOLE box moves — x/y name its pivot
   // point, so the drawn origin backs off by (w·fx, h·fy) — while the
   // interior line layout (align within the box's width, the ascent
   // realization, the lineHeight advance) is unchanged, just computed from
   // the moved origin.
-  const origin = anchoredBoxOrigin(shape, shape);
+  const origin = pivotedBoxOrigin(shape, shape);
   const x = textBoxLineX({ x: origin.x, width: shape.width }, shape.align);
   const ascent = ascentOf(shape.font);
   return (

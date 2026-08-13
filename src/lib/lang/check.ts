@@ -48,16 +48,16 @@ import type {
   TemplateNode,
 } from "./ast";
 import type { Diagnostic, Range, Severity } from "./diagnostics";
-import type { Anchor, FontFace, IconStyle, ImageFit, QrLevel, TextBoxOverflow } from "./model";
+import type { FontFace, IconStyle, ImageFit, Pivot, QrLevel, TextBoxOverflow } from "./model";
 import {
-  ANCHOR_TOKENS,
   FONT_FACES,
   ICON_STYLES,
   IMAGE_FITS,
+  PIVOT_TOKENS,
   QR_LEVELS,
   TEXTBOX_OVERFLOWS,
-  parseAnchor,
   parseAssetSrc,
+  parsePivot,
 } from "./model";
 import { CSS_COLOR_NAMES } from "./css-colors";
 import { DICIER_CODES } from "./dicier-codes";
@@ -98,11 +98,11 @@ export type Resolution =
   | { kind: "enumCase"; enumName: string; caseName: string }
   | { kind: "colorName"; name: string }
   | { kind: "geometry"; keyword: "full" | "half" | "middle" }
-  /** Nine-point `anchor:` (§3.4, M3): carries the NORMALIZED {h, v} — every
+  /** Nine-point `pivot:` (§3.4, M3): carries the NORMALIZED {h, v} — every
    * spelling variant (either word order, `center`, the legacy aliases) is
    * indistinguishable downstream, contentHash included. */
-  | { kind: "anchor"; anchor: Anchor }
-  /** TextBox `align:` (§3.3, M3): same three words as anchor, but a box
+  | { kind: "pivot"; pivot: Pivot }
+  /** TextBox `align:` (§3.3, M3): same three words as pivot, but a box
    * aligns lines within its own width — a distinct kind so the evaluator
    * can never confuse the two vocabularies. */
   | { kind: "align"; keyword: "left" | "middle" | "right" }
@@ -330,19 +330,19 @@ interface ElementSpec {
  * to left, line_height to 1.3 × size, overflow to clip (M3); Qr color
  * defaults to black, background to white, level to m (§7.1a); Text/TextBox
  * font defaults to geist (M3 — ◆41). EVERY drawable element takes an
- * optional nine-point `anchor:` (§3.4, M3; default top_left). */
+ * optional nine-point `pivot:` (§3.4, M3; default top_left). */
 const ELEMENT_SPECS: Record<ElementNode["element"], ElementSpec> = {
-  Rectangle: { required: ["x", "y", "width", "height", "color"], optional: ["anchor"] },
-  Text: { required: ["x", "y", "size", "text"], optional: ["color", "anchor", "font"] },
+  Rectangle: { required: ["x", "y", "width", "height", "color"], optional: ["pivot"] },
+  Text: { required: ["x", "y", "size", "text"], optional: ["color", "pivot", "font"] },
   TextBox: {
     required: ["x", "y", "width", "height", "text", "size"],
-    optional: ["color", "align", "line_height", "overflow", "anchor", "font"],
+    optional: ["color", "align", "line_height", "overflow", "pivot", "font"],
   },
-  Icon: { required: ["x", "y", "size", "code"], optional: ["color", "anchor", "style"] },
-  Image: { required: ["x", "y", "width", "height", "src"], optional: ["fit", "anchor"] },
+  Icon: { required: ["x", "y", "size", "code"], optional: ["color", "pivot", "style"] },
+  Image: { required: ["x", "y", "width", "height", "src"], optional: ["fit", "pivot"] },
   Qr: {
     required: ["x", "y", "size", "data"],
-    optional: ["color", "background", "level", "anchor"],
+    optional: ["color", "background", "level", "pivot"],
   },
 };
 
@@ -939,7 +939,14 @@ class Checker {
         this.error("E007", `'as' is only allowed on a Card's 'loop:' property`, prop.asVar.range);
       }
       if (!spec.required.includes(key) && !spec.optional.includes(key)) {
-        this.error("E008", `Unknown property '${key}:' on ${el.element}`, prop.key.range);
+        // §3.4/◆36†: `anchor:` was renamed to `pivot:` — a saved project
+        // using the old name should fail loudly and self-explain why,
+        // rather than read like an ordinary unknown-property typo.
+        const hint =
+          key === "anchor"
+            ? ` — it was renamed to 'pivot:' (a future 'anchor:' will position relative to the card)`
+            : "";
+        this.error("E008", `Unknown property '${key}:' on ${el.element}${hint}`, prop.key.range);
         continue;
       }
       if (seenKeys.has(key)) {
@@ -987,8 +994,8 @@ class Checker {
     switch (key) {
       case "x": {
         // `middle` is legal ONLY as the ENTIRE x: value of Text/Icon (§3.4:
-        // sugar for `x: half` + `anchor: middle`; Rectangle and Image have no
-        // anchor, so `x: middle` there is E007 like any other misplacement).
+        // sugar for `x: half` + `pivot: middle`; Rectangle and Image get no
+        // such sugar, so `x: middle` there is E007 like any other misplacement).
         if (
           (el.element === "Text" || el.element === "Icon") &&
           value.kind === "Identifier" &&
@@ -1077,9 +1084,9 @@ class Checker {
         }
         return;
       }
-      case "anchor": {
-        // Nine-point anchors (§3.4, M3): every drawable element names which
-        // point of it x/y refer to. parseAnchor (model.ts) owns the accepted
+      case "pivot": {
+        // Nine-point pivots (§3.4, M3): every drawable element names which
+        // point of it x/y refer to. parsePivot (model.ts) owns the accepted
         // vocabulary — the canonical tokens in either word order, the
         // `center` shorthand, and the legacy Text/Icon words as top-row
         // aliases — and the recorded resolution carries the NORMALIZED
@@ -1088,23 +1095,23 @@ class Checker {
         // compatibility, not the language.
         if (value.kind === "Error") return;
         if (value.kind === "Identifier") {
-          const anchor = parseAnchor(value.name);
-          if (anchor) {
-            this.recordResolution(ctx, value, { kind: "anchor", anchor });
+          const pivot = parsePivot(value.name);
+          if (pivot) {
+            this.recordResolution(ctx, value, { kind: "pivot", pivot });
             return;
           }
         }
         this.error(
           "E008",
-          `anchor: must be one of ${ANCHOR_TOKENS.join(", ")} (either word order), or center`,
+          `pivot: must be one of ${PIVOT_TOKENS.join(", ")} (either word order), or center`,
           value.range,
         );
         return;
       }
       case "align": {
-        // TextBox only (ELEMENT_SPECS): the same three words as anchor, but
+        // TextBox only (ELEMENT_SPECS): the same three words as pivot, but
         // recorded as its own kind — a box aligns lines within its width
-        // (§3.3, M3). Resolved by expected type like anchor; E008 otherwise.
+        // (§3.3, M3). Resolved by expected type like pivot; E008 otherwise.
         if (value.kind === "Error") return;
         if (
           value.kind === "Identifier" &&
@@ -1156,7 +1163,7 @@ class Checker {
       }
       case "style": {
         // Icon only (ELEMENT_SPECS): a bare identifier from the closed ten-
-        // face vocabulary, resolved by expected type like anchor (§3.3, M2).
+        // face vocabulary, resolved by expected type like pivot (§3.3, M2).
         // Unlike codes (open list, W004) the faces ARE the full set — E008.
         if (value.kind === "Error") return;
         if (value.kind === "Identifier" && ICON_STYLE_SET.has(value.name)) {

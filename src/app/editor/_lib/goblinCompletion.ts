@@ -22,13 +22,12 @@
 
 import type { Bindings } from "@/lib/lang";
 import {
-  ANCHOR_TOKENS,
   CSS_COLOR_NAMES,
-  DEFAULT_ANCHOR,
   DEFAULT_FONT,
   DEFAULT_ICON_STYLE,
   DEFAULT_IMAGE_FIT,
   DEFAULT_LINE_HEIGHT,
+  DEFAULT_PIVOT,
   DEFAULT_QR_LEVEL,
   DEFAULT_TEXTBOX_OVERFLOW,
   DICIER_CODES,
@@ -36,6 +35,7 @@ import {
   FONT_FACES,
   ICON_STYLES,
   IMAGE_FITS,
+  PIVOT_TOKENS,
   QR_LEVELS,
   SHRINK_FLOOR,
   SIZE_PRESETS,
@@ -182,11 +182,11 @@ type BlockKind = ElementKind | "Repeat" | "Card" | "Template" | "Sheet" | "Enum"
 
 /** §3.3 property tables — mirrors check.ts's private ELEMENT_SPECS (pinned by
  * a compiler-probe test). Order here is the suggestion order. */
-/** §3.4 nine-point anchor (M3): one key detail for every drawable element. */
-const DEFAULT_ANCHOR_TOKEN = `${DEFAULT_ANCHOR.v}_${DEFAULT_ANCHOR.h}`;
-const ANCHOR_KEY = {
-  key: "anchor",
-  detail: `which point x/y name (optional, default ${DEFAULT_ANCHOR_TOKEN})`,
+/** §3.4 nine-point pivot (M3): one key detail for every drawable element. */
+const DEFAULT_PIVOT_TOKEN = `${DEFAULT_PIVOT.v}_${DEFAULT_PIVOT.h}`;
+const PIVOT_KEY = {
+  key: "pivot",
+  detail: `which point x/y name (optional, default ${DEFAULT_PIVOT_TOKEN})`,
 };
 
 const ELEMENT_KEYS: Record<ElementKind, { key: string; detail: string }[]> = {
@@ -196,7 +196,7 @@ const ELEMENT_KEYS: Record<ElementKind, { key: string; detail: string }[]> = {
     { key: "width", detail: "Number — units" },
     { key: "height", detail: "Number — units" },
     { key: "color", detail: "Color" },
-    ANCHOR_KEY,
+    PIVOT_KEY,
   ],
   Text: [
     { key: "x", detail: "Number — units (or middle)" },
@@ -204,7 +204,7 @@ const ELEMENT_KEYS: Record<ElementKind, { key: string; detail: string }[]> = {
     { key: "size", detail: "Number — em height in units" },
     { key: "text", detail: "Text" },
     { key: "color", detail: "Color (optional, default black)" },
-    ANCHOR_KEY,
+    PIVOT_KEY,
     { key: "font", detail: `bundled font face (optional, default ${DEFAULT_FONT})` },
   ],
   TextBox: [
@@ -218,7 +218,7 @@ const ELEMENT_KEYS: Record<ElementKind, { key: string; detail: string }[]> = {
     { key: "align", detail: "left | middle | right (optional)" },
     { key: "line_height", detail: `number × size (optional, default ${DEFAULT_LINE_HEIGHT})` },
     { key: "overflow", detail: `${TEXTBOX_OVERFLOWS.join(" | ")} (optional, default ${DEFAULT_TEXTBOX_OVERFLOW})` },
-    ANCHOR_KEY,
+    PIVOT_KEY,
     { key: "font", detail: `bundled font face (optional, default ${DEFAULT_FONT}) — wraps per font` },
   ],
   Icon: [
@@ -227,7 +227,7 @@ const ELEMENT_KEYS: Record<ElementKind, { key: string; detail: string }[]> = {
     { key: "size", detail: "Number — em height in units" },
     { key: "code", detail: "Text — Dicier code" },
     { key: "color", detail: "Color (optional, default black)" },
-    ANCHOR_KEY,
+    PIVOT_KEY,
     { key: "style", detail: `Dicier face (optional, default ${DEFAULT_ICON_STYLE})` },
   ],
   Image: [
@@ -237,7 +237,7 @@ const ELEMENT_KEYS: Record<ElementKind, { key: string; detail: string }[]> = {
     { key: "height", detail: "Number — units (or auto)" },
     { key: "src", detail: "Text — image URL" },
     { key: "fit", detail: `${IMAGE_FITS.join(" | ")} (optional, default ${DEFAULT_IMAGE_FIT})` },
-    ANCHOR_KEY,
+    PIVOT_KEY,
   ],
   Qr: [
     { key: "x", detail: "Number — units" },
@@ -247,7 +247,7 @@ const ELEMENT_KEYS: Record<ElementKind, { key: string; detail: string }[]> = {
     { key: "color", detail: "Color (optional, default black)" },
     { key: "background", detail: "Color (optional, default white)" },
     { key: "level", detail: `${QR_LEVELS.join(" | ")} (optional, default ${DEFAULT_QR_LEVEL})` },
-    ANCHOR_KEY,
+    PIVOT_KEY,
   ],
 };
 
@@ -268,11 +268,11 @@ const CARD_KEYS: { key: string; detail: string }[] = [
 
 const ELEMENT_OPENERS: { key: string; detail: string }[] = [
   { key: "Rectangle", detail: "x y width height color" },
-  { key: "Text", detail: "x y size text (color anchor)" },
+  { key: "Text", detail: "x y size text (color pivot)" },
   { key: "TextBox", detail: "x y width height text size (color align line_height overflow)" },
-  { key: "Icon", detail: "x y size code (color anchor)" },
+  { key: "Icon", detail: "x y size code (color pivot)" },
   { key: "Image", detail: "x y width height src (fit)" },
-  { key: "Qr", detail: "x y size data (color background level anchor)" },
+  { key: "Qr", detail: "x y size data (color background level pivot)" },
   { key: "Repeat", detail: "<count expr> as <variable>" },
 ];
 
@@ -984,7 +984,7 @@ function valueSuggestions(
     // ---- element properties ------------------------------------------------
     case "x": {
       // `middle` must be the WHOLE value (E007), and only Text/Icon have the
-      // anchor sugar (§3.4) — Rectangle, Image, TextBox (which has align:,
+      // pivot sugar (§3.4) — Rectangle, Image, TextBox (which has align:,
       // §3.3 M3), and Qr (§7.1a) get plain geometry. An unknown block
       // (broken code) keeps offering it. full/half are Numbers and stay
       // legal mid-expression.
@@ -1030,31 +1030,31 @@ function valueSuggestions(
     case "background":
       // Qr only (§7.1a): the same Color vocabulary as color:.
       return [...colorSuggestions(), ...expressionExtras(beforeWord, scope(), snapshot)];
-    case "anchor": {
-      // Nine-point anchors (§3.4, M3): the nine canonical tokens plus the
+    case "pivot": {
+      // Nine-point pivots (§3.4, M3): the nine canonical tokens plus the
       // `center` shorthand, on every drawable element. Reversed word orders
       // (`center_bottom` ≡ `bottom_center`) and the legacy Text/Icon words
       // (left | middle | right — the top row) stay ACCEPTED by the checker
       // but are not offered: one spelling per point keeps the menu
       // scannable (documented decision).
-      const anchors: CompletionSuggestion[] = ANCHOR_TOKENS.map((a) => ({
+      const pivots: CompletionSuggestion[] = PIVOT_TOKENS.map((a) => ({
         label: a,
         insertText: a,
         kind: "value" as const,
         detail:
-          a === DEFAULT_ANCHOR_TOKEN
-            ? "anchor point (the default)"
-            : "anchor point (either word order works)",
+          a === DEFAULT_PIVOT_TOKEN
+            ? "pivot point (the default)"
+            : "pivot point (either word order works)",
         group: 0 as const,
       }));
-      anchors.push({
+      pivots.push({
         label: "center",
         insertText: "center",
         kind: "value",
         detail: "shorthand for center_center",
         group: 0,
       });
-      return anchors;
+      return pivots;
     }
     case "align":
       // TextBox only (§3.3, M3): where lines sit within the box's width.

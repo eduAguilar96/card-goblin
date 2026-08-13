@@ -331,7 +331,7 @@ describe("elements and Repeat (§3.3)", () => {
         "    color: black",
         "    background: white",
         "    level: h",
-        "    anchor: bottom_right",
+        "    pivot: bottom_right",
         "  Qr:",
         "    x: 0",
         "    y: 0",
@@ -345,7 +345,7 @@ describe("elements and Repeat (§3.3)", () => {
     expect(labelled.element).toBe("Qr");
     expect(labelled.label).not.toBeNull();
     expect(labelled.properties.map((q) => q.key.name)).toEqual([
-      "x", "y", "size", "data", "color", "background", "level", "anchor",
+      "x", "y", "size", "data", "color", "background", "level", "pivot",
     ]);
     const bare = tpl.children[1] as ElementNode;
     expect(bare.element).toBe("Qr");

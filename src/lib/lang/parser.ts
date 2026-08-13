@@ -8,7 +8,7 @@
  *   Rectangle, Text, TextBox, Icon, Image, Qr, Repeat, Front, Back) are only special in HEADER
  *   position — start of a line, followed by ':'. Everywhere else they are
  *   ordinary identifiers, so `column count: Number`, `[count]`, `x: full`,
- *   `anchor: right` all parse. Reserved words are however ILLEGAL as DECLARED
+ *   `pivot: right` all parse. Reserved words are however ILLEGAL as DECLARED
  *   names (§3.1): declaration names, column names, enum cases, and loop/repeat
  *   variables reject block-opener words with E001 (the declaration words and
  *   expression words already lex as keywords). Value positions still accept

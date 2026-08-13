@@ -16,9 +16,9 @@
  * - `size:` uses the X axis for `full`/`half` (the axis of an em height is
  *   genuinely ambiguous; X keeps `size: half` independent of `y_units`) —
  *   on TextBox too, for consistency with Text.
- * - `x: middle` forces the anchor's HORIZONTAL component to center even when
- *   an explicit `anchor:` is also written — the sugar wins horizontally; the
- *   anchor's vertical component still applies (§3.4, M3).
+ * - `x: middle` forces the pivot's HORIZONTAL component to center even when
+ *   an explicit `pivot:` is also written — the sugar wins horizontally; the
+ *   pivot's vertical component still applies (§3.4, M3).
  * - D005 fires only for COMPUTED icon codes: literal codes were already
  *   W004-checked at compile time (§3.8); re-reporting would double-flag.
  * - Text cells pass through verbatim (no trimming); trimming applies only
@@ -35,23 +35,23 @@ import type {
 } from "./ast";
 import type { CardBindings, ResolvableNode, Resolution } from "./check";
 import type {
-  Anchor,
   DataDiagnostic,
   FontFace,
   IconStyle,
   ImageFit,
   LoopCaseBinding,
+  Pivot,
   QrLevel,
   Shape,
   TextAnchor,
   TextBoxOverflow,
 } from "./model";
 import {
-  DEFAULT_ANCHOR,
   DEFAULT_FONT,
   DEFAULT_ICON_STYLE,
   DEFAULT_IMAGE_FIT,
   DEFAULT_LINE_HEIGHT,
+  DEFAULT_PIVOT,
   DEFAULT_QR_LEVEL,
   DEFAULT_TEXTBOX_OVERFLOW,
 } from "./model";
@@ -396,7 +396,7 @@ function readCell(res: Extract<Resolution, { kind: "column" }>, ctx: EvalContext
 
 /** Bare identifier: the checker's resolution says what it IS; we only
  * produce the value. Geometry `full`/`half` need the axis; `middle` and
- * `anchor` keywords are handled at the property level, never here. */
+ * `pivot` keywords are handled at the property level, never here. */
 function resolveIdentifier(
   expr: Extract<Expr, { kind: "Identifier" }>,
   ctx: EvalContext,
@@ -473,10 +473,10 @@ function evalElement(el: ElementNode, ctx: EvalContext): Shape {
         width: numberProp(el, "width", ctx, ctx.xUnits),
         height: numberProp(el, "height", ctx, ctx.yUnits),
         color: colorProp(el, ctx, null), // required (§3.3) — no default
-        anchor: anchorOf(el, ctx),
+        pivot: pivotOf(el, ctx),
       };
     case "Text": {
-      const { x, anchor } = xAndAnchor(el, ctx);
+      const { x, pivot } = xAndPivot(el, ctx);
       return {
         kind: "text",
         x,
@@ -489,7 +489,7 @@ function evalElement(el: ElementNode, ctx: EvalContext): Shape {
         // breaks belong to TextBox. Resolved here so the model, the hash,
         // and every renderer agree on the visible text.
         text: toText(evalExpr(requireProp(el, "text"), ctx, null)).replace(/\n/g, " "),
-        anchor,
+        pivot,
         font: fontOf(el, ctx),
       };
     }
@@ -525,7 +525,7 @@ function evalElement(el: ElementNode, ctx: EvalContext): Shape {
         size: layout.size,
         color: colorProp(el, ctx, "black"),
         align: alignOf(el, ctx),
-        anchor: anchorOf(el, ctx), // §3.4: moves the box; align lays lines in it
+        pivot: pivotOf(el, ctx), // §3.4: moves the box; align lays lines in it
         lineHeight,
         lines: layout.lines,
         clipped: layout.clipped,
@@ -534,7 +534,7 @@ function evalElement(el: ElementNode, ctx: EvalContext): Shape {
       };
     }
     case "Icon": {
-      const { x, anchor } = xAndAnchor(el, ctx);
+      const { x, pivot } = xAndPivot(el, ctx);
       const codeExpr = requireProp(el, "code");
       const code = toText(evalExpr(codeExpr, ctx, null));
       // D005 (§3.8 †): computed code not in the curated list — collect the
@@ -555,7 +555,7 @@ function evalElement(el: ElementNode, ctx: EvalContext): Shape {
         size: numberProp(el, "size", ctx, ctx.xUnits),
         color: colorProp(el, ctx, "black"),
         code,
-        anchor,
+        pivot,
         style: styleOf(el, ctx),
       };
     }
@@ -572,7 +572,7 @@ function evalElement(el: ElementNode, ctx: EvalContext): Shape {
         height: imageDimProp(el, "height", ctx, ctx.yUnits),
         src: toText(evalExpr(requireProp(el, "src"), ctx, null)),
         fit: fitOf(el, ctx),
-        anchor: anchorOf(el, ctx), // §3.4: applied to the RESOLVED box at render time
+        pivot: pivotOf(el, ctx), // §3.4: applied to the RESOLVED box at render time
       };
     case "Qr": {
       // §7.1a: data resolves like text (Text coercions apply, same as
@@ -597,7 +597,7 @@ function evalElement(el: ElementNode, ctx: EvalContext): Shape {
         size: numberProp(el, "size", ctx, ctx.xUnits),
         color: colorProp(el, ctx, "black"),
         background: backgroundProp(el, ctx),
-        anchor: anchorOf(el, ctx),
+        pivot: pivotOf(el, ctx),
         moduleCount: encoded.moduleCount,
         modules: encoded.modules,
       };
@@ -665,44 +665,44 @@ function backgroundProp(el: ElementNode, ctx: EvalContext): string {
   return v.value;
 }
 
-/** Text/Icon `x` + anchor (§3.4): `x: middle` (whole-value, checker-blessed)
- * → x = xUnits/2 AND a centered HORIZONTAL anchor component — an explicit
- * `anchor:` beside it keeps only its vertical say (§3.4: the sugar forces
+/** Text/Icon `x` + pivot (§3.4): `x: middle` (whole-value, checker-blessed)
+ * → x = xUnits/2 AND a centered HORIZONTAL pivot component — an explicit
+ * `pivot:` beside it keeps only its vertical say (§3.4: the sugar forces
  * the horizontal component to center; honoring a stray horizontal word
  * would silently un-center the element). Otherwise x evaluates on the X
- * axis and the full anchor comes from the property (default top-left). */
-function xAndAnchor(el: ElementNode, ctx: EvalContext): { x: number; anchor: Anchor } {
+ * axis and the full pivot comes from the property (default top-left). */
+function xAndPivot(el: ElementNode, ctx: EvalContext): { x: number; pivot: Pivot } {
   const expr = requireProp(el, "x");
   if (expr.kind === "Identifier") {
     const res = ctx.card.resolutions.get(expr);
     if (res?.kind === "geometry" && res.keyword === "middle") {
-      return { x: ctx.xUnits / 2, anchor: { h: "center", v: anchorOf(el, ctx).v } };
+      return { x: ctx.xUnits / 2, pivot: { h: "center", v: pivotOf(el, ctx).v } };
     }
   }
   const v = evalExpr(expr, ctx, ctx.xUnits);
   if (v.kind !== "number") return poisoned();
-  return { x: v.value, anchor: anchorOf(el, ctx) };
+  return { x: v.value, pivot: pivotOf(el, ctx) };
 }
 
-/** Nine-point `anchor:` (§3.4, M3), on every drawable element: checker-
+/** Nine-point `pivot:` (§3.4, M3), on every drawable element: checker-
  * blessed identifier or the top-left default. The checker already NORMALIZED
  * the token (either word order, `center`, and the legacy aliases collapse to
  * one {h, v}), so explicit-default ≡ omitted and alias ≡ canonical by
  * construction — the shape, and therefore the contentHash, can't tell the
  * spellings apart. Offsets are NOT baked into x/y here: an Image `auto`
  * dimension resolves only at load time, so the RENDERER applies every
- * anchor's offset (consistency across kinds beats a micro-optimization). */
-function anchorOf(el: ElementNode, ctx: EvalContext): Anchor {
-  const expr = findProp(el, "anchor");
-  if (!expr) return DEFAULT_ANCHOR; // top-left (§3.4)
+ * pivot's offset (consistency across kinds beats a micro-optimization). */
+function pivotOf(el: ElementNode, ctx: EvalContext): Pivot {
+  const expr = findProp(el, "pivot");
+  if (!expr) return DEFAULT_PIVOT; // top-left (§3.4)
   if (expr.kind !== "Identifier") return poisoned();
   const res = ctx.card.resolutions.get(expr);
-  if (res?.kind !== "anchor") return poisoned();
-  return res.anchor;
+  if (res?.kind !== "pivot") return poisoned();
+  return res.pivot;
 }
 
 /** Icon `style:` (§3.3, M2): checker-blessed identifier or the flat_dark
- * default — the same follow-the-resolution shape as anchorOf. */
+ * default — the same follow-the-resolution shape as pivotOf. */
 function styleOf(el: ElementNode, ctx: EvalContext): IconStyle {
   const expr = findProp(el, "style");
   if (!expr) return DEFAULT_ICON_STYLE;
@@ -724,7 +724,7 @@ function fontOf(el: ElementNode, ctx: EvalContext): FontFace {
 }
 
 /** TextBox `align:` (§3.3, M3): checker-blessed identifier or the left
- * default — the same follow-the-resolution shape as anchorOf, reading the
+ * default — the same follow-the-resolution shape as pivotOf, reading the
  * distinct `align` resolution kind (a box aligns within its width). */
 function alignOf(el: ElementNode, ctx: EvalContext): TextAnchor {
   const expr = findProp(el, "align");

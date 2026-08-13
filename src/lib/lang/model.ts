@@ -78,8 +78,10 @@ export interface DataDiagnostic {
 // ---------------------------------------------------------------------------
 
 /** The three horizontal words of TextBox `align:` (§3.3); default `left`.
- * (Historically also Text/Icon `anchor:` — that property normalizes to the
- * nine-point `Anchor` below since M3, with these words as top-row aliases.) */
+ * Named for SVG's `text-anchor`, which these words realize (§3.4) — this
+ * type is NOT the element `pivot:` property (renamed from `anchor:`,
+ * 2026-08-13 — ◆36†), which merely borrowed the same three words pre-M3 as
+ * its legacy top-row aliases. */
 export type TextAnchor = "left" | "middle" | "right";
 
 /**
@@ -222,14 +224,15 @@ export type QrLevel = (typeof QR_LEVELS)[number];
 export const DEFAULT_QR_LEVEL: QrLevel = "m";
 
 /**
- * The nine canonical `anchor:` tokens (§3.4, M3), row-major top→bottom,
- * vertical word first. Closed set like ICON_STYLES — this array is the
- * single source of truth: the checker's E008 message, the autocomplete
- * values, and the wiki's anchor table (docFacts) all pin to it. The full
- * ACCEPTED spelling space is wider (reversed word orders, the `center`
- * shorthand, the legacy aliases) and is owned by `parseAnchor` below.
+ * The nine canonical `pivot:` tokens (§3.4, M3; property renamed from
+ * `anchor:` 2026-08-13 — ◆36†), row-major top→bottom, vertical word first.
+ * Closed set like ICON_STYLES — this array is the single source of truth:
+ * the checker's E008 message, the autocomplete values, and the wiki's pivot
+ * table (docFacts) all pin to it. The full ACCEPTED spelling space is wider
+ * (reversed word orders, the `center` shorthand, the legacy aliases) and is
+ * owned by `parsePivot` below.
  */
-export const ANCHOR_TOKENS = [
+export const PIVOT_TOKENS = [
   "top_left",
   "top_center",
   "top_right",
@@ -241,35 +244,37 @@ export const ANCHOR_TOKENS = [
   "bottom_right",
 ] as const;
 
-export type AnchorToken = (typeof ANCHOR_TOKENS)[number];
+export type PivotToken = (typeof PIVOT_TOKENS)[number];
 
-/** Horizontal component of a normalized anchor (§3.4). */
-export type AnchorH = "left" | "center" | "right";
+/** Horizontal component of a normalized pivot (§3.4). */
+export type PivotH = "left" | "center" | "right";
 
-/** Vertical component of a normalized anchor (§3.4). */
-export type AnchorV = "top" | "center" | "bottom";
+/** Vertical component of a normalized pivot (§3.4). */
+export type PivotV = "top" | "center" | "bottom";
 
 /**
- * A NORMALIZED nine-point anchor (§3.4): which point of the element the
- * shape's x/y refer to. Every spelling variant (either word order, `center`,
- * the legacy aliases) collapses to this form at check time, so alias ≡
- * canonical everywhere downstream — the contentHash included. Always
- * construct as `{h, v}` in that key order: the hash serializes with
- * JSON.stringify, which follows construction order.
+ * A NORMALIZED nine-point pivot (§3.4): which point of the ELEMENT ITSELF
+ * the shape's x/y refer to — a sprite's pivot, not a Unity/Figma-style
+ * anchor (a point on a PARENT the child aligns to; that is a distinct,
+ * unbuilt, card-relative-positioning feature — §3.4/◆36†). Every spelling
+ * variant (either word order, `center`, the legacy aliases) collapses to
+ * this form at check time, so alias ≡ canonical everywhere downstream — the
+ * contentHash included. Always construct as `{h, v}` in that key order: the
+ * hash serializes with JSON.stringify, which follows construction order.
  */
-export interface Anchor {
-  h: AnchorH;
-  v: AnchorV;
+export interface Pivot {
+  h: PivotH;
+  v: PivotV;
 }
 
-/** §3.4: `anchor:` is optional; the default is the top-left point — for
- * Text/Icon exactly the pre-M3 `anchor: left` behavior. Frozen because
- * shapes share the instance (the model is immutable by contract). */
-export const DEFAULT_ANCHOR: Anchor = Object.freeze({ h: "left", v: "top" });
+/** §3.4: `pivot:` is optional; the default is the top-left point — for
+ * Text/Icon exactly the legacy `left`-alias behavior. Frozen because shapes
+ * share the instance (the model is immutable by contract). */
+export const DEFAULT_PIVOT: Pivot = Object.freeze({ h: "left", v: "top" });
 
 /**
- * Normalize one `anchor:` token (§3.4), or null when it is outside the
- * vocabulary — the checker then E008s naming ANCHOR_TOKENS. Accepted, case-
+ * Normalize one `pivot:` token (§3.4), or null when it is outside the
+ * vocabulary — the checker then E008s naming PIVOT_TOKENS. Accepted, case-
  * sensitively like every bare-identifier vocabulary (`Top_Left` is E008):
  *
  * - the nine canonical tokens in EITHER word order (`center_bottom` ≡
@@ -279,7 +284,7 @@ export const DEFAULT_ANCHOR: Anchor = Object.freeze({ h: "left", v: "top" });
  * - the legacy Text/Icon words `left | middle | right` as aliases for the
  *   top row — existing cards keep meaning exactly what they meant.
  */
-export function parseAnchor(token: string): Anchor | null {
+export function parsePivot(token: string): Pivot | null {
   switch (token) {
     case "left":
       return { h: "left", v: "top" };
@@ -292,8 +297,8 @@ export function parseAnchor(token: string): Anchor | null {
   }
   const words = token.split("_");
   if (words.length !== 2) return null;
-  let h: AnchorH | null = null;
-  let v: AnchorV | null = null;
+  let h: PivotH | null = null;
+  let v: PivotV | null = null;
   for (const word of words) {
     if (word === "left" || word === "right") {
       if (h !== null) return null; // two horizontal words (left_right)
@@ -310,7 +315,7 @@ export function parseAnchor(token: string): Anchor | null {
   return { h: h ?? "center", v: v ?? "center" };
 }
 
-/** §3.3; x/y name the box's `anchor` point (§3.4, default top-left). */
+/** §3.3; x/y name the box's `pivot` point (§3.4, default top-left). */
 export interface RectShape {
   kind: "rect";
   x: number;
@@ -320,13 +325,13 @@ export interface RectShape {
   /** CSS color string (named color lower-cased, or `#hex` as written). */
   color: string;
   /** Which point of the box x/y name (§3.4); top-left when omitted. */
-  anchor: Anchor;
+  pivot: Pivot;
 }
 
 export interface TextShape {
   kind: "text";
   x: number;
-  /** The `anchor.v` edge/center of the em box (§3.4): with `v: top` — the
+  /** The `pivot.v` edge/center of the em box (§3.4): with `v: top` — the
    * default — the TOP, exactly as before M3. The renderer realizes the
    * baseline via an ascent constant. */
   y: number;
@@ -334,9 +339,9 @@ export interface TextShape {
   size: number;
   color: string;
   text: string;
-  /** Nine-point (§3.4): `h` renders via text-anchor, `v` via em-box math.
-   * Default top-left ≡ the legacy `anchor: left`. */
-  anchor: Anchor;
+  /** Nine-point (§3.4): `h` renders via SVG text-anchor, `v` via em-box
+   * math. Default top-left ≡ the legacy `left` alias. */
+  pivot: Pivot;
   /** Which face draws the text (§3.3, M3 — ◆41); `geist` when omitted, the
    * pre-existing default. Affects both the renderer's font-family AND (on
    * TextBox) the wrap engine's per-character advances — see wrap.ts. */
@@ -353,7 +358,7 @@ export interface IconShape {
    * the failed ligature is its own visible indicator. */
   code: string;
   /** Nine-point (§3.4), em-box semantics like TextShape's. */
-  anchor: Anchor;
+  pivot: Pivot;
   /** Which Dicier face draws the glyph (§3.3); `flat_dark` when omitted. */
   style: IconStyle;
 }
@@ -382,8 +387,9 @@ export interface ImageShape {
   fit: ImageFit;
   /** Which point of the box x/y name (§3.4). With an `auto` dimension the
    * offset applies to the box the renderer RESOLVES at load time — the
-   * square fallback box anchors until the art's ratio is known. */
-  anchor: Anchor;
+   * square fallback box pivots on this point until the art's ratio is
+   * known. */
+  pivot: Pivot;
 }
 
 /**
@@ -397,7 +403,7 @@ export interface ImageShape {
  */
 export interface TextBoxShape {
   kind: "textbox";
-  /** The box's `anchor` point (§3.4), like Rectangle. */
+  /** The box's `pivot` point (§3.4), like Rectangle. */
   x: number;
   y: number;
   width: number;
@@ -407,12 +413,12 @@ export interface TextBoxShape {
   size: number;
   color: string;
   /** How each line aligns within the box's WIDTH (§3.3); default `left`.
-   * Orthogonal to `anchor`: align places lines in the box, anchor places
+   * Orthogonal to `pivot`: align places lines in the box, pivot places
    * the box on the card. */
   align: TextAnchor;
   /** Which point of the box x/y name (§3.4): the whole box moves; the
    * interior line layout is unchanged. */
-  anchor: Anchor;
+  pivot: Pivot;
   /** Multiplier on `size` — baseline advance in units is lineHeight × size. */
   lineHeight: number;
   /** The resolved, wrapped lines, top to bottom. May contain empty strings
@@ -432,7 +438,7 @@ export interface TextBoxShape {
 }
 
 /**
- * A scannable QR code from resolved Text data (§7.1a). Square and anchored
+ * A scannable QR code from resolved Text data (§7.1a). Square and pivoted
  * like Rectangle/Image (`size` is the box's side length in units). Encoding
  * happens at EVAL time (pure, deterministic — the wrap.ts precedent): the
  * shape carries the RESOLVED module matrix, never the source data or the
@@ -440,7 +446,7 @@ export interface TextBoxShape {
  */
 export interface QrShape {
   kind: "qr";
-  /** The box's `anchor` point (§3.4), like Rectangle. */
+  /** The box's `pivot` point (§3.4), like Rectangle. */
   x: number;
   y: number;
   /** Side length of the square box, in units. */
@@ -452,7 +458,7 @@ export interface QrShape {
    * the card designer's job, not a diagnostic. */
   background: string;
   /** Which point of the box x/y name (§3.4); top-left when omitted. */
-  anchor: Anchor;
+  pivot: Pivot;
   /** Modules per side — one of the legal QR sizes, 21 + 4k. */
   moduleCount: number;
   /** Row-major "1" (dark) / "0" (light) string, length moduleCount². The

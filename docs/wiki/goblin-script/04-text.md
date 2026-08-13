@@ -19,7 +19,7 @@ Text: "Title"
   text: [name]
 ```
 
-`x y size text` are required; `color` (default `black`) and `anchor` (default
+`x y size text` are required; `color` (default `black`) and `pivot` (default
 `top_left`) are optional. `Text` always draws a single line — `size` is the text's
 height in units, not a font-size number. However long the resolved text is, it
 keeps going in one line rather than wrapping; when it needs to fill an area
@@ -27,8 +27,8 @@ instead, that's `TextBox`, below. A newline character in the resolved text (from
 cell data, say) renders as a space in `Text` — hard breaks are a `TextBox`
 feature.
 
-`anchor:` follows the same nine-point vocabulary every shape uses — see
-[Anchors](templates-and-shapes.md) on Templates & shapes.
+`pivot:` follows the same nine-point vocabulary every shape uses — see
+[Pivots](templates-and-shapes.md) on Templates & shapes.
 
 `font:` picks the typeface — `geist` (the default) or one of eight bundled serif
 and monospace faces. See [Fonts](#fonts) below for the full list.
@@ -54,7 +54,7 @@ side. The wrapping happens **at generation time, in the compiler** — the previ
 and the [exported PDF](pdf-export.md) show the exact same line breaks, always.
 
 - `align: left | middle | right` places each line within the box's width
-  (default `left`). It's independent of `anchor:`, which moves the box itself —
+  (default `left`). It's independent of `pivot:`, which moves the box itself —
   and `x: middle` is an error on TextBox, same as on Rectangle.
 - `line_height:` is a multiplier on `size` for the distance between baselines.
   The default is **1.3** × size; it must be a plain positive number, not an

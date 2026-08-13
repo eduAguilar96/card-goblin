@@ -38,7 +38,7 @@ const icon = (style: IconStyle): Shape => ({
   size: 1,
   color: "black",
   code: "HEARTS",
-  anchor: { h: "left", v: "top" },
+  pivot: { h: "left", v: "top" },
   style,
 });
 
@@ -50,7 +50,7 @@ const image = (src: string): Shape => ({
   height: 8,
   src,
   fit: "contain",
-  anchor: { h: "left", v: "top" },
+  pivot: { h: "left", v: "top" },
 });
 
 const text: Shape = {
@@ -60,7 +60,7 @@ const text: Shape = {
   size: 1,
   color: "black",
   text: "hi",
-  anchor: { h: "left", v: "top" },
+  pivot: { h: "left", v: "top" },
   font: "geist",
 };
 
@@ -73,7 +73,7 @@ const textbox: Shape = {
   size: 1,
   color: "black",
   align: "left",
-  anchor: { h: "left", v: "top" },
+  pivot: { h: "left", v: "top" },
   lineHeight: 1.3,
   lines: ["wrapped", "lines"],
   clipped: false,
@@ -227,7 +227,7 @@ describe("imageUrlsUsed (§3.3 M2)", () => {
       height: "auto",
       src: "https://x/banner.png",
       fit: "contain",
-      anchor: { h: "left", v: "top" },
+      pivot: { h: "left", v: "top" },
     };
     expect(imageUrlsUsed(new Map([["a:front", spec([banner])]]))).toEqual([
       "https://x/banner.png",
@@ -283,7 +283,7 @@ describe("auto dimension in the rasterized markup (§3.3, 2026-08-10)", () => {
     height: "auto",
     src: "https://x/banner.png",
     fit: "contain",
-    anchor: { h: "left", v: "top" },
+    pivot: { h: "left", v: "top" },
   };
 
   const serialize = (images: ResolvedImages): string =>

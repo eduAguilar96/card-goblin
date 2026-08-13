@@ -75,9 +75,9 @@ the section that elaborates it:
 | ◆31 | Autosave (§6.2) | localStorage, debounced **1 s**, `{version, code, sheets}`; an unreadable saved payload falls back to the demo but is copied to a **quarantine key** first | A corrupt project must stay recoverable by hand — quarantining is what stops the very next autosave from overwriting the only copy |
 | ◆32 | Autocomplete (§6.3) | **Pure `computeCompletions()`** outside Monaco; its property/value tables **pinned to `check.ts`'s own specs** by E008-probe tests | Suggestions and the checker must never disagree about what's legal — pinning them with tests is what keeps that true as the language grows |
 | ◆33 | Custom card sizes (§3.4) | `width_mm:` + `height_mm:` as **two ordinary Number properties**, required together, exact to 0.01 mm | Zero new grammar — parser, checker, autocomplete, and docs all extend mechanically |
-| ◆34 | Icon style (§3.3) | `style:` bare identifier selecting one of **Dicier's ten faces** (default `flat_dark`), resolved by expected type like `anchor:`; each face its own `@font-face` | Supersedes ◆28's single-face slice default; per-face loading keeps unused faces out of the download |
+| ◆34 | Icon style (§3.3) | `style:` bare identifier selecting one of **Dicier's ten faces** (default `flat_dark`), resolved by expected type like `pivot:`; each face its own `@font-face` | Supersedes ◆28's single-face slice default; per-face loading keeps unused faces out of the download |
 | ◆35 | Image element (§3.3) | Sixth drawable element; `fit: contain\|cover\|stretch` via SVG `preserveAspectRatio`; exactly one dimension may be **`auto`** (derives from the art's ratio) | Reuses the existing element/geometry machinery rather than a special-cased image system; `auto` answers "size the box from the art" without new syntax |
-| ◆36 | Anchors (§3.4) | **Nine-point `anchor:`** vocabulary on every drawable element, either word order accepted, `center` = `center_center`; legacy `left\|middle\|right` kept as aliases for the top row | One placement vocabulary for every shape, a direct user requirement; aliasing (not replacing) the legacy values means existing cards render unchanged |
+| ◆36† | Pivots (§3.4) | **Nine-point `pivot:`** vocabulary on every drawable element, either word order accepted, `center` = `center_center`; legacy `left\|middle\|right` kept as aliases for the top row — **renamed from `anchor:`** (M3, 2026-08-13): it names which point of the SHAPE ITSELF `x`/`y` place (a sprite's *pivot*), not a point on a PARENT the shape aligns to (the Unity/Figma sense of *anchor*); freeing the name, instead of aliasing it, reserves `anchor:` for that card-relative-positioning feature, a separate planned future addition | One placement vocabulary for every shape, a direct user requirement; aliasing (not replacing) the legacy VALUES means existing cards render unchanged. The PROPERTY NAME was renamed outright, with no alias, because the confusion is real: `pivot: center_center` + `x: 0, y: 0` correctly centers the shape on ITSELF at the card's top-left corner, not "centered on the card" (that recipe is `x: half, y: half, pivot: center_center`) — keeping `anchor:` as a synonym would have permanently blocked it from ever getting its correct, different, future meaning |
 | ◆37 | Text wrapping (§7.2) | New `TextBox` element; **the compiler is the wrapping authority**, measuring against a generated Geist metrics table — the model carries resolved `lines`; `overflow: clip\|shrink` (60% floor) | Preview and PDF must agree by construction — compiler-side wrapping is the only way two different renderers show identical line breaks |
 | ◆38 | String escapes (§3.1) | `\n` (newline) and `\\` (literal backslash) are the lexer's **only** escapes besides `[[`; any other `\`-sequence is E001 | TextBox hard breaks need a way to write a newline inside a string literal; a minimal, closed escape set keeps errors loud on typos |
 | ◆39 | QR codes (§7.3) | A drawable **`Qr:` element**, not the sketched `QR(...)` call form; encoded at eval time so the shape carries the resolved module matrix, never the source data | The language has no call grammar, and custom sizes already rejected inventing one; an element reuses the practiced element pipeline (checker, evaluator, autocomplete) end to end |
@@ -113,7 +113,7 @@ Working name: **Goblin script**, file extension `.goblin` (cosmetic, revisit fre
   TextBox Icon Image Qr Repeat Front Back` — `Image` added M2 2026-08-09, `TextBox`
   added M3 2026-08-10, `Qr` added M3 2026-08-11), declaration words (`case column`),
   and expression structure (`if then else and or not as`). Everything else — including `count`,
-  `size`, `sheet`, `loop`, `x`, `color`, `anchor`, `left`, `right`, `full`, `half`,
+  `size`, `sheet`, `loop`, `x`, `color`, `pivot`, `left`, `right`, `full`, `half`,
   `middle`, `auto`, size presets, and CSS color names — is an ordinary identifier
   whose meaning comes from position and expected type. `[brackets]` always denote a
   data reference, so a column named `full` is `[full]`, never confused with the
@@ -175,24 +175,24 @@ own subsection below.
 
 | Element | Properties | Summary |
 |---|---|---|
-| `Rectangle` | `x y width height color anchor` | A filled box — §3.3.1. |
-| `Text` | `x y size color text anchor font` | One line of text — §3.3.2. |
-| `TextBox` | `x y width height text size color align line_height overflow anchor font` | Wrapped, multi-line text in a box — §3.3.3. |
-| `Icon` | `x y size color code anchor style` | A Dicier glyph, one of ten style faces — §3.3.4. |
-| `Image` | `x y width height src fit anchor` | Raster art from a URL or uploaded asset — §3.3.5. |
-| `Qr` | `x y size data color background level anchor` | A scannable QR code — §3.3.6. |
+| `Rectangle` | `x y width height color pivot` | A filled box — §3.3.1. |
+| `Text` | `x y size color text pivot font` | One line of text — §3.3.2. |
+| `TextBox` | `x y width height text size color align line_height overflow pivot font` | Wrapped, multi-line text in a box — §3.3.3. |
+| `Icon` | `x y size color code pivot style` | A Dicier glyph, one of ten style faces — §3.3.4. |
+| `Image` | `x y width height src fit pivot` | Raster art from a URL or uploaded asset — §3.3.5. |
+| `Qr` | `x y size data color background level pivot` | A scannable QR code — §3.3.6. |
 | `Repeat` | `Repeat: <Number expr> as <var>` (single line) | Draws its children N times — §3.3.7. |
 
 #### 3.3.1 Rectangle
 
-`x y width height color` required; `anchor` optional (default `top_left`,
+`x y width height color` required; `pivot` optional (default `top_left`,
 nine-point — §3.4, M3 2026-08-10). A filled box.
 
 #### 3.3.2 Text
 
-`x y size text` required; `color` (default `black`) and `anchor` (default
+`x y size text` required; `color` (default `black`) and `pivot` (default
 `top_left`) optional. Single line, always (◆24) — `size` is the em height in units.
-`anchor` is nine-point (§3.4); the legacy `left | middle | right` values alias the
+`pivot` is nine-point (§3.4); the legacy `left | middle | right` values alias the
 top row. Newline characters in the resolved text render as spaces (M3 2026-08-10)
 — hard breaks belong to `TextBox`.
 
@@ -214,7 +214,7 @@ LITERAL, default 1.3), `overflow: clip | shrink` (default `clip`), and `font:`
 (M3 2026-08-13, ◆41 — the same nine-value vocabulary as Text, §3.3.2, default
 `geist`) are optional.
 
-`align` lays lines within the box's width; the nine-point `anchor:` of §3.4 moves
+`align` lays lines within the box's width; the nine-point `pivot:` of §3.4 moves
 the box itself, and `x: middle` stays Text/Icon-only (E007 on `TextBox`).
 `line_height` means × `size` — baseline advance in units is `line_height × size`.
 
@@ -240,7 +240,7 @@ placeholder (⚑8).
 
 #### 3.3.4 Icon
 
-`x y size code` required; `color` (default `black`), `anchor` (default
+`x y size code` required; `color` (default `black`), `pivot` (default
 `top_left`), and `style` optional. A Dicier glyph; `code` is a Text expression —
 literal codes are checked against the curated list, and an unknown literal is a
 **W004 warning**, since the list is non-exhaustive (⚑10†).
@@ -248,12 +248,12 @@ literal codes are checked against the curated list, and an unknown literal is a
 `style:` (M2, agreed 2026-08-09) is an optional bare identifier — `flat_dark`
 (default), `flat_light`, `flat_heavy`, `block_dark`, `block_light`, `block_heavy`,
 `round_dark`, `round_light`, `round_heavy`, `pixel` — resolved by expected type
-like `anchor:`; an unknown value is E008. All ten faces are declared as
+like `pivot:`; an unknown value is E008. All ten faces are declared as
 `@font-face`; browsers fetch only the ones actually used.
 
 #### 3.3.5 Image
 
-(M2, agreed 2026-08-09) `x y width height src` required; `fit` and `anchor`
+(M2, agreed 2026-08-09) `x y width height src` required; `fit` and `pivot`
 optional. Raster art from a URL. `src:` is a Text expression (URLs may come from
 a sheet column); `fit:` is an optional bare identifier — `contain` (default) |
 `cover` | `stretch` — realized via SVG `preserveAspectRatio`.
@@ -291,7 +291,7 @@ spec's 4-module quiet zone is drawn INSIDE the declared box (so adjacent art can
 never break scanning) — total grid = `moduleCount + 8`, module unit = `size /
 grid`.
 
-`x: middle` is E007 (no anchor sugar — same as Rectangle/Image); `x/y/size`
+`x: middle` is E007 (no pivot sugar — same as Rectangle/Image); `x/y/size`
 geometry keywords behave as on `Icon`'s `size` (full/half legal, X-axis). `data:`
 too long for the level's capacity (even at QR version 40) → **D009**, a
 placeholder card (§3.8) — empty-string `data:` encodes normally, no special
@@ -346,10 +346,21 @@ Repeat: [health] as i
 - All coordinates/sizes are unit-valued expressions. Keywords: `full` = the axis's
   unit count, `half` = half of it, `middle` (**x-position of Text/Icon only**, ◆ —
   `y: middle` is E007) = horizontally centered (sugar for `x: half` +
-  `anchor: middle`).
-- **Nine-point anchors (M3, 2026-08-10, user requirement):** every drawable
-  element accepts `anchor:`, naming which point of the element `x`/`y` refer
-  to. Canonical values: `top_left` (default), `top_center`, `top_right`,
+  `pivot: middle`).
+- **Nine-point pivots (M3, 2026-08-10; renamed from `anchor:` M3 2026-08-13 —
+  ◆36†):** every drawable element accepts `pivot:`, naming which point OF THE
+  ELEMENT ITSELF `x`/`y` refer to — the element's own handle, the way a
+  sprite's *pivot* names a point on the sprite, NOT the way a Unity/Figma
+  *anchor* names a point on the PARENT a child aligns to (that is a distinct,
+  unbuilt, card-relative-positioning feature — ◆36† — which is why `anchor:`
+  was freed up rather than kept as an alias). **To center a shape on the
+  card:** pair the halfway coordinate with the halfway pivot —
+  `x: half, y: half, pivot: center_center` — so the card's own midpoint (from
+  `half`) and the shape's own center (from `center_center`) are the same
+  point. (The differently-useful `x: 0, y: 0, pivot: center_center` puts the
+  shape's center on the card's top-left CORNER — correct, but a common
+  surprise if "pivot" is misread as "anchor to this corner of the card".)
+  Canonical values: `top_left` (default), `top_center`, `top_right`,
   `center_left`, `center_center`, `center_right`, `bottom_left`,
   `bottom_center`, `bottom_right` — **either word order** is accepted
   (`center_bottom` ≡ `bottom_center`), `center` alone ≡ `center_center`, and
@@ -357,13 +368,13 @@ Repeat: [health] as i
   the top row (existing cards unchanged). Underscores, not hyphens — `-` is
   the minus operator. Unknown value → E008 naming the vocabulary.
   Semantics: box elements (Rectangle, Image, TextBox, Qr) offset by
-  `(width·fx, height·fy)`, fx/fy ∈ {0, ½, 1}; Text/Icon anchor horizontally
-  via `text-anchor` on the intrinsic line and vertically by the em box
-  (top = today's behavior; `y` names the anchored edge/center of the em).
+  `(width·fx, height·fy)`, fx/fy ∈ {0, ½, 1}; Text/Icon pivot horizontally
+  via SVG `text-anchor` on the intrinsic line and vertically by the em box
+  (top = today's behavior; `y` names the pivoted edge/center of the em).
   An Image with an `auto` dimension applies its offset at render time once
   the natural size is known (same load-time rule as `auto` itself).
   `x: middle` sugar is unchanged: it forces the horizontal component to
-  center; the vertical component still comes from `anchor:`. (Renderer keeps
+  center; the vertical component still comes from `pivot:`. (Renderer keeps
   the per-font ascent realization — `dy = ascent/em × size`, not
   `dominant-baseline`; §4.2.)
 
@@ -500,7 +511,7 @@ Template: MonsterFront
     x: 19
     y: 0.9
     size: 1.2
-    anchor: right
+    pivot: right
     text: "Cost: [cost]"
   Icon: "Attack"
     x: 1
@@ -797,7 +808,7 @@ warning has been enough in practice — §9.)
   suite pins them to the checker with E008 probes); value positions by expected
   type — size presets, sheet names, template names on `Front:`/`Back:`, enum names
   on `loop:`, CSS color names (◆21), the nine canonical tokens + `center` on
-  `anchor:` (M3 — aliases stay accepted, one spelling per point offered), full/half
+  `pivot:` (M3 — aliases stay accepted, one spelling per point offered), full/half
   (+ middle for x on Text/Icon) on geometry; `code:` strings → the full Dicier list
   with each code's source-list section header as detail (`DICIER_CODE_CATEGORIES`,
   generated alongside `DICIER_CODES`); `Enum.` → that enum's cases; bare cases where
@@ -882,7 +893,7 @@ template gives every card its own QR.
   at custom sizes). Properties: `x y size data` required (`size` = the
   square's side in units — QRs are square), optional `color` (default black),
   `background` (default white), `level` (error correction `l|m|q|h`, default
-  `m`), `anchor` (nine-point, standard). `data:` is a Text expression with
+  `m`), `pivot` (nine-point, standard). `data:` is a Text expression with
   standard coercions — `[column]`, interpolation, and conditionals all work.
 - **Encoding at EVAL time in the compiler** (pure, deterministic — the wrap
   precedent): the shape carries the resolved module matrix; the renderer

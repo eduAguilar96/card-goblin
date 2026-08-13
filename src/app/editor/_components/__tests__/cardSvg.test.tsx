@@ -10,12 +10,12 @@ import { renderToStaticMarkup } from "react-dom/server";
 import {
   compileProject,
   FONT_METRICS,
-  type Anchor,
   type DataDiagnostic,
   type Deck,
   type FontFace,
   type IconShape,
   type ImageShape,
+  type Pivot,
   type QrShape,
   type RectShape,
   type Shape,
@@ -30,12 +30,12 @@ import {
   ICON_ASCENT,
   IMAGE_PRESERVE_ASPECT,
   TEXT_ASCENT,
-  anchoredBaselineY,
-  anchoredBoxOrigin,
   cardSvgPropsEqual,
   faceHasTextBoxOverflow,
   imagePlaceholderStroke,
   imageStatusOf,
+  pivotedBaselineY,
+  pivotedBoxOrigin,
   resetImageStatusesForTests,
   resolveImageBox,
   setImageProbeForTests,
@@ -146,7 +146,7 @@ describe("CardSVG: Dragon front (demo model)", () => {
     });
   });
 
-  it("renders the cost right-anchored (anchor right → text-anchor end)", () => {
+  it("renders the cost right-pivoted (pivot right → text-anchor end)", () => {
     const cost = textTags(markup).find((t) => t.content === "Cost: 5");
     expect(cost).toBeDefined();
     expect(cost!.attrs).toMatchObject({
@@ -233,7 +233,7 @@ describe("CardSVG: Text font: picks the family and the per-face ascent (§3.3 M3
     const title = textTags(markup).find((t) => t.content === "Dragon")!;
     expect(title.attrs["font-family"]).toBe("CormorantGaramond-Bold");
 
-    // The shape's declared y is 0.7, size 1.6, top anchor (§3.4 default):
+    // The shape's declared y is 0.7, size 1.6, top pivot (§3.4 default):
     // baseline = y + ascent × size — with garamond_bold's OWN generated
     // ascent, which must differ from Geist's hand-tuned 0.73 (the whole
     // point of ascentOf's per-face routing).
@@ -268,7 +268,7 @@ describe("CardFaceSvg: TextBox font: picks the family and the per-face ascent (�
     size: 1.5,
     color: "navy",
     align: "left",
-    anchor: { h: "left", v: "top" },
+    pivot: { h: "left", v: "top" },
     lineHeight: 1.3,
     lines: ["first", "second"],
     clipped: false,
@@ -362,7 +362,7 @@ describe("CardFaceSvg: TextBox shapes (§3.3 M3)", () => {
     size: 1.5,
     color: "navy",
     align: "left",
-    anchor: { h: "left", v: "top" },
+    pivot: { h: "left", v: "top" },
     lineHeight: 1.3,
     lines: ["first", "second", "third"],
     clipped: false,
@@ -403,7 +403,7 @@ describe("CardFaceSvg: TextBox shapes (§3.3 M3)", () => {
     }
   });
 
-  it("align middle/right anchor each line at the box's center/right edge", () => {
+  it("align middle/right positions each line at the box's center/right edge", () => {
     const middle = render(boxShape({ align: "middle" }));
     expect(parseAttrs(/<text\b([^>]*)>/.exec(middle)![1])["text-anchor"]).toBe("middle");
     for (const t of tspans(middle)) expect(t.attrs.x).toBe("7"); // 2 + 10/2
@@ -466,7 +466,7 @@ describe("CardSVG: the clipped/shrunk badge (§3.3 M3)", () => {
     size: 1,
     color: "black",
     align: "left",
-    anchor: { h: "left", v: "top" },
+    pivot: { h: "left", v: "top" },
     lineHeight: 1.3,
     lines: ["a"],
     clipped: false,
@@ -522,7 +522,7 @@ describe("CardFaceSvg: Image shapes (§3.3 M2)", () => {
     height: 8,
     src: "https://example.com/a.png",
     fit,
-    anchor: { h: "left", v: "top" },
+    pivot: { h: "left", v: "top" },
   });
 
   const render = (shape: ImageShape, images?: ResolvedImages): string =>
@@ -609,7 +609,7 @@ describe("CardFaceSvg: auto dimension resolves at load time (§3.3)", () => {
     height: "auto",
     src: "https://example.com/banner.png",
     fit: "contain",
-    anchor: { h: "left", v: "top" },
+    pivot: { h: "left", v: "top" },
   };
 
   const render = (shape: ImageShape, images?: ResolvedImages): string =>
@@ -693,14 +693,14 @@ describe("CardFaceSvg: auto dimension resolves at load time (§3.3)", () => {
   });
 });
 
-// -- nine-point anchors (§3.4, M3) --------------------------------------------
+// -- nine-point pivots (§3.4, M3) ---------------------------------------------
 
-describe("CardFaceSvg: nine-point anchors (§3.4 M3)", () => {
+describe("CardFaceSvg: nine-point pivots (§3.4 M3)", () => {
   const render = (face: Shape[], images?: ResolvedImages): string =>
     renderToStaticMarkup(
       <CardFaceSvg xUnits={20} yUnits={28} face={face} images={images} />,
     );
-  const anchor = (h: Anchor["h"], v: Anchor["v"]): Anchor => ({ h, v });
+  const pivot = (h: Pivot["h"], v: Pivot["v"]): Pivot => ({ h, v });
 
   it("Rectangle bottom_right at x10,y10 w4,h2 draws the rect at 6,8 (hand-computed)", () => {
     const shape: RectShape = {
@@ -710,14 +710,14 @@ describe("CardFaceSvg: nine-point anchors (§3.4 M3)", () => {
       width: 4,
       height: 2,
       color: "teal",
-      anchor: anchor("right", "bottom"),
+      pivot: pivot("right", "bottom"),
     };
     const [rect] = rectTags(render([shape]));
     expect(rect).toMatchObject({ x: "6", y: "8", width: "4", height: "2", fill: "teal" });
   });
 
-  it("anchoredBoxOrigin: the §3.4 (w·fx, h·fy) back-off, all nine points on a 4×2 box", () => {
-    const cases: [Anchor["h"], Anchor["v"], number, number][] = [
+  it("pivotedBoxOrigin: the §3.4 (w·fx, h·fy) back-off, all nine points on a 4×2 box", () => {
+    const cases: [Pivot["h"], Pivot["v"], number, number][] = [
       ["left", "top", 10, 10],
       ["center", "top", 8, 10],
       ["right", "top", 6, 10],
@@ -730,7 +730,7 @@ describe("CardFaceSvg: nine-point anchors (§3.4 M3)", () => {
     ];
     for (const [h, v, x, y] of cases) {
       expect(
-        anchoredBoxOrigin({ x: 10, y: 10, anchor: anchor(h, v) }, { width: 4, height: 2 }),
+        pivotedBoxOrigin({ x: 10, y: 10, pivot: pivot(h, v) }, { width: 4, height: 2 }),
         `${h}/${v}`,
       ).toEqual({ x, y });
     }
@@ -744,7 +744,7 @@ describe("CardFaceSvg: nine-point anchors (§3.4 M3)", () => {
       size: 2,
       color: "black",
       text: "mid",
-      anchor: anchor("center", "center"),
+      pivot: pivot("center", "center"),
       font: "geist",
     };
     const t = textTags(render([shape])).find((x) => x.content === "mid")!;
@@ -752,12 +752,12 @@ describe("CardFaceSvg: nine-point anchors (§3.4 M3)", () => {
     // Em top = y − size/2; baseline = top + ascent·size. Written with the
     // renderer's operation order so the float math is bit-identical.
     expect(t.attrs.y).toBe(String(10 - 1 + TEXT_ASCENT * 2));
-    // Horizontal anchoring is text-anchor's job — x passes through as-is.
+    // Horizontal pivoting is text-anchor's job — x passes through as-is.
     expect(t.attrs.x).toBe("5");
   });
 
   it("Text vertical rows: top ≡ the legacy baseline; center/bottom back off ½/1 em", () => {
-    const yAt = (v: Anchor["v"]): string => {
+    const yAt = (v: Pivot["v"]): string => {
       const shape: TextShape = {
         kind: "text",
         x: 1,
@@ -765,7 +765,7 @@ describe("CardFaceSvg: nine-point anchors (§3.4 M3)", () => {
         size: 2,
         color: "black",
         text: "t",
-        anchor: anchor("left", v),
+        pivot: pivot("left", v),
         font: "geist",
       };
       return textTags(render([shape]))[0].attrs.y;
@@ -775,7 +775,7 @@ describe("CardFaceSvg: nine-point anchors (§3.4 M3)", () => {
     expect(yAt("bottom")).toBe(String(10 - 2 + TEXT_ASCENT * 2));
   });
 
-  it("Icon anchors run the same em-box formula with ICON_ASCENT", () => {
+  it("Icon pivots run the same em-box formula with ICON_ASCENT", () => {
     const shape: IconShape = {
       kind: "icon",
       x: 3,
@@ -783,7 +783,7 @@ describe("CardFaceSvg: nine-point anchors (§3.4 M3)", () => {
       size: 1.5,
       color: "red",
       code: "HEARTS",
-      anchor: anchor("right", "bottom"),
+      pivot: pivot("right", "bottom"),
       style: "flat_dark",
     };
     const t = textTags(render([shape]))[0];
@@ -791,20 +791,20 @@ describe("CardFaceSvg: nine-point anchors (§3.4 M3)", () => {
     expect(t.attrs.y).toBe(String(20 - 1.5 + ICON_ASCENT * 1.5));
   });
 
-  it("anchoredBaselineY is the pure form of the em-box formula", () => {
-    expect(anchoredBaselineY({ y: 10, size: 2, anchor: anchor("left", "top") }, TEXT_ASCENT)).toBe(
+  it("pivotedBaselineY is the pure form of the em-box formula", () => {
+    expect(pivotedBaselineY({ y: 10, size: 2, pivot: pivot("left", "top") }, TEXT_ASCENT)).toBe(
       10 + TEXT_ASCENT * 2,
     );
     expect(
-      anchoredBaselineY({ y: 10, size: 2, anchor: anchor("left", "center") }, TEXT_ASCENT),
+      pivotedBaselineY({ y: 10, size: 2, pivot: pivot("left", "center") }, TEXT_ASCENT),
     ).toBe(10 - 1 + TEXT_ASCENT * 2);
     expect(
-      anchoredBaselineY({ y: 10, size: 2, anchor: anchor("left", "bottom") }, ICON_ASCENT),
+      pivotedBaselineY({ y: 10, size: 2, pivot: pivot("left", "bottom") }, ICON_ASCENT),
     ).toBe(10 - 2 + ICON_ASCENT * 2);
   });
 
-  /** width: 16, height: auto, anchored at its bottom-center point (10, 20). */
-  const autoAnchored: ImageShape = {
+  /** width: 16, height: auto, pivoted at its bottom-center point (10, 20). */
+  const autoPivoted: ImageShape = {
     kind: "image",
     x: 10,
     y: 20,
@@ -812,14 +812,14 @@ describe("CardFaceSvg: nine-point anchors (§3.4 M3)", () => {
     height: "auto",
     src: "https://x/banner.png",
     fit: "contain",
-    anchor: { h: "center", v: "bottom" },
+    pivot: { h: "center", v: "bottom" },
   };
 
   it("Image bottom_center + auto height: the offset comes from the RESOLVED box", () => {
     // 200×100 art in a width:16 box → height 8 (resolveImageBox), so
     // bottom_center backs the origin off by (16/2, 8) → (2, 12).
     const markup = render(
-      [autoAnchored],
+      [autoPivoted],
       new Map([
         [
           "https://x/banner.png",
@@ -831,13 +831,13 @@ describe("CardFaceSvg: nine-point anchors (§3.4 M3)", () => {
     expect(attrs).toMatchObject({ x: "2", y: "12", width: "16", height: "8" });
   });
 
-  it("Image auto + anchor in the square-fallback states anchors the 16×16 square", () => {
-    // Loading (no resolutions): the square box (16×16) anchors → (2, 4).
-    const loading = render([autoAnchored]);
+  it("Image auto + pivot in the square-fallback states pivots the 16×16 square", () => {
+    // Loading (no resolutions): the square box (16×16) pivots → (2, 4).
+    const loading = render([autoPivoted]);
     expect(loading).toContain('data-image-placeholder="loading"');
     expect(rectTags(loading)[0]).toMatchObject({ x: "2", y: "4", width: "16", height: "16" });
-    // Failed: same anchored square, warning-styled, the cross spans it.
-    const failed = render([autoAnchored], new Map([["https://x/banner.png", null]]));
+    // Failed: same pivoted square, warning-styled, the cross spans it.
+    const failed = render([autoPivoted], new Map([["https://x/banner.png", null]]));
     expect(failed).toContain('data-image-placeholder="failed"');
     expect(rectTags(failed)[0]).toMatchObject({ x: "2", y: "4", width: "16", height: "16" });
     const lines = [...failed.matchAll(/<line\b([^>]*)\/?>/g)].map((m) => parseAttrs(m[1]));
@@ -854,7 +854,7 @@ describe("CardFaceSvg: nine-point anchors (§3.4 M3)", () => {
       size: 1.5,
       color: "navy",
       align: "middle",
-      anchor: anchor("right", "bottom"),
+      pivot: pivot("right", "bottom"),
       lineHeight: 1.3,
       lines: ["a", "b"],
       clipped: false,
@@ -886,7 +886,7 @@ describe("CardFaceSvg: Qr shapes (§7.1a)", () => {
     size: 10,
     color: "black",
     background: "white",
-    anchor: { h: "left", v: "top" },
+    pivot: { h: "left", v: "top" },
     moduleCount: 21,
     modules: "1" + "0".repeat(21 * 21 - 1),
   };
@@ -917,14 +917,14 @@ describe("CardFaceSvg: Qr shapes (§7.1a)", () => {
     expect([...markup.matchAll(/<path\b/g)]).toHaveLength(1);
   });
 
-  it("anchor bottom_right shifts the box by (size, size) — same anchoredBoxOrigin math as Rectangle/Image", () => {
-    const shifted: QrShape = { ...oneModule, anchor: { h: "right", v: "bottom" } };
+  it("pivot bottom_right shifts the box by (size, size) — same pivotedBoxOrigin math as Rectangle/Image", () => {
+    const shifted: QrShape = { ...oneModule, pivot: { h: "right", v: "bottom" } };
     const markup = render([shifted]);
     const [rect] = rectTags(markup);
     // top_left origin was (2,2); bottom_right backs off by (size, size).
     expect(rect).toMatchObject({ x: "-8", y: "-8", width: "10", height: "10" });
     expect(
-      anchoredBoxOrigin(shifted, { width: shifted.size, height: shifted.size }),
+      pivotedBoxOrigin(shifted, { width: shifted.size, height: shifted.size }),
     ).toEqual({ x: -8, y: -8 });
   });
 

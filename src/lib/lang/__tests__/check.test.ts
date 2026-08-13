@@ -9,14 +9,14 @@ import { describe, expect, it } from "vitest";
 import type { DataRef, ElementNode, Program, RepeatNode, TemplateDecl } from "../ast";
 import type { CheckResult } from "../check";
 import { check, SIZE_PRESETS } from "../check";
-import type { Anchor } from "../index";
+import type { Pivot } from "../index";
 import {
-  ANCHOR_TOKENS,
   compileSource,
   FONT_FACES,
   ICON_STYLES,
   IMAGE_FITS,
-  parseAnchor,
+  parsePivot,
+  PIVOT_TOKENS,
   TEXTBOX_OVERFLOWS,
 } from "../index";
 import type { Diagnostic } from "../diagnostics";
@@ -559,7 +559,7 @@ describe("E008 required properties", () => {
     expect(card.map((d) => d.code)).toEqual(["E008"]);
     expect(card[0].message).toBe("Unknown property 'foo:' on Card");
 
-    // style exists on Icon but NOT on Rectangle (§3.3) — anchor no longer
+    // style exists on Icon but NOT on Rectangle (§3.3) — pivot no longer
     // serves as the probe here: since M3 it is legal on EVERY drawable (§3.4).
     expect(
       codesOf(
@@ -578,14 +578,14 @@ describe("E008 required properties", () => {
     expect(noColor[0].message).toContain("'color:'");
   });
 
-  it("anchor must be in the nine-point vocabulary (§3.4) — full coverage in its own suite", () => {
-    expect(codesOf(withElement("Text:", [...TEXT_BASE, 'text: "a"', "anchor: up"]))).toEqual([
+  it("pivot must be in the nine-point vocabulary (§3.4) — full coverage in its own suite", () => {
+    expect(codesOf(withElement("Text:", [...TEXT_BASE, 'text: "a"', "pivot: up"]))).toEqual([
       "E008",
     ]);
-    expect(codesOf(withElement("Text:", [...TEXT_BASE, 'text: "a"', 'anchor: "left"']))).toEqual([
+    expect(codesOf(withElement("Text:", [...TEXT_BASE, 'text: "a"', 'pivot: "left"']))).toEqual([
       "E008",
     ]);
-    expect(codesOf(withElement("Text:", [...TEXT_BASE, 'text: "a"', "anchor: right"]))).toEqual([]);
+    expect(codesOf(withElement("Text:", [...TEXT_BASE, 'text: "a"', "pivot: right"]))).toEqual([]);
   });
 
   it("loop: requires an 'as <variable>' clause", () => {
@@ -731,12 +731,12 @@ describe("Text/TextBox font: (§3.3 M3, ◆41)", () => {
   });
 });
 
-// -- nine-point anchors (§3.4, M3) -------------------------------------------
+// -- nine-point pivots (§3.4, M3) ---------------------------------------------
 
-describe("nine-point anchor normalization (parseAnchor, §3.4)", () => {
-  /** The canonical grid, row-major — kept in ANCHOR_TOKENS order so the
+describe("nine-point pivot normalization (parsePivot, §3.4)", () => {
+  /** The canonical grid, row-major — kept in PIVOT_TOKENS order so the
    * token array and the normalization can never drift apart. */
-  const GRID: [string, Anchor][] = [
+  const GRID: [string, Pivot][] = [
     ["top_left", { h: "left", v: "top" }],
     ["top_center", { h: "center", v: "top" }],
     ["top_right", { h: "right", v: "top" }],
@@ -748,28 +748,28 @@ describe("nine-point anchor normalization (parseAnchor, §3.4)", () => {
     ["bottom_right", { h: "right", v: "bottom" }],
   ];
 
-  it("normalizes all nine canonical tokens (and GRID covers exactly ANCHOR_TOKENS)", () => {
-    expect(GRID.map(([token]) => token)).toEqual([...ANCHOR_TOKENS]);
-    for (const [token, anchor] of GRID) {
-      expect(parseAnchor(token), token).toEqual(anchor);
+  it("normalizes all nine canonical tokens (and GRID covers exactly PIVOT_TOKENS)", () => {
+    expect(GRID.map(([token]) => token)).toEqual([...PIVOT_TOKENS]);
+    for (const [token, pivot] of GRID) {
+      expect(parsePivot(token), token).toEqual(pivot);
     }
   });
 
   it("accepts either word order — every reversed spelling hits the same point", () => {
-    for (const [token, anchor] of GRID) {
+    for (const [token, pivot] of GRID) {
       const reversed = token.split("_").reverse().join("_");
-      expect(parseAnchor(reversed), reversed).toEqual(anchor);
+      expect(parsePivot(reversed), reversed).toEqual(pivot);
     }
   });
 
   it("`center` alone is center_center", () => {
-    expect(parseAnchor("center")).toEqual({ h: "center", v: "center" });
+    expect(parsePivot("center")).toEqual({ h: "center", v: "center" });
   });
 
   it("legacy left/middle/right alias the top row (existing cards unchanged)", () => {
-    expect(parseAnchor("left")).toEqual({ h: "left", v: "top" });
-    expect(parseAnchor("middle")).toEqual({ h: "center", v: "top" });
-    expect(parseAnchor("right")).toEqual({ h: "right", v: "top" });
+    expect(parsePivot("left")).toEqual({ h: "left", v: "top" });
+    expect(parsePivot("middle")).toEqual({ h: "center", v: "top" });
+    expect(parsePivot("right")).toEqual({ h: "right", v: "top" });
   });
 
   it("rejects unknowns, lone axis words, doubled axes, and any non-lowercase spelling", () => {
@@ -792,23 +792,23 @@ describe("nine-point anchor normalization (parseAnchor, §3.4)", () => {
       "Left",
       "",
     ]) {
-      expect(parseAnchor(bad), JSON.stringify(bad)).toBeNull();
+      expect(parsePivot(bad), JSON.stringify(bad)).toBeNull();
     }
   });
 });
 
-describe("anchor: on every drawable element (§3.4 M3)", () => {
+describe("pivot: on every drawable element (§3.4 M3)", () => {
   /** One valid spelling per element kind — canonical, reversed, shorthand,
    * and legacy all mixed on purpose. */
-  const CASES: { header: string; props: string[]; expected: Anchor }[] = [
+  const CASES: { header: string; props: string[]; expected: Pivot }[] = [
     {
       header: "Rectangle:",
-      props: ["x: 0", "y: 0", "width: 1", "height: 1", "color: teal", "anchor: bottom_right"],
+      props: ["x: 0", "y: 0", "width: 1", "height: 1", "color: teal", "pivot: bottom_right"],
       expected: { h: "right", v: "bottom" },
     },
     {
       header: "Text:",
-      props: [...TEXT_BASE, 'text: "a"', "anchor: center"],
+      props: [...TEXT_BASE, 'text: "a"', "pivot: center"],
       expected: { h: "center", v: "center" },
     },
     {
@@ -820,18 +820,18 @@ describe("anchor: on every drawable element (§3.4 M3)", () => {
         "height: 6",
         'text: "t"',
         "size: 1",
-        "anchor: center_bottom", // reversed spelling of bottom_center
+        "pivot: center_bottom", // reversed spelling of bottom_center
       ],
       expected: { h: "center", v: "bottom" },
     },
     {
       header: "Icon:",
-      props: ["x: 1", "y: 1", "size: 1", 'code: "HEARTS"', "anchor: left_center"],
+      props: ["x: 1", "y: 1", "size: 1", 'code: "HEARTS"', "pivot: left_center"],
       expected: { h: "left", v: "center" },
     },
     {
       header: "Image:",
-      props: ["x: 1", "y: 1", "width: 5", "height: 5", 'src: "a.png"', "anchor: middle"],
+      props: ["x: 1", "y: 1", "width: 5", "height: 5", 'src: "a.png"', "pivot: middle"],
       expected: { h: "center", v: "top" }, // legacy alias, now on Image too
     },
   ];
@@ -842,38 +842,56 @@ describe("anchor: on every drawable element (§3.4 M3)", () => {
       expect(result.diagnostics, header).toEqual([]);
       const tpl = result.bindings.templates.get("T") as TemplateDecl;
       const prop = (tpl.children[0] as ElementNode).properties.find(
-        (p) => p.key.name === "anchor",
+        (p) => p.key.name === "pivot",
       )!;
       expect(result.bindings.cards[0].resolutions.get(prop.value as never), header).toEqual({
-        kind: "anchor",
-        anchor: expected,
+        kind: "pivot",
+        pivot: expected,
       });
     }
   });
 
   it("an unknown value is E008 listing the canonical vocabulary", () => {
     const ds = diagsOf(withElement("Rectangle:", [
-      "x: 0", "y: 0", "width: 1", "height: 1", "color: teal", "anchor: up",
+      "x: 0", "y: 0", "width: 1", "height: 1", "color: teal", "pivot: up",
     ]));
     expect(ds.map((d) => d.code)).toEqual(["E008"]);
-    for (const token of ANCHOR_TOKENS) expect(ds[0].message).toContain(token);
+    for (const token of PIVOT_TOKENS) expect(ds[0].message).toContain(token);
     expect(ds[0].message).toContain("center");
     expect(ds[0].message).toContain("either word order");
   });
 
-  it("anchor is case-sensitive — Top_Left is E008 like any vocabulary", () => {
+  it("pivot is case-sensitive — Top_Left is E008 like any vocabulary", () => {
     expect(
-      codesOf(withElement("Icon:", ["x: 1", "y: 1", "size: 1", 'code: "HEARTS"', "anchor: Top_Left"])),
+      codesOf(withElement("Icon:", ["x: 1", "y: 1", "size: 1", 'code: "HEARTS"', "pivot: Top_Left"])),
     ).toEqual(["E008"]);
   });
 
   it("strings and expressions are E008 — a bare identifier is required", () => {
-    for (const bad of ['anchor: "top_left"', "anchor: 1", "anchor: 1 + 1"]) {
+    for (const bad of ['pivot: "top_left"', "pivot: 1", "pivot: 1 + 1"]) {
       expect(
         codesOf(withElement("Text:", [...TEXT_BASE, 'text: "a"', bad])),
         bad,
       ).toEqual(["E008"]);
     }
+  });
+
+  it("anchor: is the renamed property — E008 says so instead of a bare 'unknown property' (§3.4/◆36†)", () => {
+    const onText = diagsOf(withElement("Text:", [...TEXT_BASE, 'text: "a"', "anchor: right"]));
+    expect(onText.map((d) => d.code)).toEqual(["E008"]);
+    expect(onText[0].message).toBe(
+      "Unknown property 'anchor:' on Text — it was renamed to 'pivot:' (a future 'anchor:' will position relative to the card)",
+    );
+
+    const onRect = diagsOf(
+      withElement("Rectangle:", [
+        "x: 0", "y: 0", "width: 1", "height: 1", "color: teal", "anchor: right",
+      ]),
+    );
+    expect(onRect.map((d) => d.code)).toEqual(["E008"]);
+    expect(onRect[0].message).toBe(
+      "Unknown property 'anchor:' on Rectangle — it was renamed to 'pivot:' (a future 'anchor:' will position relative to the card)",
+    );
   });
 });
 
@@ -1037,7 +1055,7 @@ describe("Qr (§7.1a)", () => {
     }
   });
 
-  it("omitting level:/color:/background:/anchor: is legal — the defaults are the evaluator's business", () => {
+  it("omitting level:/color:/background:/pivot: is legal — the defaults are the evaluator's business", () => {
     expect(codesOf(withElement("Qr:", QR_BASE))).toEqual([]);
   });
 
@@ -1110,9 +1128,9 @@ describe("Qr (§7.1a)", () => {
     expect(ds[0].message).toContain("Text or Icon");
   });
 
-  it("anchor: is legal on Qr, resolved like every other drawable (§3.4)", () => {
+  it("pivot: is legal on Qr, resolved like every other drawable (§3.4)", () => {
     expect(
-      codesOf(withElement("Qr:", [...QR_BASE, "anchor: bottom_right"])),
+      codesOf(withElement("Qr:", [...QR_BASE, "pivot: bottom_right"])),
     ).toEqual([]);
   });
 
@@ -1339,7 +1357,7 @@ describe("TextBox (§3.3 M3)", () => {
     }
   });
 
-  it("x: middle is E007 on TextBox — it has align:, never the anchor sugar", () => {
+  it("x: middle is E007 on TextBox — it has align:, never the pivot sugar", () => {
     const ds = diagsOf(
       withElement("TextBox:", ["x: middle", ...BOX_BASE.slice(1)]),
     );
@@ -1355,8 +1373,8 @@ describe("TextBox (§3.3 M3)", () => {
     expect(ds[0].message).toContain("Image");
   });
 
-  it("align on Text is an unknown property (E008); anchor on TextBox is legal since §3.4", () => {
-    expect(codesOf(withElement("TextBox:", [...BOX_BASE, "anchor: middle"]))).toEqual([]);
+  it("align on Text is an unknown property (E008); pivot on TextBox is legal since §3.4", () => {
+    expect(codesOf(withElement("TextBox:", [...BOX_BASE, "pivot: middle"]))).toEqual([]);
     const aligned = diagsOf(
       withElement("Text:", [...TEXT_BASE, 'text: "t"', "align: middle"]),
     );

@@ -113,14 +113,14 @@ describe("demo fixture (§3.9)", () => {
     expect(color!.range.startCol).toBe(4);
   });
 
-  it("parses geometry keywords and anchors as ordinary identifiers (◆30)", () => {
+  it("parses geometry keywords and pivots as ordinary identifiers (◆30)", () => {
     const tpl = program.declarations[2] as TemplateDecl;
     const title = tpl.children[1] as ElementNode;
     const x = title.properties.find((p) => p.key.name === "x");
     expect(asKind(x!.value, "Identifier").name).toBe("middle");
     const cost = tpl.children[2] as ElementNode;
-    const anchor = cost.properties.find((p) => p.key.name === "anchor");
-    expect(asKind(anchor!.value, "Identifier").name).toBe("right");
+    const pivot = cost.properties.find((p) => p.key.name === "pivot");
+    expect(asKind(pivot!.value, "Identifier").name).toBe("right");
     const back = program.declarations[3] as TemplateDecl;
     const rect = back.children[0] as ElementNode;
     const width = rect.properties.find((p) => p.key.name === "width");

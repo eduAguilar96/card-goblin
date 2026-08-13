@@ -30,7 +30,7 @@ Template: MonsterFront
     x: 19
     y: 0.9
     size: 1.2
-    anchor: right
+    pivot: right
     text: "Cost: [cost]"
   Icon: "Attack"
     x: 1

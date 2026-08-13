@@ -8,7 +8,6 @@
  */
 import { describe, expect, it } from "vitest";
 import {
-  ANCHOR_TOKENS,
   compileSource,
   DEFAULT_FONT,
   DEFAULT_ICON_STYLE,
@@ -18,6 +17,7 @@ import {
   FONT_FACES,
   ICON_STYLES,
   IMAGE_FITS,
+  PIVOT_TOKENS,
   QR_LEVELS,
   SIZE_PRESETS,
 } from "@/lib/lang";
@@ -60,7 +60,7 @@ const FIXTURE = src(
   "    y: 2",
   "    size: 1",
   "    text: [flavor]",
-  "    anchor: middle",
+  "    pivot: middle",
   "Card: Monster",
   "  sheet: Monsters",
   "  size: poker",
@@ -345,26 +345,26 @@ describe("bracket refs", () => {
 // ---------------------------------------------------------------------------
 
 describe("property keys", () => {
-  it("Rectangle keys with type-hint details (anchor included, §3.4 M3)", () => {
+  it("Rectangle keys with type-hint details (pivot included, §3.4 M3)", () => {
     const r = at(src("Template: T", "  Rectangle:", "    ¦"));
-    expect(labels(r)).toEqual(["x", "y", "width", "height", "color", "anchor"]);
+    expect(labels(r)).toEqual(["x", "y", "width", "height", "color", "pivot"]);
     expect(byLabel(r, "color").detail).toBe("Color");
-    expect(byLabel(r, "anchor").detail).toContain("top_left");
+    expect(byLabel(r, "pivot").detail).toContain("top_left");
     expect(byLabel(r, "x").insertText).toBe("x: ");
   });
 
-  it("Text keys include text/anchor/font; Icon keys include code and style", () => {
+  it("Text keys include text/pivot/font; Icon keys include code and style", () => {
     expect(labels(at(src("Template: T", "  Text:", "    ¦")))).toEqual([
-      "x", "y", "size", "text", "color", "anchor", "font",
+      "x", "y", "size", "text", "color", "pivot", "font",
     ]);
     expect(labels(at(src("Template: T", "  Icon:", "    ¦")))).toEqual([
-      "x", "y", "size", "code", "color", "anchor", "style",
+      "x", "y", "size", "code", "color", "pivot", "style",
     ]);
   });
 
   it("Image keys include src and fit (§3.3 M2)", () => {
     const r = at(src("Template: T", "  Image:", "    ¦"));
-    expect(labels(r)).toEqual(["x", "y", "width", "height", "src", "fit", "anchor"]);
+    expect(labels(r)).toEqual(["x", "y", "width", "height", "src", "fit", "pivot"]);
     expect(byLabel(r, "src").detail).toBe("Text — image URL");
     expect(byLabel(r, "fit").detail).toContain("contain | cover | stretch");
   });
@@ -372,7 +372,7 @@ describe("property keys", () => {
   it("Qr keys include data/level/background (§7.1a)", () => {
     const r = at(src("Template: T", "  Qr:", "    ¦"));
     expect(labels(r)).toEqual([
-      "x", "y", "size", "data", "color", "background", "level", "anchor",
+      "x", "y", "size", "data", "color", "background", "level", "pivot",
     ]);
     expect(byLabel(r, "data").detail).toBe("Text — the encoded content");
     expect(byLabel(r, "background").detail).toBe("Color (optional, default white)");
@@ -383,7 +383,7 @@ describe("property keys", () => {
     const r = at(src("Template: T", "  TextBox:", "    ¦"));
     expect(labels(r)).toEqual([
       "x", "y", "width", "height", "text", "size", "color", "align", "line_height", "overflow",
-      "anchor", "font",
+      "pivot", "font",
     ]);
     expect(byLabel(r, "text").detail).toContain("hard break");
     expect(byLabel(r, "line_height").detail).toContain("1.3");
@@ -500,10 +500,10 @@ describe("value positions", () => {
     expect(labels(r)).toContain("if"); // expression still legal here
   });
 
-  it("anchor: offers the nine canonical tokens + center, default marked (§3.4 M3)", () => {
-    const r = at(src("Template: T", "  Text:", "    anchor: ¦"));
-    expect(labels(r)).toEqual([...ANCHOR_TOKENS, "center"]);
-    expect(byLabel(r, "top_left").detail).toBe("anchor point (the default)");
+  it("pivot: offers the nine canonical tokens + center, default marked (§3.4 M3)", () => {
+    const r = at(src("Template: T", "  Text:", "    pivot: ¦"));
+    expect(labels(r)).toEqual([...PIVOT_TOKENS, "center"]);
+    expect(byLabel(r, "top_left").detail).toBe("pivot point (the default)");
     expect(byLabel(r, "bottom_right").detail).toContain("either word order");
     expect(byLabel(r, "center").detail).toBe("shorthand for center_center");
     // The legacy aliases and reversed spellings stay ACCEPTED by the
@@ -511,18 +511,18 @@ describe("value positions", () => {
     expect(labels(r)).not.toContain("left");
     expect(labels(r)).not.toContain("middle");
     expect(labels(r)).not.toContain("center_bottom");
-    // Offered on the box elements too — anchor: is legal everywhere (§3.4).
-    expect(labels(at(src("Template: T", "  Rectangle:", "    anchor: ¦")))).toEqual([
-      ...ANCHOR_TOKENS, "center",
+    // Offered on the box elements too — pivot: is legal everywhere (§3.4).
+    expect(labels(at(src("Template: T", "  Rectangle:", "    pivot: ¦")))).toEqual([
+      ...PIVOT_TOKENS, "center",
     ]);
-    expect(labels(at(src("Template: T", "  Image:", "    anchor: ¦")))).toEqual([
-      ...ANCHOR_TOKENS, "center",
+    expect(labels(at(src("Template: T", "  Image:", "    pivot: ¦")))).toEqual([
+      ...PIVOT_TOKENS, "center",
     ]);
-    expect(labels(at(src("Template: T", "  TextBox:", "    anchor: ¦")))).toEqual([
-      ...ANCHOR_TOKENS, "center",
+    expect(labels(at(src("Template: T", "  TextBox:", "    pivot: ¦")))).toEqual([
+      ...PIVOT_TOKENS, "center",
     ]);
-    expect(labels(at(src("Template: T", "  Qr:", "    anchor: ¦")))).toEqual([
-      ...ANCHOR_TOKENS, "center",
+    expect(labels(at(src("Template: T", "  Qr:", "    pivot: ¦")))).toEqual([
+      ...PIVOT_TOKENS, "center",
     ]);
   });
 
@@ -598,7 +598,7 @@ describe("value positions", () => {
     expect(labels(at(src("Template: T", "  Image:", "    x: ¦")))).not.toContain("middle");
     // TextBox has align:, never the x: middle sugar (§3.3 M3 — E007).
     expect(labels(at(src("Template: T", "  TextBox:", "    x: ¦")))).not.toContain("middle");
-    // Qr has no anchor sugar either (§7.1a — mirrors Rectangle/Image).
+    // Qr has no pivot sugar either (§7.1a — mirrors Rectangle/Image).
     expect(labels(at(src("Template: T", "  Qr:", "    x: ¦")))).not.toContain("middle");
   });
 
@@ -688,7 +688,7 @@ describe("value positions", () => {
     expect(labels(r)).toContain("red");
     // A same-indent sibling line is a KEY position, not a continuation.
     const sibling = at(src("Template: T", "  Rectangle:", "    color: red", "    ¦"));
-    expect(labels(sibling)).toEqual(["x", "y", "width", "height", "color", "anchor"]);
+    expect(labels(sibling)).toEqual(["x", "y", "width", "height", "color", "pivot"]);
   });
 });
 
@@ -858,7 +858,7 @@ describe("compiler pins (E008 probes)", () => {
     "    width: full",
     "    height: half",
     "    color: navy",
-    "    anchor: bottom_right",
+    "    pivot: bottom_right",
     "  Repeat: [cost] as i",
     "    Text:",
     "      x: middle",
@@ -866,7 +866,7 @@ describe("compiler pins (E008 probes)", () => {
     "      size: 1",
     '      text: "Cost: [cost]"',
     "      color: black",
-    "      anchor: middle",
+    "      pivot: middle",
     "      font: garamond",
     "  Icon:",
     "    x: middle",
@@ -874,7 +874,7 @@ describe("compiler pins (E008 probes)", () => {
     "    size: 1",
     '    code: "HEARTS"',
     "    color: red",
-    "    anchor: right",
+    "    pivot: right",
     "    style: round_heavy",
     "  Image:",
     "    x: 2",
@@ -883,7 +883,7 @@ describe("compiler pins (E008 probes)", () => {
     "    height: 12",
     '    src: "https://example.com/[name].png"',
     "    fit: cover",
-    "    anchor: center",
+    "    pivot: center",
     "  TextBox:",
     "    x: 2",
     "    y: 17",
@@ -895,7 +895,7 @@ describe("compiler pins (E008 probes)", () => {
     "    align: middle",
     "    line_height: 1.3",
     "    overflow: shrink",
-    "    anchor: center_right",
+    "    pivot: center_right",
     "    font: courier_bold_italic",
     "  Qr:",
     "    x: 2",
@@ -905,7 +905,7 @@ describe("compiler pins (E008 probes)", () => {
     "    color: black",
     "    background: white",
     "    level: h",
-    "    anchor: bottom_left",
+    "    pivot: bottom_left",
     "Template: BackT",
     "  Rectangle:",
     "    x: 0",
@@ -991,7 +991,7 @@ describe("compiler pins (E008 probes)", () => {
     // decoy that must never be accepted. Front:/Back: are face lines, not
     // E008-probed properties — the clean PIN program pins those. Probing each
     // candidate on each block makes the pin bidirectional for OPTIONAL keys
-    // too: an accepted-but-unoffered key (anchor, color, loop, count…) fails
+    // too: an accepted-but-unoffered key (pivot, color, loop, count…) fails
     // the set equality, not just a missing REQUIRED one.
     const candidates = [
       ...new Set(Object.values(offered).flat().filter((k) => /^[a-z]/.test(k))),

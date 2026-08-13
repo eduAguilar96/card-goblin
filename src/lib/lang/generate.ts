@@ -59,7 +59,7 @@ import type {
   RenderModel,
   Shape,
 } from "./model";
-import { DEFAULT_ANCHOR } from "./model";
+import { DEFAULT_PIVOT } from "./model";
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -395,7 +395,7 @@ class Generator {
                     width: xUnits,
                     height: yUnits,
                     color: "white",
-                    anchor: DEFAULT_ANCHOR,
+                    pivot: DEFAULT_PIVOT,
                   },
                 ];
           } catch (err) {

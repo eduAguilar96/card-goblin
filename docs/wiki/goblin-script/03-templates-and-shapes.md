@@ -1,7 +1,7 @@
 ---
 title: Templates & shapes
 status: stable
-summary: Templates, the coordinate grid, the shape index, anchors, and Repeat — the drawing model every shape shares.
+summary: Templates, the coordinate grid, the shape index, pivots, and Repeat — the drawing model every shape shares.
 ---
 
 # Templates & shapes
@@ -56,21 +56,22 @@ card, whatever size the card turns out to be.
 
 | Shape | Required | Optional (default) | Notes |
 |---|---|---|---|
-| `Rectangle` | `x y width height color` | `anchor` (top_left) | a filled box |
-| `Text` | `x y size text` | `color` (black), `anchor` (top_left) | one line; `size` is text height in units — see [Text & TextBox](text.md) |
-| `TextBox` | `x y width height text size` | `color` (black), `align` (left), `line_height` (1.3), `overflow` (clip), `anchor` (top_left) | wrapped multi-line text in a box — see [Text & TextBox](text.md) |
-| `Icon` | `x y size code` | `color` (black), `anchor` (top_left), `style` (flat_dark) | a game glyph — see [Icons](icons.md) |
-| `Image` | `x y width height src` | `fit` (contain), `anchor` (top_left) | your own artwork, from a URL or an uploaded asset — see [Images](images.md) |
-| `Qr` | `x y size data` | `color` (black), `background` (white), `level` (m), `anchor` (top_left) | a scannable QR code — see [QR codes](qr-codes.md) |
+| `Rectangle` | `x y width height color` | `pivot` (top_left) | a filled box |
+| `Text` | `x y size text` | `color` (black), `pivot` (top_left) | one line; `size` is text height in units — see [Text & TextBox](text.md) |
+| `TextBox` | `x y width height text size` | `color` (black), `align` (left), `line_height` (1.3), `overflow` (clip), `pivot` (top_left) | wrapped multi-line text in a box — see [Text & TextBox](text.md) |
+| `Icon` | `x y size code` | `color` (black), `pivot` (top_left), `style` (flat_dark) | a game glyph — see [Icons](icons.md) |
+| `Image` | `x y width height src` | `fit` (contain), `pivot` (top_left) | your own artwork, from a URL or an uploaded asset — see [Images](images.md) |
+| `Qr` | `x y size data` | `color` (black), `background` (white), `level` (m), `pivot` (top_left) | a scannable QR code — see [QR codes](qr-codes.md) |
 | `Repeat: N as i` | — | — | draws its children N times — see below |
 
-## Anchors — which point `x`/`y` place
+## Pivots — which point of the shape `x`/`y` place
 
-Every shape takes an optional `anchor:` naming **which point of the shape** its
-`x`/`y` coordinates refer to. Nine points, spelled with underscores, vertical
-word first:
+Every shape takes an optional `pivot:` naming **which point of the shape
+itself** its `x`/`y` coordinates refer to — the shape's own handle, not a
+point on the card. Nine points, spelled with underscores, vertical word
+first:
 
-| `anchor:` | The point `x`/`y` place |
+| `pivot:` | The point `x`/`y` place |
 |---|---|
 | `top_left` | top-left corner — **the default** |
 | `top_center` | middle of the top edge |
@@ -82,9 +83,25 @@ word first:
 | `bottom_center` | middle of the bottom edge |
 | `bottom_right` | bottom-right corner |
 
-So `anchor: bottom_right` with `x: full` and `y: full` pins a shape to the
-card's bottom-right corner, and `anchor: center` with `x: half`, `y: half`
-centers it dead on — no more subtracting half the width by hand.
+**To center a shape on the card**, pair the halfway coordinate with the
+halfway pivot — reach for this any time you want something centered:
+
+```goblin
+x: half
+y: half
+pivot: center_center
+```
+
+`half` puts `x`/`y` at the card's own midpoint; `pivot: center_center` says
+that midpoint is the shape's OWN center too — so the shape's center lands
+exactly on the card's center. (`pivot: center_center` with `x: 0, y: 0` does
+something different, and it trips people up: it puts the shape's center on
+the card's top-left CORNER — correct once you know `x`/`y` is always a point
+on the card that the shape's own center gets placed at, but a common surprise
+if you expected it to pin a corner of the CARD instead.)
+
+So `pivot: bottom_right` with `x: full` and `y: full` pins a shape to the
+card's bottom-right corner.
 
 Spelling conveniences:
 
@@ -95,25 +112,25 @@ Spelling conveniences:
   aliases for the top row (`top_left`, `top_center`, `top_right`), so existing
   cards mean exactly what they always meant.
 
-What the anchor moves, per shape:
+What the pivot moves, per shape:
 
-- On **Rectangle, Image, TextBox, and Qr** the anchor moves the whole box:
-  `anchor: bottom_right` means `x`/`y` are the box's bottom-right corner.
+- On **Rectangle, Image, TextBox, and Qr** the pivot moves the whole box:
+  `pivot: bottom_right` means `x`/`y` are the box's bottom-right corner.
   Inside a TextBox, `align:` still lays each line within the box's width —
-  `align` places text *in* the box, `anchor` places the box *on the card*.
-- On **Text and Icon** the anchor applies to the drawn line itself:
+  `align` places text *in* the box, `pivot` places the box *on the card*.
+- On **Text and Icon** the pivot applies to the drawn line itself:
   horizontally it sets where the text starts, centers, or ends; vertically,
   `y` names the top, middle, or bottom of the text's height (`size:`). The
   default `top_left` is exactly the old behavior — `y` is the top of the line.
-- On an **Image with an `auto` dimension**, the anchor offsets the box the art
+- On an **Image with an `auto` dimension**, the pivot offsets the box the art
   actually resolves to. Until the image loads, the placeholder is a square, so
-  an anchored `auto` box can shift once the true ratio arrives — that's the
+  a pivoted `auto` box can shift once the true ratio arrives — that's the
   same load-time rule `auto` itself follows.
 
 `x: middle` is still shorthand for "horizontally centered" (Text and Icon only —
 `y: middle` is an error, and so is `x: middle` on Rectangle, Image, TextBox, or Qr).
-It always wins horizontally, and a written `anchor:` keeps its vertical say:
-`x: middle` + `anchor: bottom_left` centers horizontally and anchors the
+It always wins horizontally, and a written `pivot:` keeps its vertical say:
+`x: middle` + `pivot: bottom_left` centers horizontally and pivots the
 bottom of the line.
 
 ## `Repeat` — the interesting one
