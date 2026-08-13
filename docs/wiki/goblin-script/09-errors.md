@@ -16,6 +16,7 @@ kept as small as the mistake.
 | **Red squiggle in the code** | A code problem — typo, type mismatch, missing property. The preview and grid hold their last good state; the status bar shows "stale". |
 | **Red cell in the grid** | That cell's value doesn't fit its column: not a number, not a valid enum option, or empty but needed. Only the cards using that cell become placeholders. |
 | **A grey placeholder card** | One card's data couldn't be evaluated — a bad cell, a divide by zero, a runaway repeat. The error messages are printed on the card. |
+| **An amber dot on a card** | A [`TextBox`](text.md) on that card had its text clipped or shrunk to fit the box — not an error, just worth a look. |
 | **A dimmed spreadsheet row** | A brand-new, never-edited empty row. It's excluded from the deck until you type into it. |
 | **An icon showing raw text** like `HEARTZ` | An unknown [icon code](icons.md) — fix the spelling. |
 
@@ -39,7 +40,9 @@ Some things are suspicious rather than wrong, and warn instead of erroring:
 - a declaration nothing uses,
 - an explicit `y_units` that makes units non-square,
 - an icon code that isn't in the known list — it may still be a real glyph, since the
-  published list isn't exhaustive.
+  published list isn't exhaustive,
+- an `asset:` reference to an upload that isn't in your library — you might be about
+  to add it.
 
 ## Recovering
 

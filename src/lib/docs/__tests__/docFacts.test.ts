@@ -192,9 +192,9 @@ const NUMERIC_CLAIMS: {
     patterns: [/\*\*(\d[\d,]*) MB\*\*/g],
     expected: ASSET_MAX_BYTES / (1024 * 1024),
     // Scoped to the two pages that actually state the cap (adversarial m9)
-    // — templates-and-shapes' Image/assets section and the limits page —
-    // rather than the whole wiki, so this test only ever guards THIS claim.
-    text: () => `${pageText("templates-and-shapes")}\n${pageText("limits")}`,
+    // — the uploaded-assets page and the limits page — rather than the whole
+    // wiki, so this test only ever guards THIS claim.
+    text: () => `${pageText("assets")}\n${pageText("limits")}`,
   },
   {
     label: "TextBox default line_height (× size)",
@@ -340,7 +340,7 @@ describe("the icon-styles table matches ICON_STYLES", () => {
 // ---------------------------------------------------------------------------
 
 describe("the image-fit table matches IMAGE_FITS", () => {
-  const text = pageText("templates-and-shapes");
+  const text = pageText("images");
   /** `contain` → its What-it-does prose, from the table with a "fit" header. */
   const documented = new Map(
     tableWithHeader(text, "fit").rows.map(
@@ -367,7 +367,7 @@ describe("the image-fit table matches IMAGE_FITS", () => {
 // ---------------------------------------------------------------------------
 
 describe("the Qr level table matches QR_LEVELS", () => {
-  const text = pageText("templates-and-shapes");
+  const text = pageText("qr-codes");
   /** `m` → its What-it-does prose, from the table with a "level" header. */
   const documented = new Map(
     tableWithHeader(text, "level").rows.map(
@@ -433,7 +433,7 @@ describe("the anchor table matches ANCHOR_TOKENS", () => {
 // ---------------------------------------------------------------------------
 
 describe("the overflow table matches TEXTBOX_OVERFLOWS", () => {
-  const text = pageText("templates-and-shapes");
+  const text = pageText("text");
   /** `clip` → its What-it-does prose, from the table with an "overflow" header. */
   const documented = new Map(
     tableWithHeader(text, "overflow").rows.map(

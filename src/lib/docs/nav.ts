@@ -73,7 +73,7 @@ export const SECTIONS: readonly { id: string; title: string; blurb: string }[] =
   {
     id: "export-and-project",
     title: "Export & project",
-    blurb: "Getting cards onto paper, and where the project is heading.",
+    blurb: "Printing your deck, saving and moving your project, current limits, and the roadmap.",
   },
 ];
 

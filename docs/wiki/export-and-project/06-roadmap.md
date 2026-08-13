@@ -33,13 +33,12 @@ names, property names, enum cases, color names, icon codes. See
 plus pixel) via `style:` — see [Icons](icons.md).
 
 **The `Image` element.** Your own artwork on a card, from a URL — with `fit:`
-control and PDF embedding. See
-[Templates & shapes](templates-and-shapes.md).
+control and PDF embedding. See [Images](images.md).
 
 **Uploaded assets.** An Assets drawer for images local to your machine — upload,
 rename, delete, and reference them with `asset:<name>` in any `src:`, no hosting
 required. Bundled into [project files](project-files.md) so art travels with the
-project. See [Templates & shapes](templates-and-shapes.md).
+project. See [Uploaded assets](assets.md).
 
 **Project files.** Export the project as a file and import it back — backup,
 moving between browsers, and keeping more than one project. See
@@ -48,12 +47,12 @@ moving between browsers, and keeping more than one project. See
 **Text wrapping.** The `TextBox` element: multi-line text that wraps in the
 compiler itself, so the preview and the PDF always agree — with hard breaks
 (`\n` and newlines in cells), alignment, and clip/shrink overflow control. See
-[Templates & shapes](templates-and-shapes.md).
+[Text & TextBox](text.md).
 
 **QR codes.** The `Qr` element: scannable codes generated straight from sheet
 data, with error-correction levels and a scan-safe quiet zone — the idiom for
 giving every card in a deck its own code on the back. See
-[Templates & shapes](templates-and-shapes.md).
+[QR codes](qr-codes.md).
 
 ## Further out
 
@@ -63,6 +62,8 @@ giving every card in a deck its own code on the back. See
   are a separate, later piece.
 - **Rich text in boxes** — bold runs and inline icons inside a `TextBox`
   (run-based layout, a deliberate later design round).
+- **A browsable icon picker** — search and preview the [888 Dicier
+  codes](../reference/icons.md) visually instead of typing them from memory.
 
 ## Open questions
 

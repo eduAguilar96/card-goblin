@@ -19,7 +19,7 @@ Everything the editor would need to pick up where you left off:
 - every sheet's rows — including which rows you've touched, so dimmed pristine
   rows come back dimmed, and including values from columns you've removed
   (they resurface if the column comes back),
-- every [uploaded asset](templates-and-shapes.md) in your Assets drawer — the
+- every [uploaded asset](assets.md) in your Assets drawer — the
   art itself, not a reference to it, so the file is self-contained,
 - a format version, so future versions of CardGoblin can keep reading old files.
 

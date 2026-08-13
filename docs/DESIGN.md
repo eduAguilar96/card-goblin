@@ -1,9 +1,16 @@
 # CardGoblin — Design Document
 
-**Status:** Agreed design for the vertical slice (v1), **Revision A**.
-Decisions marked ⚑ were made during the 2026-08-03 design session; decisions marked ◆
-are working assumptions chosen without an explicit question — veto freely. Entries
-marked † were amended in Revision A after an adversarial review (change log in §10).
+**Status:** A living design document, not a one-time agreement. §1–§5 record the
+vertical slice (v1) as agreed and then revised once, after an adversarial review
+(§10); §3 (the language) is kept current as the normative reference for what has
+actually shipped, past the slice; §6 and §7 are the milestone 2 and milestone 3
+specs, each amended in place as its pieces shipped.
+Decisions marked ⚑ were made during the 2026-08-03 design session. Decisions marked
+◆ — including every row added after the slice (◆31 on) — are working assumptions
+chosen without an explicit question; veto freely. Entries marked † have been
+**amended since they were first decided**: most were amended together, in the
+Revision A adversarial review (change log in §10); later, one-off amendments carry
+their own date inline next to the † and aren't in that change log.
 
 ---
 
@@ -56,9 +63,25 @@ Every decision, its choice, and the one-line justification. Sections below elabo
 | ◆25 | Multiple loops | allowed; nested cross-product in declaration order | Trivial in the generator; avoids arbitrary limitation |
 | ◆26† | Sheet data lifecycle | compile never deletes data; orphaned columns kept for the session; **same-position/same-type column rename migrates data** | Data must survive typos *and* committed renames |
 | ◆27† | Expansion caps | 500 `Repeat` expansions per card **and 2,000 generated instances per Card** | A bad cell must not hang the preview — at either the repeat or the generator level |
-| ◆28 | Dicier style | slice loads **Flat-Dark** only; `style:` property deferred | One good default; style switching is additive |
+| ◆28 | Dicier style | slice loads **Flat-Dark** only; `style:` property deferred — **superseded**: M2 shipped all ten faces via `style:` (§3.3) | One good default at slice time; style switching is additive |
 | ◆29† | Pristine rows | never-edited all-empty rows are **dimmed in the grid and excluded from generation** (status bar reports exclusions) | Adding a row shouldn't spray D003 errors ×(loop cases) before the user can type |
 | ◆30† | Keyword policy | **contextual keywords**: only block-opening words + expression-structure words are reserved; property names are ordinary identifiers; `[brackets]` always mean data refs | Without this, `column count:` and `[count]` in our own demo are illegal |
+
+Decisions made after the slice, milestone by milestone — same format, each pointing at
+the section that elaborates it:
+
+| # | Decision | Choice | Why (short) |
+|---|----------|--------|-------------|
+| ◆31 | Autosave (§6.2) | localStorage, debounced **1 s**, `{version, code, sheets}`; an unreadable saved payload falls back to the demo but is copied to a **quarantine key** first | A corrupt project must stay recoverable by hand — quarantining is what stops the very next autosave from overwriting the only copy |
+| ◆32 | Autocomplete (§6.3) | **Pure `computeCompletions()`** outside Monaco; its property/value tables **pinned to `check.ts`'s own specs** by E008-probe tests | Suggestions and the checker must never disagree about what's legal — pinning them with tests is what keeps that true as the language grows |
+| ◆33 | Custom card sizes (§3.4) | `width_mm:` + `height_mm:` as **two ordinary Number properties**, required together, exact to 0.01 mm | Zero new grammar — parser, checker, autocomplete, and docs all extend mechanically |
+| ◆34 | Icon style (§3.3) | `style:` bare identifier selecting one of **Dicier's ten faces** (default `flat_dark`), resolved by expected type like `anchor:`; each face its own `@font-face` | Supersedes ◆28's single-face slice default; per-face loading keeps unused faces out of the download |
+| ◆35 | Image element (§3.3) | Sixth drawable element; `fit: contain\|cover\|stretch` via SVG `preserveAspectRatio`; exactly one dimension may be **`auto`** (derives from the art's ratio) | Reuses the existing element/geometry machinery rather than a special-cased image system; `auto` answers "size the box from the art" without new syntax |
+| ◆36 | Anchors (§3.4) | **Nine-point `anchor:`** vocabulary on every drawable element, either word order accepted, `center` = `center_center`; legacy `left\|middle\|right` kept as aliases for the top row | One placement vocabulary for every shape, a direct user requirement; aliasing (not replacing) the legacy values means existing cards render unchanged |
+| ◆37 | Text wrapping (§7.2) | New `TextBox` element; **the compiler is the wrapping authority**, measuring against a generated Geist metrics table — the model carries resolved `lines`; `overflow: clip\|shrink` (60% floor) | Preview and PDF must agree by construction — compiler-side wrapping is the only way two different renderers show identical line breaks |
+| ◆38 | String escapes (§3.1) | `\n` (newline) and `\\` (literal backslash) are the lexer's **only** escapes besides `[[`; any other `\`-sequence is E001 | TextBox hard breaks need a way to write a newline inside a string literal; a minimal, closed escape set keeps errors loud on typos |
+| ◆39 | QR codes (§7.3) | A drawable **`Qr:` element**, not the sketched `QR(...)` call form; encoded at eval time so the shape carries the resolved module matrix, never the source data | The language has no call grammar, and custom sizes already rejected inventing one; an element reuses the practiced element pipeline (checker, evaluator, autocomplete) end to end |
+| ◆40 | Local image assets (§7.4) | **IndexedDB** (not localStorage) + an **`asset:` scheme** inside Image `src:` + a **project-file v2** that bundles asset bytes as base64 | localStorage is string-only with a small quota; IDB stores Blobs natively, and v2 keeps art traveling with the file without inventing a second file format |
 
 ---
 
@@ -146,17 +169,124 @@ Card: Monster
 
 Elements render in declaration order; later elements draw on top (◆15). All elements
 accept an optional quoted display label (`Rectangle: "Banner"`) — purely descriptive,
-never referenced (⚑11).
+never referenced (⚑11). This is an index; each element's full semantics are in its
+own subsection below.
 
-| Element | Properties | Notes |
+| Element | Properties | Summary |
 |---|---|---|
-| `Rectangle` | `x y width height color anchor` | default `anchor: top_left` (nine-point, §3.4 — M3 2026-08-10) |
-| `Text` | `x y size color text anchor` | single line (◆24); `size` = em height in units; default color `black`, default `anchor: top_left` (nine-point §3.4; the legacy `left \| middle \| right` alias the top row). Newline characters in the resolved text render as spaces (M3 2026-08-10 — hard breaks belong to `TextBox`) |
-| `TextBox` | `x y width height text size color align line_height overflow anchor` | (M3, agreed 2026-08-10 — §7.2) wrapped multi-line text in a box; ◆24 stays intact for `Text`. `x y width height text size` required; `color` (default `black`), `align: left \| middle \| right` (default `left` — align lays lines within the box's width; the nine-point `anchor:` of §3.4 moves the box itself, and `x: middle` stays Text/Icon-only, E007), `line_height` (positive number LITERAL, default 1.3, meaning × `size` — baseline advance in units is `line_height × size`), `overflow: clip \| shrink` (default `clip`) optional. **The compiler is the wrapping authority**: the evaluator wraps deterministically against a generated Geist advance-widths table (`geist-metrics.ts`, the dicier-codes pattern) with a 2% measurement safety margin, and the model carries the resolved `lines` — preview and PDF agree by construction. Wrap semantics: split on hard breaks (real `\n` in the resolved text — from the §3.1 escapes or from cell data) first; within a segment, greedy word-wrap on spaces (runs of spaces collapse at break points only; interior spacing is preserved); a single word wider than the box breaks mid-word rather than overflow horizontally. Vertical fit is `lines × line_height × size ≤ height`: `clip` keeps the last fully-fitting line and marks the box clipped; `shrink` retries at 5%-of-`size` steps down to a 60% floor, then clips at the floor — the shape carries the FINAL size. Clipped/shrunk boxes get a subtle per-card preview badge, never an error placeholder (⚑8) |
-| `Icon` | `x y size color code anchor style` | Dicier glyph; `code` is a Text expression; literal codes checked against the curated list — unknown literal = **W004 warning**, since the list is non-exhaustive (⚑10†). `style:` (M2, agreed 2026-08-09) is an optional bare identifier — `flat_dark` (default), `flat_light`, `flat_heavy`, `block_dark`, `block_light`, `block_heavy`, `round_dark`, `round_light`, `round_heavy`, `pixel` — resolved by expected type like `anchor:`; unknown value = E008. All ten faces are declared as `@font-face`; browsers fetch only the ones actually used |
-| `Image` | `x y width height src fit anchor` | (M2, agreed 2026-08-09) raster art from a URL. `src:` is a Text expression (URLs may come from a sheet column); `fit:` optional bare identifier `contain` (default) \| `cover` \| `stretch`, realized via SVG `preserveAspectRatio`. **`auto` dimension (2026-08-10):** exactly one of `width:`/`height:` may be the bare keyword `auto` — that dimension derives from the other × the art's intrinsic aspect ratio (`width: full` + `height: auto` is the canonical "banner art" idiom). Both `auto` = E008. `auto` is resolved by the renderer/exporter at load time (intrinsic size is load-time knowledge — the pure model carries the keyword); pre-load placeholders use a square box, and `fit:` is inert alongside `auto` (the box matches the ratio by construction — allowed, documented, no diagnostic). Loading → subtle placeholder box; failed load → placeholder with warning styling (renderer-level state, **not** a D-code — the model stays pure, per-card isolation preserved). At PDF export, images load with `crossorigin=anonymous`; a load failure or canvas taint exports that image as a marked placeholder box and the modal warns "N images could not be embedded" before export — the deck always exports (⚑8 philosophy) |
-| `Qr` | `x y size data color background level anchor` | (M3, agreed 2026-08-10, shipped 2026-08-11 — §7.1a) a scannable QR code. `x y size data` required — `size` is the square box's side in units, `data:` a Text expression (usual §3.5 coercions: `[column]`, interpolation, conditionals). Optional `color` (default `black`), `background` (default `white`), `level:` — error-correction, bare identifier `l \| m \| q \| h` (default `m`) — resolved by expected type like `fit:`/`style:`; unknown value = E008. **Encoded at EVAL time** (pure, deterministic, the wrap.ts precedent — via `qrcode-generator`, the second sanctioned runtime dependency): the shape carries the resolved module matrix (row-major `"1"`/`"0"`, quiet zone NOT included), never the source data, so the renderer only draws one vector `<path>`. The spec's 4-module quiet zone is drawn INSIDE the declared box (so adjacent art can never break scanning) — total grid = `moduleCount + 8`, module unit = `size / grid`. `x: middle` is E007 (no anchor sugar — same as Rectangle/Image); `x/y/size` geometry keywords behave as on `Icon`'s `size` (full/half legal, X-axis). `data:` too long for the level's capacity (even at QR version 40) → **D009**, a placeholder card (§3.8) — empty-string `data:` encodes normally, no special case |
-| `Repeat` | `Repeat: <Number expr> as <var>` (single line, ◆23†) | children emitted N times; `[var]` is the 0-based index (◆18), usable in any child expression; nests; cap 500/card (◆27) |
+| `Rectangle` | `x y width height color anchor` | A filled box — §3.3.1. |
+| `Text` | `x y size color text anchor` | One line of text — §3.3.2. |
+| `TextBox` | `x y width height text size color align line_height overflow anchor` | Wrapped, multi-line text in a box — §3.3.3. |
+| `Icon` | `x y size color code anchor style` | A Dicier glyph, one of ten style faces — §3.3.4. |
+| `Image` | `x y width height src fit anchor` | Raster art from a URL or uploaded asset — §3.3.5. |
+| `Qr` | `x y size data color background level anchor` | A scannable QR code — §3.3.6. |
+| `Repeat` | `Repeat: <Number expr> as <var>` (single line) | Draws its children N times — §3.3.7. |
+
+#### 3.3.1 Rectangle
+
+`x y width height color` required; `anchor` optional (default `top_left`,
+nine-point — §3.4, M3 2026-08-10). A filled box.
+
+#### 3.3.2 Text
+
+`x y size text` required; `color` (default `black`) and `anchor` (default
+`top_left`) optional. Single line, always (◆24) — `size` is the em height in units.
+`anchor` is nine-point (§3.4); the legacy `left | middle | right` values alias the
+top row. Newline characters in the resolved text render as spaces (M3 2026-08-10)
+— hard breaks belong to `TextBox`.
+
+#### 3.3.3 TextBox
+
+(M3, agreed 2026-08-10 — §7.2) Wrapped, multi-line text in a box; ◆24 stays intact
+for `Text`. `x y width height text size` required; `color` (default `black`),
+`align: left | middle | right` (default `left`), `line_height` (positive number
+LITERAL, default 1.3), and `overflow: clip | shrink` (default `clip`) are optional.
+
+`align` lays lines within the box's width; the nine-point `anchor:` of §3.4 moves
+the box itself, and `x: middle` stays Text/Icon-only (E007 on `TextBox`).
+`line_height` means × `size` — baseline advance in units is `line_height × size`.
+
+**The compiler is the wrapping authority**: the evaluator wraps deterministically
+against a generated Geist advance-widths table (`geist-metrics.ts`, the
+dicier-codes pattern) with a 2% measurement safety margin, and the model carries
+the resolved `lines` — preview and PDF agree by construction.
+
+Wrap semantics: split on hard breaks (real `\n` in the resolved text — from the
+§3.1 escapes or from cell data) first; within a segment, greedy word-wrap on
+spaces (runs of spaces collapse at break points only; interior spacing is
+preserved); a single word wider than the box breaks mid-word rather than overflow
+horizontally.
+
+Vertical fit is `lines × line_height × size ≤ height`: `clip` keeps the last
+fully-fitting line and marks the box clipped; `shrink` retries at 5%-of-`size`
+steps down to a 60% floor, then clips at the floor — the shape carries the FINAL
+size. Clipped/shrunk boxes get a subtle per-card preview badge, never an error
+placeholder (⚑8).
+
+#### 3.3.4 Icon
+
+`x y size code` required; `color` (default `black`), `anchor` (default
+`top_left`), and `style` optional. A Dicier glyph; `code` is a Text expression —
+literal codes are checked against the curated list, and an unknown literal is a
+**W004 warning**, since the list is non-exhaustive (⚑10†).
+
+`style:` (M2, agreed 2026-08-09) is an optional bare identifier — `flat_dark`
+(default), `flat_light`, `flat_heavy`, `block_dark`, `block_light`, `block_heavy`,
+`round_dark`, `round_light`, `round_heavy`, `pixel` — resolved by expected type
+like `anchor:`; an unknown value is E008. All ten faces are declared as
+`@font-face`; browsers fetch only the ones actually used.
+
+#### 3.3.5 Image
+
+(M2, agreed 2026-08-09) `x y width height src` required; `fit` and `anchor`
+optional. Raster art from a URL. `src:` is a Text expression (URLs may come from
+a sheet column); `fit:` is an optional bare identifier — `contain` (default) |
+`cover` | `stretch` — realized via SVG `preserveAspectRatio`.
+
+**`auto` dimension (2026-08-10):** exactly one of `width:`/`height:` may be the
+bare keyword `auto` — that dimension derives from the other × the art's
+intrinsic aspect ratio (`width: full` + `height: auto` is the canonical "banner
+art" idiom). Both `auto` = E008. `auto` is resolved by the renderer/exporter at
+load time (intrinsic size is load-time knowledge — the pure model carries the
+keyword); pre-load placeholders use a square box, and `fit:` is inert alongside
+`auto` (the box matches the ratio by construction — allowed, documented, no
+diagnostic).
+
+Loading → subtle placeholder box; failed load → placeholder with warning styling
+(renderer-level state, **not** a D-code — the model stays pure, per-card
+isolation preserved). At PDF export, images load with `crossorigin=anonymous`; a
+load failure or canvas taint exports that image as a marked placeholder box and
+the modal warns "N images could not be embedded" before export — the deck always
+exports (⚑8 philosophy).
+
+#### 3.3.6 Qr
+
+(M3, agreed 2026-08-10, shipped 2026-08-11 — §7.3) `x y size data` required —
+`size` is the square box's side in units, `data:` a Text expression (usual §3.5
+coercions: `[column]`, interpolation, conditionals). Optional `color` (default
+`black`), `background` (default `white`), `level:` — error-correction, bare
+identifier `l | m | q | h` (default `m`) — resolved by expected type like
+`fit:`/`style:`; an unknown value is E008.
+
+**Encoded at EVAL time** (pure, deterministic, the wrap.ts precedent — via
+`qrcode-generator`, the second sanctioned runtime dependency): the shape carries
+the resolved module matrix (row-major `"1"`/`"0"`, quiet zone NOT included),
+never the source data, so the renderer only draws one vector `<path>`. The
+spec's 4-module quiet zone is drawn INSIDE the declared box (so adjacent art can
+never break scanning) — total grid = `moduleCount + 8`, module unit = `size /
+grid`.
+
+`x: middle` is E007 (no anchor sugar — same as Rectangle/Image); `x/y/size`
+geometry keywords behave as on `Icon`'s `size` (full/half legal, X-axis). `data:`
+too long for the level's capacity (even at QR version 40) → **D009**, a
+placeholder card (§3.8) — empty-string `data:` encodes normally, no special
+case.
+
+#### 3.3.7 Repeat
+
+`Repeat: <Number expr> as <var>` (single line, ◆23†). Children emitted N times;
+`[var]` is the 0-based index (◆18), usable in any child expression; nests; cap
+500/card (◆27).
 
 **The showcase** — one number in the sheet becomes a row of hearts (⚑6, ⚑9, ⚑10):
 
@@ -299,7 +429,7 @@ grid keeps last good schema — §4.2):
 | W002 | unused declaration |
 | W003 | explicit `y_units` makes units non-square (suppressed when the value exactly equals the square `auto` value) |
 | W004 | unknown icon code literal — may still be a valid glyph; the curated list is non-exhaustive † |
-| W005 | unknown asset — a literal `asset:` Image `src:` whose name isn't in the current Assets-drawer library (§7.1b); never an error, since the asset may be about to be uploaded |
+| W005 | unknown asset — a literal `asset:` Image `src:` whose name isn't in the current Assets-drawer library (§7.4); never an error, since the asset may be about to be uploaded |
 
 *(E006 existed in the original revision as "unknown icon code (error)"; downgraded to
 W004 in Revision A because the code list is provably incomplete.)*
@@ -318,7 +448,7 @@ single source cell (◆†), so they mark the placeholder card / problems strip 
 | D006 | `count:` non-integer, negative, or unevaluable → one placeholder per row×case combination † |
 | D007 | per-Card instance cap (2,000) exceeded — generation truncated † |
 | D008 | non-finite numeric result during evaluation (division by zero) → placeholder card |
-| D009 | QR data is too long for one code (exceeds the `level:`'s capacity, even at the largest QR version) → placeholder card (§7.1a) |
+| D009 | QR data is too long for one code (exceeds the `level:`'s capacity, even at the largest QR version) → placeholder card (§7.3) |
 
 ### 3.9 The demo project (slice acceptance fixture)
 
@@ -421,7 +551,7 @@ sheet rows (from store) ──────────► generator/evaluator �
 - `dicier-codes.ts` — generated from `Dicier codes v1_5_4.txt` by a specced parse
   (§9): skip `:`-suffixed category headers, blank lines, and literal `etc.` lines;
   deduplicate across sections; keep codes containing spaces. ~888 unique codes.
-  (M2: derive from the font's GSUB table instead, which is exhaustive.)
+  (An exhaustive GSUB-derived list was considered instead; not pursued — §9.)
 
 RenderModel is deliberately dumb: `Deck[] → CardInstance{front: Shape[], back:
 Shape[]}` where `Shape` is `{kind, x, y, …, resolved values}` in card units. Each
@@ -435,8 +565,19 @@ One Zustand store (introduced in slice task 4† — the panels currently share 
 { code: string,
   sheets: Record<sheetName, Record<columnName, string>[]>,   // rows, ⚑12
   compile: { ast, diagnostics, model, dataDiagnostics },     // derived, debounced 300ms
-  lastGoodSchema: SheetSchema[] }                            // survives broken compiles †
+  lastGoodSchema: SheetSchema[],                             // survives broken compiles †
+  lastGoodModel: { model, dataDiagnostics, excludedPristineRows } | null,
+                                                              // what the preview renders †
+  isStale: boolean,                                          // true while `compile` is bad †
+  autosaveDisabled: boolean }                                // storage unusable this session (§6.2)
 ```
+
+Uploaded assets are deliberately **not** in this store: the asset library is its own
+small store (`assetStore.ts`, IndexedDB-backed, §7.4), because art is binary and can
+be large — keeping it out of this synchronous, JSON-shaped state (and out of
+localStorage entirely) means a big upload never touches the compile/persist path it
+doesn't belong to. `editorStore` only reacts to it (an asset change is a compile
+input, §7.4) rather than owning it.
 
 - **Code window:** Monaco with a Monarch tokenizer for `.goblin` highlighting;
   compile diagnostics → `setModelMarkers` (squiggles + problems strip).
@@ -461,9 +602,11 @@ One Zustand store (introduced in slice task 4† — the panels currently share 
   error-placeholder card for D-errors. `CardSVG` is memoized on the
   RenderModel's per-card content hash (†) so an edit re-renders only affected cards
   — this, not raw compute, is what makes 500-card decks interactive. Text `y` is
-  realized via per-font ascent constants (§3.4). Dicier loaded as a webfont
-  (`Flat-Dark`, ◆28) with `font-feature-settings: "liga" 1, "calt" 1, "dlig" 1,
-  "kern" 1` († — `dlig` is required for double-digit codes like `"13_ON_D20"`).
+  realized via per-font ascent constants (§3.4). Dicier loaded as a webfont — all ten
+  `style:` faces declared as `@font-face`, browsers fetch only the ones a card
+  actually uses (◆28 superseded, §3.3) — with `font-feature-settings: "liga" 1,
+  "calt" 1, "dlig" 1, "kern" 1` († — `dlig` is required for double-digit codes like
+  `"13_ON_D20"`).
 - Compile runs on the main thread in the slice; moved to a web worker in M2 only if
   profiling demands (500-card decks are the sanity target).
 
@@ -472,7 +615,13 @@ One Zustand store (introduced in slice task 4† — the panels currently share 
 Vitest unit tests per compiler stage (golden-file tests for parser/checker; semantic
 tests for generation: cross-product counts, `count:` copies and caps, repeat
 expansion, if chains, shadowing warnings, contextual-keyword and continuation edge
-cases from §10). The demo project (§3.9) is the integration fixture. Browser E2E: M2.
+cases from §10). The demo project (§3.9) is the integration fixture. **Browser E2E is
+a deliberate non-goal**, not a deferred one: this environment has no interaction
+driver, so coverage stays headless top to bottom — components render real compiled
+models via `renderToStaticMarkup`, interaction logic lives in pure unit-tested
+functions (e.g. `gridModel.ts`, `previewVirtual.ts`), and a manual smoke-test
+checklist (`docs/development.md`) is the human verification pass; one-shot
+headless-Chrome screenshots cover visual regressions only, never click flows.
 
 ---
 
@@ -524,8 +673,10 @@ a 500-card deck stays interactive.
 
 PDF export (the reason geometry is mm-exact: duplex-mirrored back pages, cut lines,
 bleed), `Image` element (URL-sourced), Monaco autocomplete (columns, enum cases,
-icon codes), localStorage autosave, Dicier `style:` property + GSUB-derived
-exhaustive code list, custom card sizes, compile in a worker if needed.
+icon codes), localStorage autosave, Dicier `style:` property, custom card sizes,
+compile in a worker if needed. (An exhaustive GSUB-derived code list was floated
+here too; shipped instead: the curated list stayed, and the M7-downgraded W004
+warning has been enough in practice — §9.)
 
 ### 6.1 PDF export — agreed spec (2026-08-05)
 
@@ -667,7 +818,42 @@ uploaded assets, sharing, docs site.
 - Multi-project management stays file-based in v1 (the autosave slot remains
   singular); accounts/cloud are later M3.
 
-### 7.1a QR codes — scoped, HIGH PRIORITY (2026-08-10, shipped M3 2026-08-11 — normative spec in the §3.3 row, §3.1 opener/reserved-word lists, and §3.8's D009 row)
+### 7.2 Text wrapping (TextBox) — agreed direction (2026-08-10; shipped M3 2026-08-10 — normative spec in the §3.3 row and §3.1 escapes)
+
+- New **`TextBox`** element (Text stays single-line, ◆24 intact): x, y, width,
+  height, text, size, color, `align: left|middle|right`, `line_height`
+  (default ≈1.3×size), `overflow: clip|shrink` (default clip; shrink steps the
+  font size down to a 60% floor until the text fits).
+- **The compiler is the wrapping authority**: a Geist glyph-advance metrics
+  table generated at build time (the dicier-codes pattern) lets the evaluator
+  wrap deterministically in the pure layer with a small safety margin — the
+  model carries resolved lines, preview/PDF agree by construction, and overflow
+  is detected at generate time (preview badge on affected cards; NOT an error
+  placeholder).
+- v1 wraps plain text (one font/size/color per box; interpolation substitutes
+  before wrapping; breaks on spaces). Inline icons/bold (run-based layout) are
+  a deliberate later design round.
+- **Float boundary note (review):** the vertical-fit formula
+  `lines × line_height × size ≤ height` is evaluated in IEEE floats exactly as
+  written, so a box authored to the exact product (e.g. `height: 3.9` for
+  3 × 1.3 × 1) may clip on the last line's ulp — author a hair of slack.
+- **Explicit line breaks (2026-08-10, user requirement):** hard breaks are
+  honored wherever a real newline character appears in the resolved text —
+  from cell data (paste/import can carry newlines; multi-line cell *editing*
+  in the grid is deferred) or from the new string-literal escapes: `\n` is a
+  newline, `\\` a literal backslash (the lexer's only escapes besides `[[`;
+  any other `\`-sequence is E001 with a hint). Hard breaks apply regardless
+  of wrapping; in single-line `Text`, newline characters render as spaces.
+- **Shipped detail (2026-08-10):** the shape carries an explicit `shrunk`
+  flag beside `clipped`. The badge must fire for a shrink that then FITS
+  (`clipped` false), and the shape deliberately drops the declared size
+  (it carries only the final one), so shrunk-ness is not derivable — it has
+  to travel. Rendering: one `<text>` per box with absolutely positioned
+  `<tspan>`s (x/y per line, no `dy` chaining), same `TEXT_ASCENT` realization
+  as `Text` (§3.4 m10); badge on the SHOWN face only, rendered by the preview
+  wrapper so PDF/landing markup stays badge-free.
+
+### 7.3 QR codes — scoped, HIGH PRIORITY (2026-08-10, shipped M3 2026-08-11 — normative spec in the §3.3 row, §3.1 opener/reserved-word lists, and §3.8's D009 row)
 
 **Requirement (edu):** cards carry scannable codes from sheet data, enabling
 cross-media games (an app scans the card and acts). The app is out of scope;
@@ -714,7 +900,7 @@ template gives every card its own QR.
   autocomplete + E008 pins, wiki, docFacts guard) — the same shape as the
   Image-element batch, plus the encoder wrapper and its structural tests.
 
-### 7.1b Local image assets — agreed spec, P0 (2026-08-11)
+### 7.4 Local image assets — agreed spec, P0 (2026-08-11)
 
 **Requirement (edu):** use images local to the user's machine — no hosting —
 to unblock prototyping.
@@ -746,50 +932,21 @@ to unblock prototyping.
   the library too. The autosave slot is UNCHANGED (code+sheets in
   localStorage); assets persist in IDB at upload time — upload IS the save.
 
-### 7.2 Text wrapping (TextBox) — agreed direction (2026-08-10; shipped M3 2026-08-10 — normative spec in the §3.3 row and §3.1 escapes)
-
-- New **`TextBox`** element (Text stays single-line, ◆24 intact): x, y, width,
-  height, text, size, color, `align: left|middle|right`, `line_height`
-  (default ≈1.3×size), `overflow: clip|shrink` (default clip; shrink steps the
-  font size down to a 60% floor until the text fits).
-- **The compiler is the wrapping authority**: a Geist glyph-advance metrics
-  table generated at build time (the dicier-codes pattern) lets the evaluator
-  wrap deterministically in the pure layer with a small safety margin — the
-  model carries resolved lines, preview/PDF agree by construction, and overflow
-  is detected at generate time (preview badge on affected cards; NOT an error
-  placeholder).
-- v1 wraps plain text (one font/size/color per box; interpolation substitutes
-  before wrapping; breaks on spaces). Inline icons/bold (run-based layout) are
-  a deliberate later design round.
-- **Float boundary note (review):** the vertical-fit formula
-  `lines × line_height × size ≤ height` is evaluated in IEEE floats exactly as
-  written, so a box authored to the exact product (e.g. `height: 3.9` for
-  3 × 1.3 × 1) may clip on the last line's ulp — author a hair of slack.
-- **Explicit line breaks (2026-08-10, user requirement):** hard breaks are
-  honored wherever a real newline character appears in the resolved text —
-  from cell data (paste/import can carry newlines; multi-line cell *editing*
-  in the grid is deferred) or from the new string-literal escapes: `\n` is a
-  newline, `\\` a literal backslash (the lexer's only escapes besides `[[`;
-  any other `\`-sequence is E001 with a hint). Hard breaks apply regardless
-  of wrapping; in single-line `Text`, newline characters render as spaces.
-- **Shipped detail (2026-08-10):** the shape carries an explicit `shrunk`
-  flag beside `clipped`. The badge must fire for a shrink that then FITS
-  (`clipped` false), and the shape deliberately drops the declared size
-  (it carries only the final one), so shrunk-ness is not derivable — it has
-  to travel. Rendering: one `<text>` per box with absolutely positioned
-  `<tspan>`s (x/y per line, no `dy` chaining), same `TEXT_ASCENT` realization
-  as `Text` (§3.4 m10); badge on the SHOWN face only, rendered by the preview
-  wrapper so PDF/landing markup stays badge-free.
-
 ## 8. Open questions (explicitly deferred, not blocking the slice)
 
-- Text wrapping / multi-line text boxes (◆24) — needs a layout mini-engine; design in M2.
+Items are removed from this list once they ship — §10 and the milestone specs in
+§6/§7 are the record of what was decided, when, and why (text wrapping, for
+instance, left this list for §7.2).
+
 - Auto-layout containers (`Row`/`Stack`) as sugar over `Repeat` (⚑9).
 - Template composition (templates using templates) and inline templates under `Front:`.
 - Custom fonts for `Text` (v1 renders Geist only).
-- Print specifics: bleed, safe zones, DPI for raster images, cut-line style.
+- Print specifics: bleed, safe zones, DPI for raster images.
 - Whether `sheet:` becomes optional for loop-only Cards (⚑13 relaxation — the
   zero-column-sheet idiom is the v1 answer).
+- Whether to extract an exhaustive Dicier code list from the font's GSUB table
+  (§9) — floated for M2, never picked up; the curated ~888-code list plus W004's
+  non-fatal warning haven't been a real problem, so this stays optional.
 
 ## 9. Dicier notes
 
@@ -803,7 +960,10 @@ uppercase text (e.g. `HEARTS`, `3_ON_D6`) with `liga` + `calt` + `dlig` (+ `kern
 enabled — `dlig` is required for double-digit codes. The codes txt is a human
 reference: ~888 unique codes once headers/`etc.`/duplicates are stripped, and
 demonstrably non-exhaustive (translated families end in "etc."), hence W004 is a
-warning and the M2 plan is to extract the true inventory from the font's GSUB table.
+warning. Extracting the true inventory from the font's GSUB table was the M2 plan
+(§10 M7) for closing that gap exhaustively; it was never picked up, since the
+curated list plus the non-fatal warning haven't been a real problem — an optional,
+unscheduled improvement (§8), not a commitment.
 
 ## 10. Revision A change log (2026-08-03, post adversarial review)
 

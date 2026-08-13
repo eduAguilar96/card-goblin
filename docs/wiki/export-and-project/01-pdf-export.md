@@ -64,7 +64,7 @@ the export — reduce the margin or spacing, or choose a larger page.
   before you export. If *every* card is a placeholder there's nothing to print and
   export is blocked.
 - **Images are checked before you export.** When the deck uses
-  [`Image`](templates-and-shapes.md) shapes, the modal probes their URLs as it opens.
+  [`Image`](images.md) shapes, the modal probes their URLs as it opens.
   Embedding an image into the PDF needs the host's permission (the file is fetched
   with `crossorigin=anonymous`, so the server must allow cross-origin use — CORS). Any
   image that can't be embedded is warned about in the modal — "N images could not be

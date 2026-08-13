@@ -17,7 +17,7 @@ The editor lives at [`/editor`](/editor). Three panels and a status bar:
 │  SPREADSHEET — one tab per Sheet:               │
 │  columns from your code, rows from you          │
 ├─────────────────────────────────────────────────┤
-│  12 cards · 0 problems · 1 excluded row         │
+│  9 cards · 0 problems · 0 excluded rows         │
 └─────────────────────────────────────────────────┘
 ```
 
@@ -30,7 +30,7 @@ accepts, size presets, [color names](colors.md), enum cases after a `.`, and
 [icon codes](icons.md) inside `code:` strings. They come from your latest compile,
 so they keep working while the code is broken mid-edit — the moment a `Sheet:`
 declares a column, that column is offered everywhere it's legal. Errors appear as
-red squiggles where they happen, and in the problems strip.
+red squiggles where they happen, and the status bar counts how many.
 
 ## Preview (top right)
 
@@ -69,8 +69,14 @@ One tab per `Sheet:` you declare in code. The **columns come from your code**; t
 
 Total cards, code problems, flagged cells, and excluded rows — plus a **stale**
 indicator when the preview is showing an older render because the current code
-doesn't compile, and the **Reset to demo** button (it asks first — see
-[Autosave](autosave.md)).
+doesn't compile. To its right sit the editor's project-lifecycle controls:
+
+- **Assets** — opens the drawer of images uploaded from your machine (see
+  [Uploaded assets](assets.md)), with a count badge.
+- **Export project** / **Import project** — download the whole project as a
+  file, or load one back — see [Project files](project-files.md).
+- **Reset to demo** — wipes your saved project and loads the demo back. It
+  asks first (see [Autosave](autosave.md)).
 
 ## The compile loop
 
@@ -93,5 +99,5 @@ Two rules make it feel stable rather than twitchy:
 ## Saving your work
 
 The editor [autosaves](autosave.md) your code and rows to this browser and restores
-them when you come back — one save slot, one browser. For anything precious, copy
-the code out too; project files are on the [roadmap](roadmap.md).
+them when you come back — one save slot, one browser. For anything precious, export
+a [project file](project-files.md) too — it's a proper backup that travels.

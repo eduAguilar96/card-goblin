@@ -17,7 +17,7 @@ npm install
 | Command | What it does |
 |---|---|
 | `npm run dev` | dev server → http://localhost:3000 (editor at `/editor`) |
-| `npm test` | full vitest suite (~420 tests, sub-second) |
+| `npm test` | full vitest suite (sub-second) |
 | `npx tsc --noEmit` | strict type check |
 | `npm run lint` | ESLint (prints a `next lint` deprecation notice — needs migration before Next 16) |
 | `npm run build` | production build — must stay green with `/editor` static. **Stop `npm run dev` first:** both write to `.next/`, and a production build removes the manifests the dev server is holding open, which makes every route 500 with `ENOENT … routes-manifest.json`. Recovery is `rm -rf .next` + restart dev. |
@@ -40,14 +40,14 @@ src/lib/lang/            the compiler (pure, no React)
 src/app/editor/
   _store/editorStore.ts  Zustand store: debounced compile, keep-last-good, rename migration
   _store/persistence.ts  localStorage autosave: debounced save, quarantined restore, reset
-  _store/assetStore.ts   IndexedDB local-asset library: CRUD, 2 MB cap, disabled posture (§7.1b)
+  _store/assetStore.ts   IndexedDB local-asset library: CRUD, 2 MB cap, disabled posture (§7.4)
   _components/           Monaco window (windowCode), SVG preview (windowPreview,
                          cardSvg, deckSection, previewSingle, previewVirtual),
                          bespoke grid
                          (windowSpreadsheet, gridModel), statusBar, panelLayout,
                          PDF export (pdfExportModal, pdfLayout, pdfPagePreview,
                          pdfRaster, pdfAssemble), project file export/import
-                         (projectFile), the Assets drawer (assetsDrawer, §7.1b),
+                         (projectFile), the Assets drawer (assetsDrawer, §7.4),
                          shared prev/next control (pager)
   _lib/goblinLanguage.ts Monaco language registration (Monarch)
 src/lib/content/         frontmatter parsing shared by the wiki and the blog
@@ -90,12 +90,13 @@ Two test files keep the wiki honest, both run by `npm test`:
 - `__tests__/content.test.ts` — frontmatter, unique slugs, and every internal link
   pointing at a page that exists. A broken cross-link fails the suite.
 - `__tests__/docFacts.test.ts` — the wiki's numbers and tables checked against the
-  constants they describe (`SIZE_PRESETS`, `CARD_CAP`, `REPEAT_CAP`, `DICIER_CODES`,
-  `CSS_COLOR_NAMES`, `KEYWORDS`, `BLOCK_OPENERS`, `DEFAULT_PDF_OPTIONS`,
-  `PAGE_SIZES`). The checks are **bidirectional**: nothing the wiki states may
-  disagree with the code, *and* nothing in the code may be missing from the wiki — so
-  adding a sixth card preset fails the suite until it's documented. When it fires,
-  fix the docs or fix the pattern; don't delete the check.
+  constants they describe: card-size and PDF page-size presets, generation/repeat
+  caps, per-element defaults and closed vocabularies, the Dicier code count, CSS
+  color names, reserved words, and timing/size constants — see the file's import
+  block for the exact, current list. The checks are **bidirectional**: nothing the
+  wiki states may disagree with the code, *and* nothing in the code may be missing
+  from the wiki — so adding a sixth card preset fails the suite until it's
+  documented. When it fires, fix the docs or fix the pattern; don't delete the check.
 
 The docs contract (which surface owns which fact) is in
 [CLAUDE.md](../CLAUDE.md#documentation-contract).

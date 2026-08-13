@@ -117,11 +117,11 @@ The editor screenshot (`public/editor-screenshot.png`) is the one image that
 asserts the wiki's numbers and tables against the constants they describe —
 **bidirectionally**: nothing stated disagrees with the code, and nothing in the code is
 missing from the docs. Touching any of these will fail `npm test` until the wiki
-matches:
-
-`SIZE_PRESETS` · `CARD_CAP` · `REPEAT_CAP` · `DICIER_CODES` · `CSS_COLOR_NAMES` ·
-`KEYWORDS` · `BLOCK_OPENERS` · `DEFAULT_PDF_OPTIONS` · `PAGE_SIZES` ·
-`PERSIST_DEBOUNCE_MS`
+matches — the file's import block is the current, authoritative list; the categories
+are card-size and PDF page-size presets, generation/repeat caps, per-element defaults
+and closed vocabularies (icon style, image fit, QR level, anchor, TextBox overflow),
+the Dicier code count, CSS color names, reserved words, and timing/size constants
+(autosave debounce, asset upload cap).
 
 When it fails there are two honest fixes: update the wiki because the code changed, or
 update the *pattern* because the prose was legitimately reworded. **Never delete a

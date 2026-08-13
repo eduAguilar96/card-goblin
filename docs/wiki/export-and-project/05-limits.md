@@ -13,7 +13,7 @@ to read them now than to discover them three hours into a deck.
 
 - **`Text` is one line by design** — long text runs off the card rather than
   flowing. Wrapped, multi-line text is what
-  [`TextBox`](templates-and-shapes.md) is for.
+  [`TextBox`](text.md) is for.
 - **One look per box.** A `TextBox` wraps plain text in a single font, size, and
   color — no bold runs or inline icons inside the flow yet.
 - **One font.** Text renders in the app's built-in font. Custom fonts aren't
@@ -21,7 +21,7 @@ to read them now than to discover them three hours into a deck.
 
 ## Images
 
-- **2 MB** per uploaded asset. The [Assets drawer](templates-and-shapes.md) caps
+- **2 MB** per uploaded asset. The [Assets drawer](assets.md) caps
   each upload — plenty for print-resolution card art, not a place for
   full-resolution photography.
 - **PDF embedding needs CORS for URL art.** An image displays in the preview from
@@ -54,9 +54,8 @@ with a note rather than failing.
 
 ## Editing
 
-- No autocomplete for column names, enum cases, or icon codes yet — the checker tells
-  you when a name is wrong, but won't offer it.
-- No undo across the spreadsheet and code together; they undo independently.
+- **No shared undo.** The code editor and the spreadsheet keep separate undo
+  histories — Ctrl+Z in one never rewinds the other.
 
-Everything here is on the [roadmap](roadmap.md) in some form. If one of these is
+Most of these are on the [roadmap](roadmap.md) in some form. If one of these is
 blocking you, that's useful signal — say so.
