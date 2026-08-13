@@ -3,6 +3,7 @@ title: "Dicemancy: the game that made me build CardGoblin"
 description: "A design log for Dicemancy — and why making its deck by hand turned into building a tool that generates decks from a script and a spreadsheet."
 tags: design log, dicemancy, origin
 author: Eduardo Aguilar
+draft: true
 ---
 
 # Dicemancy: the game that made me build CardGoblin
