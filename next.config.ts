@@ -37,6 +37,24 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   outputFileTracingExcludes: {
     "**/*": [
+      // The build's own output and history — these dominate the bundle. The
+      // tracer sweeps the working directory (see above), so a function ends up
+      // carrying the build cache, the client assets it will never serve, and
+      // the git object store. `.next/server` is deliberately KEPT: the route's
+      // own compiled chunks live there.
+      ".next/cache/**",
+      ".next/static/**",
+      ".next/trace",
+      ".git/**",
+      "*.tsbuildinfo",
+      // Already present in the build output, or authoring-only.
+      "src/app/fonts/**",
+      "public/**",
+      "docs/**",
+      "scripts/**",
+      // Toolchain and browser-only packages that cannot run in a function.
+      // monaco-editor is `import type` only (the editor loads from a CDN);
+      // pdf-lib runs behind the export modal in the browser.
       "node_modules/monaco-editor/**",
       "node_modules/typescript/**",
       "node_modules/@typescript-eslint/**",
@@ -46,7 +64,6 @@ const nextConfig: NextConfig = {
       "node_modules/vitest/**",
       "node_modules/@vitest/**",
       "node_modules/pdf-lib/**",
-      "docs/vendor/**",
     ],
   },
 };
