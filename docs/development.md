@@ -20,7 +20,7 @@ npm install
 | `npm test` | full vitest suite (~420 tests, sub-second) |
 | `npx tsc --noEmit` | strict type check |
 | `npm run lint` | ESLint (prints a `next lint` deprecation notice — needs migration before Next 16) |
-| `npm run build` | production build — must stay green with `/editor` static |
+| `npm run build` | production build — must stay green with `/editor` static. **Stop `npm run dev` first:** both write to `.next/`, and a production build removes the manifests the dev server is holding open, which makes every route 500 with `ENOENT … routes-manifest.json`. Recovery is `rm -rf .next` + restart dev. |
 | `npm run generate:dicier` | regenerate `src/lib/lang/dicier-codes.ts` from the vendored codes file |
 | `npm run generate:geist-metrics` | regenerate `src/lib/lang/geist-metrics.ts` from `src/app/fonts/GeistVF.woff` |
 
