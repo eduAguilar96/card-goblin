@@ -83,15 +83,39 @@ function encodeQrUncached(data: string, level: QrLevel): QrEncoding | null {
  * a different cell per card, but a fixed-content QR — a logo, a URL that
  * doesn't vary — re-encodes identically on every one of N cards per
  * compile). Keyed on `level + "\0" + data` (a level letter never collides
- * with a NUL byte a real data string might contain). Capped at 1000
- * entries; on overflow the WHOLE map is cleared rather than evicting one
- * entry — deterministic, no LRU bookkeeping, and 1000 distinct QR bodies in
- * one deck is already an unusual document. `null` results (capacity
- * failures) are cached too, so a broken row doesn't re-attempt encoding on
- * every reference.
+ * with a NUL byte a real data string might contain). `null` results
+ * (capacity failures) are cached too, so a broken row doesn't re-attempt
+ * encoding on every reference.
+ *
+ * CACHE_LIMIT (adversarial review, 2026-08-13 — the cache-cliff fix):
+ * comfortably above generate.ts's CARD_CAP (2000, not imported here — that
+ * would cycle qr.ts → generate.ts → eval.ts → qr.ts) so a single CARD_CAP-
+ * sized deck of distinct QR codes NEVER evicts anything mid-compile. The
+ * previous limit (1000, exactly HALF of CARD_CAP) combined with clear-on-
+ * overflow meant a 2000-QR deck's cache held NOTHING at the end of any
+ * compile: every recompile — including a "warm" one with IDENTICAL data —
+ * re-encoded all 2000 codes synchronously behind the 300 ms debounce
+ * (measured ~800–1100 ms, every keystroke). On overflow past this limit,
+ * `evictOldestHalf` below removes the OLDEST half (Map iteration order =
+ * insertion order) instead of clearing everything: a still-active
+ * recompile's own codes — inserted most recently — survive, so even a
+ * session that keeps growing past the cap degrades gradually rather than
+ * falling off a cliff. 4000 matrices is on the order of 1–2 MB — trivial.
  */
-const CACHE_LIMIT = 1000;
+const CACHE_LIMIT = 4000;
 const cache = new Map<string, QrEncoding | null>();
+
+/** Evict the oldest half of entries rather than the whole map (see
+ * CACHE_LIMIT above). `Math.floor` so a cache that overflows at an odd size
+ * still shrinks (never a zero-length no-op). */
+function evictOldestHalf(): void {
+  let remaining = Math.floor(cache.size / 2);
+  for (const key of cache.keys()) {
+    if (remaining <= 0) break;
+    cache.delete(key);
+    remaining--;
+  }
+}
 
 /** Test-observable hit count — a deterministic, portable alternative to a
  * wall-clock CI assertion for proving the cache actually short-circuits
@@ -126,7 +150,13 @@ export function encodeQr(data: string, level: QrLevel): QrEncoding | null {
     return cached;
   }
   const result = encodeQrUncached(data, level);
-  if (cache.size >= CACHE_LIMIT) cache.clear();
+  if (cache.size >= CACHE_LIMIT) evictOldestHalf();
   cache.set(key, result);
   return result;
+}
+
+/** Test seam: the live eviction threshold, so tests assert against the real
+ * constant instead of a hardcoded number that could silently drift from it. */
+export function qrCacheLimitForTests(): number {
+  return CACHE_LIMIT;
 }

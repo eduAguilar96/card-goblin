@@ -33,6 +33,7 @@ import {
   type ReactElement,
 } from "react";
 import { ASSET_SRC_SCHEME } from "@/lib/lang";
+import { focusableElementsIn } from "@/app/editor/_components/dialogFocusTrap";
 import {
   assetStore,
   isValidAssetName,
@@ -221,7 +222,14 @@ export function AssetsDrawerContent({
   const thumbnails = useThumbnails(assets, getBytes);
 
   useEffect(() => {
+    // Capture the opener BEFORE moving focus into the dialog, and restore it
+    // on close (adversarial review item 5): neither dialog used to do this,
+    // so closing via Escape/backdrop/Close dropped keyboard focus to
+    // document.body — the same lost-your-place failure as the grid's
+    // Enter-blur bug (item 3).
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     dialogRef.current?.focus();
+    return () => opener?.focus();
   }, []);
 
   const handleFiles = async (files: Iterable<File>): Promise<void> => {
@@ -292,11 +300,10 @@ export function AssetsDrawerContent({
       return;
     }
     if (event.key !== "Tab" || dialogRef.current === null) return;
-    const focusable = [
-      ...dialogRef.current.querySelectorAll<HTMLElement>(
-        'button, input, select, textarea, a[href], [tabindex]:not([tabindex="-1"])',
-      ),
-    ].filter((el) => !el.hasAttribute("disabled"));
+    // dialogFocusTrap.ts (item 5): filters out non-visible matches — e.g.
+    // the hidden file input below — that the raw selector alone can't tell
+    // apart from a real, Tab-reachable control.
+    const focusable = focusableElementsIn(dialogRef.current);
     if (focusable.length === 0) return;
     const first = focusable[0];
     const last = focusable[focusable.length - 1];

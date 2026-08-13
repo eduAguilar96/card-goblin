@@ -426,8 +426,13 @@ export interface CardMeta {
 }
 
 export interface CardInstance {
-  front: Shape[];
-  back: Shape[];
+  /** `readonly` (adversarial review): count: copies SHARE this array — a
+   * stray push/splice on one instance would corrupt every sibling copy. The
+   * immutability contract above was previously prose-only; TypeScript now
+   * enforces it (generate.ts builds each face array once, locally, before
+   * any instance is constructed). */
+  readonly front: readonly Shape[];
+  readonly back: readonly Shape[];
   meta: CardMeta;
   /**
    * Deterministic content hash (FNV-1a) of the resolved faces + deck
@@ -452,9 +457,11 @@ export interface Deck {
   xUnits: number;
   /** May be fractional (⚑7†: `y_units: auto` keeps units square). */
   yUnits: number;
-  cards: CardInstance[];
+  /** `readonly` (adversarial review — see CardInstance): generate.ts builds
+   * each deck's cards in a local mutable array and assigns it in once. */
+  readonly cards: readonly CardInstance[];
 }
 
 export interface RenderModel {
-  decks: Deck[];
+  readonly decks: readonly Deck[];
 }

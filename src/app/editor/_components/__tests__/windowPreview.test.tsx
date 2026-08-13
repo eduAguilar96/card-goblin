@@ -88,6 +88,24 @@ describe("PreviewContent — single view (default)", () => {
     expect(markup).toContain("showing last good result — fix errors to update");
     expect(countCards(markup)).toBe(1); // last good keeps rendering
   });
+
+  it("the toolbar wraps instead of clipping at narrow panel widths — Export PDF always renders (item 1)", () => {
+    // Regression: the toolbar used to be a single non-wrapping flex line
+    // inside the panel's overflow-hidden, so narrow panels (dragging the
+    // divider on any monitor) cut off Back / the grid-view toggle / Export
+    // PDF with no way to reach them. `flex-wrap` lets every control reflow
+    // instead. Real reflow is a browser layout behavior renderToStaticMarkup
+    // can't exercise (no layout engine) — this pins the structural
+    // contract (the toolbar CAN wrap) and that Export PDF is unconditionally
+    // in the markup, not something that can vanish behind a clip.
+    const markup = renderToStaticMarkup(
+      <PreviewContent lastGood={demoLastGood()} isStale={false} />,
+    );
+    expect(markup).toContain(
+      'class="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-2 border-b border-gray-700 bg-gray-800 px-3 py-2"',
+    );
+    expect(markup).toContain("Export PDF");
+  });
 });
 
 describe("PreviewContent — grid view", () => {

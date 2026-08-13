@@ -81,6 +81,22 @@ describe("SpreadsheetContent (demo)", () => {
     expect(stripTags(markup)).toContain("+ add row");
   });
 
+  it("the delete-row button is keyboard-reachable: opacity, not visibility (item 4)", () => {
+    // `visibility:hidden` (the old `invisible` class) drops an element from
+    // the tab order entirely — Tab could never land on it. `opacity-0`
+    // keeps it focusable and clickable while staying out of the way
+    // visually; it must also reveal on ITS OWN keyboard focus (not just the
+    // row's mouse hover), or a keyboard user would tab onto an invisible
+    // control with no indication anything is there.
+    const deleteButtons = markup.match(/<button[^>]*aria-label="delete row[^>]*>/g) ?? [];
+    expect(deleteButtons.length).toBe(2);
+    for (const tag of deleteButtons) {
+      expect(tag).not.toContain("invisible");
+      expect(tag).toContain("opacity-0");
+      expect(tag).toContain("focus-visible:opacity-100");
+    }
+  });
+
   it("flags nothing red and dims nothing on the clean, fully edited demo", () => {
     expect(markup).not.toContain("bg-red-950");
     expect(markup).not.toContain("pristine — excluded");
@@ -197,6 +213,25 @@ describe("SpreadsheetContent (enum variant)", () => {
     expect(unescapeHtml(markup)).toContain('"Garbage" is not a case of enum Suit');
     // The non-case value stays visible in the dropdown instead of blanking.
     expect(markup).toContain('<option value="Garbage" selected="">');
+  });
+
+  it("a flagged enum cell drops its opaque background so the <td>'s red wash shows through (item 8)", () => {
+    // Unflagged, <select> painted bg-gray-800 OVER the <td>'s (unflagged,
+    // colorless) background — invisible either way. Flagged, that same
+    // opaque fill hid the <td>'s bg-red-950 wash, so an invalid enum read
+    // as a lesser error than an invalid Number/Text cell (TextCell is
+    // bg-transparent, so ITS <td> wash always shows through). Both cell
+    // kinds must look identically red when flagged.
+    const selects = markup.match(/<select[^>]*>/g) ?? [];
+    expect(selects).toHaveLength(2); // one per row
+    const flaggedSelect = selects.find((tag) => tag.includes("text-red-200"));
+    const plainSelect = selects.find((tag) => !tag.includes("text-red-200"));
+    expect(flaggedSelect).toBeDefined();
+    expect(plainSelect).toBeDefined();
+    expect(flaggedSelect).toContain("bg-transparent");
+    expect(flaggedSelect).not.toContain("bg-gray-800");
+    // Unflagged chip styling is unchanged.
+    expect(plainSelect).toContain("bg-gray-800");
   });
 });
 

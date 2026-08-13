@@ -21,7 +21,8 @@ import type {
 } from "../index";
 import { GEIST_METRICS, SIZE_PRESETS, compileProject, generateModel, measureText } from "../index";
 import { parse } from "../parser";
-import { encodeQr } from "../qr";
+import { CARD_CAP } from "../generate";
+import { encodeQr, resetQrCacheForTests } from "../qr";
 
 const demoSource = readFileSync(
   fileURLToPath(new URL("./fixtures/demo.goblin", import.meta.url)),
@@ -689,6 +690,49 @@ describe("D009 — QR data too long for one code", () => {
     expect(cards[0].error?.diagnostics.map((d) => d.code)).toEqual(["D009"]);
     expect(cards[1].error).toBeUndefined();
     expect((cards[1].front[0] as QrShape).kind).toBe("qr");
+  });
+});
+
+// -- QR cache perf regression (adversarial review, 2026-08-13) ---------------
+
+describe("QR cache — warm recompile stays inside the debounce at CARD_CAP scale", () => {
+  it("a CARD_CAP-sized deck of DISTINCT QR codes recompiles warm in well under 150ms", () => {
+    // Regression for the cache-cliff bug: qr.ts's old CACHE_LIMIT (1000) was
+    // exactly HALF of CARD_CAP (2000), and clear-on-overflow meant the cache
+    // held NOTHING once a full-size deck finished compiling — so even a
+    // "warm" recompile with IDENTICAL data re-encoded all 2000 QR codes
+    // synchronously (measured ~1.1s), stalling every debounced keystroke
+    // (300ms). This drives the REAL pipeline (parse + check + generate), not
+    // just encodeQr, so the bound covers everything a keystroke actually
+    // pays for.
+    resetQrCacheForTests();
+    const code = src(
+      ...sheetLines(["t: Text"]),
+      "Template: T",
+      "  Qr:",
+      "    x: 0",
+      "    y: 0",
+      "    size: 5",
+      "    data: [t]",
+      ...CARD_LINES,
+      "  Front: T",
+    );
+    const rows = Array.from({ length: CARD_CAP }, (_, i) => ({ t: `payload-${i}` }));
+    const sheets: SheetRows = { Sh: rows };
+
+    // Cold pass: populates the cache with CARD_CAP distinct encodings.
+    const cold = projectOf(code, sheets);
+    expect(cold.model.decks[0].cards).toHaveLength(CARD_CAP);
+
+    // Warm pass: identical data — every encodeQr call should be a cache hit
+    // (the scenario a debounced recompile after an unrelated keystroke hits).
+    const startedAt = performance.now();
+    const warm = projectOf(code, sheets);
+    const elapsedMs = performance.now() - startedAt;
+
+    expect(warm.model.decks[0].cards).toHaveLength(CARD_CAP);
+    expect(elapsedMs).toBeLessThan(150); // generous CI bound; old code: ~1.1s
+    resetQrCacheForTests();
   });
 });
 

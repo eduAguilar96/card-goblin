@@ -102,23 +102,35 @@ export function StatusBarContent({
   );
 
   return (
-    <div className="flex shrink-0 items-center gap-1.5 overflow-hidden whitespace-nowrap border-t border-gray-700 bg-gray-900 px-3 py-1 text-xs text-gray-400">
-      <span>{plural(cards, "card")}</span>
-      <Dot />
-      <span
-        className={
-          problems === 0 ? undefined : hasErrors ? "text-red-400" : "text-amber-400"
-        }
-      >
-        {plural(problems, "problem")}
-      </span>
-      <Dot />
-      <span className={flaggedCells > 0 ? "text-red-400" : undefined}>
-        {plural(flaggedCells, "flagged cell")}
-      </span>
-      <Dot />
-      <span>{plural(excluded, "pristine row")} excluded</span>
-      <span className="ml-auto flex items-center gap-3">
+    // adversarial review item 2: this bar used to be ONE `overflow-hidden
+    // whitespace-nowrap` line, so at ~1000px with the stale + autosave-off
+    // indicators on, the right-hand action group (Assets / Export / Import /
+    // Reset — or an ARMED confirm's answer buttons) got clipped out of view
+    // along with the counters. Restructured so the two halves degrade
+    // differently: the counters (below) are low-stakes and allowed to
+    // truncate/clip; the action group (ml-auto span) never does — it wraps
+    // onto additional lines instead, and nothing in it forces nowrap, so
+    // even a long confirm sentence can break onto a second line rather than
+    // vanish. `flex-wrap` here is defense in depth for the same reason.
+    <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-t border-gray-700 bg-gray-900 px-3 py-1 text-xs text-gray-400">
+      <div className="flex min-w-0 items-center gap-1.5 overflow-hidden whitespace-nowrap">
+        <span>{plural(cards, "card")}</span>
+        <Dot />
+        <span
+          className={
+            problems === 0 ? undefined : hasErrors ? "text-red-400" : "text-amber-400"
+          }
+        >
+          {plural(problems, "problem")}
+        </span>
+        <Dot />
+        <span className={flaggedCells > 0 ? "text-red-400" : undefined}>
+          {plural(flaggedCells, "flagged cell")}
+        </span>
+        <Dot />
+        <span>{plural(excluded, "pristine row")} excluded</span>
+      </div>
+      <span className="ml-auto flex flex-wrap items-center gap-3">
         {isStale && (
           <span className="text-amber-400">
             stale — preview &amp; tabs show last good state
@@ -166,7 +178,10 @@ export function ResetToDemoButton({
     );
   }
   return (
-    <span className="flex items-center gap-1.5">
+    // flex-wrap (item 2): the answer buttons of an armed confirm must never
+    // clip — if the sentence doesn't fit beside Reset/Keep, it wraps rather
+    // than pushing them out of the visible bar.
+    <span className="flex flex-wrap items-center gap-1.5">
       <span className="text-amber-400">
         Replace your project (and your uploaded assets) with the demo?
       </span>

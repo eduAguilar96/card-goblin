@@ -111,6 +111,42 @@ describe("StatusBarContent", () => {
   });
 });
 
+describe("StatusBarContent — never-clip action group (adversarial review item 2)", () => {
+  // Regression: the whole bar used to be ONE `overflow-hidden whitespace-
+  // nowrap` line, so at ~1000px with the stale + autosave-off indicators on,
+  // Reset to demo / Export / Import — and an armed confirm's answer buttons
+  // — got clipped out of view along with the counters. Real reflow is a
+  // browser layout behavior renderToStaticMarkup can't exercise (no layout
+  // engine); these pin the structural contract instead.
+  it("the outer bar carries no overflow-hidden — that clipped everything, buttons included", () => {
+    const markup = renderState(createEditorStore().getState());
+    const barTag = markup.slice(0, markup.indexOf(">") + 1);
+    expect(barTag).not.toContain("overflow-hidden");
+    expect(barTag).toContain("flex-wrap");
+  });
+
+  it("only the low-priority counters are scoped to clip (min-w-0 + overflow-hidden)", () => {
+    const markup = renderState(createEditorStore().getState());
+    expect(markup).toContain(
+      'class="flex min-w-0 items-center gap-1.5 overflow-hidden whitespace-nowrap"',
+    );
+  });
+
+  it("the action group (Assets/Export/Import/Reset) wraps instead of clipping", () => {
+    const markup = renderState(createEditorStore().getState());
+    expect(markup).toContain('class="ml-auto flex flex-wrap items-center gap-3"');
+  });
+
+  it("an armed Reset confirm's answer buttons live in a wrapping group, not a rigid line", () => {
+    const markup = renderToStaticMarkup(
+      <ResetToDemoButton onReset={() => {}} initialConfirming />,
+    );
+    expect(markup).toContain('class="flex flex-wrap items-center gap-1.5"');
+    // Still says what it says — the restructure didn't drop content.
+    expect(stripTags(markup)).toContain("Replace your project (and your uploaded assets)");
+  });
+});
+
 describe("ResetToDemoButton (§6.2 two-step confirm)", () => {
   it("rests as a single quiet button — no destructive control visible", () => {
     const markup = renderToStaticMarkup(<ResetToDemoButton onReset={() => {}} />);

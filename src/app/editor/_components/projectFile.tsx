@@ -358,7 +358,11 @@ export function ProjectFileButtons({
 
   if (pending !== null) {
     return (
-      <span className="flex items-center gap-1.5">
+      // flex-wrap (adversarial review item 2): the answer buttons of an
+      // armed confirm must never clip out of the status bar — a long
+      // filename here (a real, user-supplied string) can no longer push
+      // Import/Keep out of view; it wraps onto another line instead.
+      <span className="flex flex-wrap items-center gap-1.5">
         <span className="text-amber-400">
           Replace your project (and your uploaded assets) with “{pending.filename}”?
         </span>
@@ -380,7 +384,7 @@ export function ProjectFileButtons({
   }
 
   return (
-    <span className="flex items-center gap-1.5">
+    <span className="flex flex-wrap items-center gap-1.5">
       {error !== null && (
         <span role="alert" className="text-red-400">
           {error}

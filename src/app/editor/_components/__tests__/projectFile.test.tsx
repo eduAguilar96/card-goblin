@@ -356,6 +356,27 @@ describe("ProjectFileButtons", () => {
     expect(stripTags(markup)).toContain(EXPORT_FAILED_MESSAGE);
     expect(stripTags(markup)).toContain("Export project");
   });
+
+  it("both button groups wrap instead of clipping (adversarial review item 2)", () => {
+    // Regression: the status bar's right-hand group used to be a rigid,
+    // overflow-hidden line — a long filename in the armed confirm (a real,
+    // user-supplied string) could push Import/Keep out of view. Real reflow
+    // is a browser layout behavior with no headless driver here; this pins
+    // the structural contract (flex-wrap) on both states.
+    const resting = renderToStaticMarkup(
+      <ProjectFileButtons onExport={() => {}} onImport={() => {}} />,
+    );
+    expect(resting).toContain('class="flex flex-wrap items-center gap-1.5"');
+
+    const armed = renderToStaticMarkup(
+      <ProjectFileButtons
+        onExport={() => {}}
+        onImport={() => {}}
+        initialPending={{ seed, assets: [], filename: "orcs.cardgoblin.json" }}
+      />,
+    );
+    expect(armed).toContain('class="flex flex-wrap items-center gap-1.5"');
+  });
 });
 
 // -- export rejection handling (adversarial m7: no interaction driver, so ---

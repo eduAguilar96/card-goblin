@@ -279,16 +279,22 @@ class Generator {
         ? (xUnits * Math.round(size.heightMm * 100)) / Math.round(size.widthMm * 100)
         : card.yUnits;
 
+    // Built as a plain mutable array and handed to the Deck literal below.
+    // Deck.cards is `readonly CardInstance[]` (model.ts's immutability
+    // contract, now compiler-enforced) — fillDeck/emit accumulate into THIS
+    // reference (same array object, mutable view) rather than deck.cards,
+    // which TypeScript correctly refuses to .push() into.
+    const cards: CardInstance[] = [];
     const deck: Deck = {
       cardName: card.decl.name.name,
       widthMm: size.widthMm,
       heightMm: size.heightMm,
       xUnits,
       yUnits,
-      cards: [],
+      cards,
     };
     try {
-      this.fillDeck(deck, deckIndex, card, xUnits, yUnits);
+      this.fillDeck(deck, cards, deckIndex, card, xUnits, yUnits);
     } catch (err) {
       // Never-throws (⚑8): an internal failure degrades this ONE deck to a
       // D000, keeping the instances generated so far and every other deck.
@@ -303,6 +309,7 @@ class Generator {
 
   private fillDeck(
     deck: Deck,
+    cards: CardInstance[],
     deckIndex: number,
     card: CardBindings,
     xUnits: number,
@@ -354,7 +361,18 @@ class Generator {
 
         let emitted: boolean;
         if (countFailure) {
-          emitted = this.emit(deck, deckIndex, rowIndex, loopRecord, 1, [], [], countFailure, []);
+          emitted = this.emit(
+            deck,
+            cards,
+            deckIndex,
+            rowIndex,
+            loopRecord,
+            1,
+            [],
+            [],
+            countFailure,
+            [],
+          );
         } else if (count === 0) {
           emitted = true; // a legal zero — nothing to emit, no diagnostic
         } else {
@@ -385,9 +403,10 @@ class Generator {
             error = err.diagnostics; // ⚑8: this combination only — siblings unaffected
           }
           emitted = error
-            ? this.emit(deck, deckIndex, rowIndex, loopRecord, count, [], [], error, [])
+            ? this.emit(deck, cards, deckIndex, rowIndex, loopRecord, count, [], [], error, [])
             : this.emit(
                 deck,
+                cards,
                 deckIndex,
                 rowIndex,
                 loopRecord,
@@ -411,6 +430,7 @@ class Generator {
    */
   private emit(
     deck: Deck,
+    cards: CardInstance[],
     deckIndex: number,
     rowIndex: number,
     loopBindings: Record<string, LoopCaseBinding>,
@@ -420,7 +440,7 @@ class Generator {
     error: DataDiagnostic[] | null,
     iconIssues: Iterable<DataDiagnostic>,
   ): boolean {
-    const firstIndex = deck.cards.length;
+    const firstIndex = cards.length;
     const allowed = Math.min(n, CARD_CAP - firstIndex);
     if (allowed > 0) {
       const cardRef = { deck: deck.cardName, deckIndex, cardIndex: firstIndex };
@@ -447,7 +467,7 @@ class Generator {
           contentHash,
         };
         if (error) instance.error = { diagnostics: error };
-        deck.cards.push(instance);
+        cards.push(instance);
       }
     }
     if (allowed < n) {

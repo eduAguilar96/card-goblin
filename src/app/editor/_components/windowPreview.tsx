@@ -152,8 +152,15 @@ export function PreviewContent({
   return (
     <div className="flex h-full w-full flex-col overflow-hidden bg-gray-900 text-sm text-gray-200">
       {/* Toolbar: front/back, view mode, then the mode's own control —
-          nav in single view, zoom in grid view (§4.2). */}
-      <div className="flex shrink-0 items-center gap-4 border-b border-gray-700 bg-gray-800 px-3 py-2">
+          nav in single view, zoom in grid view (§4.2). `flex-wrap` (item 1,
+          adversarial review): this row used to be a single non-wrapping
+          line inside the panel's `overflow-hidden` — below ~460px of panel
+          width (any monitor, just drag the divider) Back / the grid-view
+          toggle / Export PDF were cut off with no way to reach them. Every
+          child here is an independent, modestly-sized control, so wrapping
+          onto a second line at narrow widths keeps all of them reachable;
+          Export PDF must never become unreachable. */}
+      <div className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-2 border-b border-gray-700 bg-gray-800 px-3 py-2">
         <div className="inline-flex overflow-hidden rounded border border-gray-600 text-xs">
           {(["front", "back"] as const).map((s) => (
             <button

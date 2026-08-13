@@ -14,6 +14,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { compileProject, type RenderModel } from "@/lib/lang";
 import { DEMO_PROJECT_ROWS, DEMO_PROJECT_SOURCE } from "@/lib/lang/demoProject";
 import {
+  INVALID_MM_MESSAGE,
   PdfExportModal,
   imageEmbedWarning,
   resetSessionPdfOptions,
@@ -196,5 +197,62 @@ describe("PdfExportModal — image pre-flight (§3.3 M2)", () => {
     expect(imageEmbedWarning(3)).toBe(
       "3 images could not be embedded — they will print as marked placeholder boxes.",
     );
+  });
+});
+
+describe("PdfExportModal — export failure is announced (item 6)", () => {
+  beforeEach(resetSessionPdfOptions);
+
+  it("the failure banner carries role=alert — progress already has role=status, failure had NEITHER", () => {
+    const markup = renderToStaticMarkup(
+      <PdfExportModal model={demoModel()} onClose={() => {}} initialFailure="disk full" />,
+    );
+    expect(markup).toContain('role="alert"');
+    expect(markup).toContain("Export failed: disk full");
+  });
+
+  it("no failure banner (and so no role=alert from it) when nothing has failed", () => {
+    const markup = renderToStaticMarkup(<PdfExportModal model={demoModel()} onClose={() => {}} />);
+    expect(markup).not.toContain("Export failed");
+  });
+});
+
+describe("PdfExportModal — invalid margin/spacing is named, not signaled by color alone (item 7)", () => {
+  beforeEach(resetSessionPdfOptions);
+
+  it("an invalid margin gets aria-invalid, aria-describedby, and a role=alert message naming the problem", () => {
+    const markup = renderToStaticMarkup(
+      <PdfExportModal model={demoModel()} onClose={() => {}} initialMarginText="-5" />,
+    );
+    expect(markup).toContain('aria-invalid="true"');
+    expect(markup).toContain('aria-describedby="pdf-margin-error"');
+    expect(markup).toContain('id="pdf-margin-error"');
+    expect(markup).toContain('role="alert"');
+    expect(markup).toContain(INVALID_MM_MESSAGE);
+    // Pre-existing rule, still true: Export stays disabled while invalid.
+    const exportButton = /<button[^>]*>Export<\/button>/.exec(markup)?.[0];
+    expect(exportButton).toContain('disabled=""');
+  });
+
+  it("an invalid spacing gets the same treatment, keyed to its OWN field id", () => {
+    const markup = renderToStaticMarkup(
+      <PdfExportModal
+        model={demoModel()}
+        onClose={() => {}}
+        initialSpacingText="not a number"
+      />,
+    );
+    expect(markup).toContain('aria-invalid="true"');
+    expect(markup).toContain('aria-describedby="pdf-spacing-error"');
+    expect(markup).toContain('id="pdf-spacing-error"');
+    expect(markup).toContain(INVALID_MM_MESSAGE);
+  });
+
+  it("valid margin/spacing: no error ids, no message, aria-invalid explicitly false", () => {
+    const markup = renderToStaticMarkup(<PdfExportModal model={demoModel()} onClose={() => {}} />);
+    expect(markup).not.toContain("pdf-margin-error");
+    expect(markup).not.toContain("pdf-spacing-error");
+    expect(markup).not.toContain(INVALID_MM_MESSAGE);
+    expect(markup).toContain('aria-invalid="false"');
   });
 });

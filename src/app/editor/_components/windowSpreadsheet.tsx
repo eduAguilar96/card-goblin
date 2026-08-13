@@ -287,7 +287,15 @@ function SheetGrid({ sheet, state, flags, actions }: SheetGridProps): ReactEleme
                       aria-label={`delete row ${r + 1}`}
                       title="delete row"
                       onClick={() => actions.deleteRow(sheet.name, r)}
-                      className="invisible px-0.5 text-gray-500 hover:text-red-400 group-hover:visible"
+                      // adversarial review item 4: `invisible` (visibility:
+                      // hidden) drops the button from the tab order entirely
+                      // — a keyboard user could never reach it. `opacity-0`
+                      // keeps it focusable and clickable while still out of
+                      // the way visually; it reveals on mouse hover (row
+                      // group-hover, unchanged) AND on its own keyboard
+                      // focus (focus-visible), so Tab-ing to it doesn't land
+                      // on an invisible control.
+                      className="rounded px-0.5 text-gray-500 opacity-0 outline-none transition-opacity hover:text-red-400 focus-visible:opacity-100 focus-visible:ring-1 focus-visible:ring-sky-500 group-hover:opacity-100"
                     >
                       ×
                     </button>
@@ -371,8 +379,21 @@ function TextCell({ value, flagged, onCommit, onPasteBlock }: TextCellProps): Re
     if (result.commit !== undefined) onCommit(result.commit);
   };
   const onKeyDown = (e: KeyboardEvent<HTMLInputElement>): void => {
-    if (e.key === "Enter") e.currentTarget.blur(); // blur → the commit action
-    else if (e.key === "Escape") apply({ kind: "escape" }); // revert in place
+    if (e.key === "Enter") {
+      // adversarial review item 3: this used to call blur(), which commits
+      // via the onBlur handler below — but ALSO moves focus to
+      // document.body, so the next Tab restarted at the top of the page
+      // instead of continuing through the grid. Commit the same way blur
+      // did, but stay put: the chosen behavior is "stay in the cell" (the
+      // alternative — move to the same column of the next row — needs real
+      // DOM row/column traversal that this project's headless test suite
+      // has no way to drive or verify; picking the option that's provably
+      // correct here beats one that merely looks nicer).
+      e.preventDefault();
+      apply({ kind: "commit" });
+    } else if (e.key === "Escape") {
+      apply({ kind: "escape" }); // revert in place
+    }
   };
   return (
     <input
@@ -413,8 +434,14 @@ function EnumCell({ value, cases, flagged, onCommit, onPasteBlock }: EnumCellPro
       value={value}
       onChange={(e) => onChange(e.currentTarget.value)}
       onPaste={onPasteBlock}
-      className={`w-36 bg-gray-800 px-1.5 py-1 outline-none focus:bg-gray-900/50 focus:ring-1 focus:ring-inset focus:ring-sky-600 ${
-        flagged ? "text-red-200" : ""
+      // adversarial review item 8: `bg-gray-800` painted OVER the flagged
+      // <td>'s bg-red-950 wash, so an invalid enum read as a lesser error
+      // than an invalid number (TextCell is bg-transparent, so its <td>'s
+      // wash always shows). Drop to transparent ONLY when flagged, so both
+      // cell kinds render identically red; the unflagged chip look is
+      // unchanged.
+      className={`w-36 px-1.5 py-1 outline-none focus:bg-gray-900/50 focus:ring-1 focus:ring-inset focus:ring-sky-600 ${
+        flagged ? "bg-transparent text-red-200" : "bg-gray-800"
       }`}
     >
       {unknown && <option value={value}>{value}</option>}

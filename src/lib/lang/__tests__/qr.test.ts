@@ -4,7 +4,13 @@
  * every QR code carries, independent of any external decoder.
  */
 import { describe, expect, it } from "vitest";
-import { encodeQr, QR_LEVELS, qrCacheHitsForTests, resetQrCacheForTests } from "../qr";
+import {
+  encodeQr,
+  QR_LEVELS,
+  qrCacheHitsForTests,
+  qrCacheLimitForTests,
+  resetQrCacheForTests,
+} from "../qr";
 
 describe("encodeQr — determinism and capacity", () => {
   it("the same (data, level) always produces the identical matrix", () => {
@@ -93,14 +99,43 @@ describe("encodeQr — memoization", () => {
     expect(qrCacheHitsForTests()).toBe(0);
   });
 
-  it("overflow past 1000 distinct entries clears the whole map (no partial LRU eviction)", () => {
+  it("overflow past the cache limit evicts the OLDEST half, not the whole map (cliff fix, 2026-08-13)", () => {
     resetQrCacheForTests();
-    for (let i = 0; i < 1000; i++) encodeQr(`seed-${i}`, "m");
-    // The cache is exactly at the 1000 cap; the next DISTINCT key clears it
-    // before inserting, so every earlier seed is now a fresh miss again.
-    encodeQr("seed-1000", "m");
+    const limit = qrCacheLimitForTests();
+    for (let i = 0; i < limit; i++) encodeQr(`seed-${i}`, "m");
+    // One more DISTINCT key pushes the cache to capacity and evicts the
+    // OLDEST half (seed-0 .. seed-(limit/2 - 1)) — insertion order, since
+    // Map iterates in the order keys were set.
+    encodeQr(`seed-${limit}`, "m");
+
+    // The newest half of the original fill, plus the key that triggered the
+    // evict, must still be warm.
+    let hits = qrCacheHitsForTests();
+    encodeQr(`seed-${limit - 1}`, "m"); // newest of the original fill
+    encodeQr(`seed-${limit}`, "m"); // the key that triggered the evict
+    expect(qrCacheHitsForTests() - hits).toBe(2);
+
+    // The oldest half is gone — a re-request is a fresh miss, not a cliff
+    // where EVERY key (including ones just re-warmed above) would miss.
+    hits = qrCacheHitsForTests();
     encodeQr("seed-0", "m");
-    expect(qrCacheHitsForTests()).toBe(0);
+    expect(qrCacheHitsForTests() - hits).toBe(0);
+
+    resetQrCacheForTests();
+  });
+
+  it("a CARD_CAP-scale (2000) deck of distinct codes never evicts anything — the whole deck stays warm", () => {
+    // The old 1000-entry limit was HALF of generate.ts's CARD_CAP (2000):
+    // every full-size deck guaranteed at least one eviction. The limit is
+    // now comfortably above CARD_CAP, so this exact scenario — the one the
+    // adversarial review measured at 800–1100 ms per recompile — produces
+    // zero evictions and every key stays cached.
+    resetQrCacheForTests();
+    const CARD_CAP = 2000;
+    for (let i = 0; i < CARD_CAP; i++) encodeQr(`card-${i}`, "m");
+    const hitsBefore = qrCacheHitsForTests();
+    for (let i = 0; i < CARD_CAP; i++) encodeQr(`card-${i}`, "m");
+    expect(qrCacheHitsForTests() - hitsBefore).toBe(CARD_CAP); // ALL hits, warm
     resetQrCacheForTests();
   });
 });

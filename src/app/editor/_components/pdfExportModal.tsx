@@ -71,6 +71,7 @@ import {
   type PdfExportOptions,
 } from "@/app/editor/_components/pdfLayout";
 import { assemblePdf } from "@/app/editor/_components/pdfAssemble";
+import { focusableElementsIn } from "@/app/editor/_components/dialogFocusTrap";
 import { PdfPagePreview } from "@/app/editor/_components/pdfPagePreview";
 import type { ResolvedImage } from "@/app/editor/_components/cardSvg";
 import {
@@ -102,6 +103,13 @@ export function parseNonNegativeMm(text: string): number | null {
   const value = Number(text);
   return Number.isFinite(value) && value >= 0 ? value : null;
 }
+
+/** The margin/spacing inline validation message (adversarial review item 7):
+ * an invalid field used to signal ONLY via a red border — nothing named the
+ * problem, and nothing told a screen-reader user the field was invalid at
+ * all. Both fields share this exact rule (parseNonNegativeMm above), so one
+ * message serves both; each field's own label sits right above it. */
+export const INVALID_MM_MESSAGE = "Enter a number ≥ 0.";
 
 /** §3.3 (M2): the pre-export image warning, worded per the spec ("N images
  * could not be embedded"). Warning only — the deck always exports, with the
@@ -175,6 +183,13 @@ export interface PdfExportModalProps {
   rasterize?: RasterizeFaces;
   /** Injection seam for tests (default: the real browser image loader). */
   resolveImages?: ResolveImages;
+  /** Test seams (no interaction driver in this project, same pattern as
+   * ResetToDemoButton's `initialConfirming`): seed the margin/spacing text
+   * fields and the failure banner so their states render statically instead
+   * of needing a simulated typing/click flow. */
+  initialMarginText?: string;
+  initialSpacingText?: string;
+  initialFailure?: string | null;
 }
 
 export function PdfExportModal({
@@ -182,12 +197,19 @@ export function PdfExportModal({
   onClose,
   rasterize = rasterizeFaces,
   resolveImages = resolveImageSources,
+  initialMarginText,
+  initialSpacingText,
+  initialFailure = null,
 }: PdfExportModalProps): ReactElement {
   const [options, setOptions] = useState<PdfExportOptions>(() => ({ ...sessionOptions }));
-  const [marginText, setMarginText] = useState(() => String(sessionOptions.marginMm));
-  const [spacingText, setSpacingText] = useState(() => String(sessionOptions.spacingMm));
+  const [marginText, setMarginText] = useState(
+    () => initialMarginText ?? String(sessionOptions.marginMm),
+  );
+  const [spacingText, setSpacingText] = useState(
+    () => initialSpacingText ?? String(sessionOptions.spacingMm),
+  );
   const [working, setWorking] = useState(false);
-  const [failure, setFailure] = useState<string | null>(null);
+  const [failure, setFailure] = useState<string | null>(initialFailure);
   /** Previewed page. Clamped at render, never in state (module note). */
   const [pageIndex, setPageIndex] = useState(0);
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -195,8 +217,14 @@ export function PdfExportModal({
   // Focus the dialog on open (tabIndex −1 makes it focusable) so keyboard
   // users land inside it and Escape works immediately. Effects never run in
   // renderToStaticMarkup — behavior is on the manual browser checklist.
+  // Capture the opener BEFORE moving focus in, and restore it on close
+  // (adversarial review item 5) — every close path (Escape, backdrop,
+  // Cancel, a successful export) unmounts this component the same way, so
+  // one cleanup covers all of them.
   useEffect(() => {
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     dialogRef.current?.focus();
+    return () => opener?.focus();
   }, []);
 
   /** Escape closes; Tab wraps at the dialog's ends (minimal focus trap over
@@ -209,11 +237,11 @@ export function PdfExportModal({
       return;
     }
     if (event.key !== "Tab" || dialogRef.current === null) return;
-    const focusable = [
-      ...dialogRef.current.querySelectorAll<HTMLElement>(
-        'button, input, select, textarea, a[href], [tabindex]:not([tabindex="-1"])',
-      ),
-    ].filter((el) => !el.hasAttribute("disabled"));
+    // dialogFocusTrap.ts (item 5, shared with assetsDrawer.tsx): filters the
+    // selector's matches down to elements a real Tab press can reach, so a
+    // future non-visible control here can't silently break Tab wrapping the
+    // way assetsDrawer's hidden file input did.
+    const focusable = focusableElementsIn(dialogRef.current);
     if (focusable.length === 0) return;
     const first = focusable[0];
     const last = focusable[focusable.length - 1];
@@ -393,6 +421,8 @@ export function PdfExportModal({
                   className={FIELD_CLASS + (marginValid ? "" : " border-red-500")}
                   value={marginText}
                   disabled={working}
+                  aria-invalid={!marginValid}
+                  aria-describedby={marginValid ? undefined : "pdf-margin-error"}
                   onChange={(e) => {
                     const text = e.currentTarget.value;
                     setMarginText(text);
@@ -400,6 +430,13 @@ export function PdfExportModal({
                     if (value !== null) update({ marginMm: value });
                   }}
                 />
+                {/* item 7: a red border alone names nothing to a sighted
+                    user and nothing at all to a screen reader. */}
+                {!marginValid && (
+                  <span id="pdf-margin-error" role="alert" className="text-red-400">
+                    {INVALID_MM_MESSAGE}
+                  </span>
+                )}
               </label>
 
               <label className={LABEL_CLASS}>
@@ -411,6 +448,8 @@ export function PdfExportModal({
                   className={FIELD_CLASS + (spacingValid ? "" : " border-red-500")}
                   value={spacingText}
                   disabled={working}
+                  aria-invalid={!spacingValid}
+                  aria-describedby={spacingValid ? undefined : "pdf-spacing-error"}
                   onChange={(e) => {
                     const text = e.currentTarget.value;
                     setSpacingText(text);
@@ -418,6 +457,11 @@ export function PdfExportModal({
                     if (value !== null) update({ spacingMm: value });
                   }}
                 />
+                {!spacingValid && (
+                  <span id="pdf-spacing-error" role="alert" className="text-red-400">
+                    {INVALID_MM_MESSAGE}
+                  </span>
+                )}
               </label>
 
               <label className={LABEL_CLASS}>
@@ -462,7 +506,14 @@ export function PdfExportModal({
             />
 
             {failure !== null && (
-              <p className="mt-3 rounded border border-red-900 bg-red-950 px-2 py-1 text-xs text-red-300">
+              // item 6: progress has role="status"; failure had no role at
+              // all, so an assistive-tech user got no announcement that the
+              // export had failed — only the (silent) disappearance of the
+              // "Exporting…" status text.
+              <p
+                role="alert"
+                className="mt-3 rounded border border-red-900 bg-red-950 px-2 py-1 text-xs text-red-300"
+              >
                 Export failed: {failure}
               </p>
             )}
