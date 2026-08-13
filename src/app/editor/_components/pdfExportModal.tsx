@@ -322,7 +322,10 @@ export function PdfExportModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+      // `whitespace-normal`: prophylactic, same reason as assetsDrawer's —
+      // an overlay mounted under a `whitespace-nowrap` ancestor inherits it
+      // through the DOM (fixed positioning does not break inheritance).
+      className="fixed inset-0 z-50 flex items-center justify-center whitespace-normal bg-black/60 p-4"
       role="presentation"
       // Backdrop click closes; clicks inside the dialog bubble here with a
       // different target, so only true backdrop hits pass the guard.

@@ -239,3 +239,16 @@ describe("takePickedFiles — the picker regression (file input's live FileList)
     expect(takePickedFiles({ files: null, value: "x" })).toEqual([]);
   });
 });
+
+describe("overlay typography reset (status-bar inheritance trap)", () => {
+  it("the backdrop resets white-space — the status bar it mounts under sets nowrap", () => {
+    // Regression: `white-space` inherits through the DOM and `position: fixed`
+    // does not stop it, so the banner rendered as one unwrapped line.
+    const html = renderToStaticMarkup(
+      <AssetsDrawerContent assets={[]} disabled={false} onClose={() => {}} {...noopActions} />,
+    );
+    const backdrop = html.slice(0, html.indexOf(">") + 1);
+    expect(backdrop).toContain("fixed inset-0");
+    expect(backdrop).toContain("whitespace-normal");
+  });
+});

@@ -318,8 +318,14 @@ export function AssetsDrawerContent({
   };
 
   return (
+    // `whitespace-normal` is load-bearing, not decoration: this overlay is a
+    // DOM child of the status bar, which sets `whitespace-nowrap` to keep its
+    // stats on one line. `white-space` INHERITS down the DOM tree, and
+    // `position: fixed` doesn't stop inheritance — without this reset the
+    // banner's paragraph renders as one long unwrapped line. Any overlay
+    // mounted from that bar needs the same reset.
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center whitespace-normal bg-black/60 p-4"
       role="presentation"
       onClick={(event) => {
         if (event.target === event.currentTarget) onClose();
