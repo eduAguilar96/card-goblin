@@ -1821,6 +1821,133 @@ describe("templates are checked per using Card", () => {
   });
 });
 
+// -- built-in [row]/[card] position bindings (§3.6, ◆42) --------------------
+
+describe("built-in [row]/[card] position bindings (§3.6, ◆42)", () => {
+  it("resolve to Number with no diagnostics when no column shadows them", () => {
+    // [row] in a Number position (no coercion possible — proves it IS
+    // Number) and [card] in a Text position (proves it coerces like any
+    // other Number), on the demo's Monsters sheet, which declares neither.
+    expect(
+      codesOf(withElement("Text:", ["x: [row]", ...TEXT_BASE.slice(1), "text: [card]"])),
+    ).toEqual([]);
+  });
+
+  it("record kind 'position' and type Number", () => {
+    const source = src(
+      ...PRELUDE,
+      "Template: T",
+      "  Text:",
+      ...TEXT_BASE.map((p) => `    ${p}`),
+      "    text: [row]",
+      "Card: C",
+      ...CARD_ITEMS.map((i) => `  ${i}`),
+    );
+    const { bindings } = checkOf(source);
+    const tpl = bindings.templates.get("T") as TemplateDecl;
+    const ref = (tpl.children[0] as ElementNode).properties.find((p) => p.key.name === "text")!
+      .value as DataRef;
+    const card = bindings.cards[0];
+    expect(card.resolutions.get(ref)).toEqual({ kind: "position", which: "row" });
+    expect(card.exprTypes.get(ref)).toEqual({ kind: "Number" });
+  });
+
+  it("a sheet column named row/card shadows the built-in, warning W001 at the column's declaration", () => {
+    const rowShadow = diagsOf(
+      src(
+        "Sheet: S",
+        "  column row: Text",
+        "Template: T",
+        "  Text:",
+        ...TEXT_BASE.map((p) => `    ${p}`),
+        "    text: [row]",
+        "Card: C",
+        "  sheet: S",
+        ...CARD_ITEMS.slice(1).map((i) => `  ${i}`),
+      ),
+    );
+    expect(rowShadow.map((d) => d.code)).toEqual(["W001"]);
+    expect(rowShadow[0].message).toBe(
+      "Column 'row' of sheet 'S' shadows the built-in [row] binding",
+    );
+
+    const cardShadow = diagsOf(
+      src(
+        "Sheet: S",
+        "  column card: Number",
+        "Template: T",
+        "  Text:",
+        ...TEXT_BASE.map((p) => `    ${p}`),
+        "    text: [card]",
+        "Card: C",
+        "  sheet: S",
+        ...CARD_ITEMS.slice(1).map((i) => `  ${i}`),
+      ),
+    );
+    expect(cardShadow.map((d) => d.code)).toEqual(["W001"]);
+    expect(cardShadow[0].message).toBe(
+      "Column 'card' of sheet 'S' shadows the built-in [card] binding",
+    );
+  });
+
+  it("the shadow warning fires at declaration time, even when [row]/[card] is never referenced", () => {
+    // Mirrors the loop-/Repeat-variable shadow warnings: the conflict is a
+    // property of the DECLARATION, not of any particular [ref]. The sheet
+    // is also unbound, hence the accompanying W002.
+    expect(codesOf(src("Sheet: S", "  column row: Text"))).toEqual(["W001", "W002"]);
+  });
+
+  it("a column named row/card resolves as the COLUMN — the built-in never shows through", () => {
+    const source = src(
+      "Sheet: S",
+      "  column row: Text",
+      "Template: T",
+      "  Text:",
+      ...TEXT_BASE.map((p) => `    ${p}`),
+      "    text: [row]",
+      "Card: C",
+      "  sheet: S",
+      ...CARD_ITEMS.slice(1).map((i) => `  ${i}`),
+    );
+    const { bindings } = checkOf(source);
+    const tpl = bindings.templates.get("T") as TemplateDecl;
+    const ref = (tpl.children[0] as ElementNode).properties.find((p) => p.key.name === "text")!
+      .value as DataRef;
+    expect(bindings.cards[0].resolutions.get(ref)).toEqual({
+      kind: "column",
+      sheet: "S",
+      column: "row",
+      type: { kind: "Text" },
+    });
+  });
+
+  it("MINOR-6 (adversarial review): a non-Color-compatible position hard-errors even with NO sheet context", () => {
+    // Counterexample to reading ◆42's shadowing guarantee too broadly: an
+    // UNUSED template (no Card, hence no sheet at all) used to poison an
+    // unmatched [ref] silently to Unknown (no diagnostic — see "an unused
+    // Template still gets structural checks" above). Since the built-ins
+    // resolve regardless of sheet context (they never depended on one),
+    // [row] here types as Number — correctly E003 against a Color-typed
+    // position, where it previously said nothing. This is intended: it's a
+    // genuine type mismatch, exactly as loud as any other misused Number.
+    const ds = diagsOf(
+      src(
+        "Template: Orphan",
+        "  Rectangle:",
+        "    x: 0",
+        "    y: 0",
+        "    width: 1",
+        "    height: 1",
+        "    color: [row]",
+      ),
+    );
+    expect(ds.map((d) => d.code).sort()).toEqual(["E003", "W002"]); // + unused-template
+    expect(ds.find((d) => d.code === "E003")?.message).toBe(
+      "Type mismatch: expected Color, got Number",
+    );
+  });
+});
+
 // -- expected-type resolution (◆14†, ◆21†) ----------------------------------
 
 describe("expected-type-driven bare names", () => {

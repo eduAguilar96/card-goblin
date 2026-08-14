@@ -303,8 +303,12 @@ export function computeCrossMarks(
  * placeholders skipped (counted); duplex → each front page immediately
  * followed by its column-mirrored back page; separate → all backs after all
  * fronts (module note); none → fronts only. `count:` copies are separate
- * CardInstances in the model, so they place (and count) individually while
- * sharing a contentHash — i.e. one raster, embedded once, drawn N times.
+ * CardInstances in the model, so they place (and count) individually. They
+ * share a contentHash — one raster, embedded once, drawn N times — UNLESS a
+ * face reads the built-in `[card]` binding (§3.6, ◆42): a numbered print run
+ * has genuinely different pixels per copy, so it rasterizes N times, not
+ * one — `faceSpecs`/`registerFace` below dedupe by hash either way, so this
+ * needs no special-casing here, only an honest comment.
  */
 export function layoutPdf(model: RenderModel, options: PdfExportOptions): PdfLayoutResult {
   const page = PAGE_SIZES[options.pageSize];

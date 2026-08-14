@@ -23,6 +23,7 @@ const noopActions: SpreadsheetActions = {
   setCell: () => undefined,
   addRow: () => undefined,
   deleteRow: () => undefined,
+  moveRow: () => undefined,
 };
 
 function renderState(state: EditorState): string {
@@ -64,11 +65,17 @@ describe("SpreadsheetContent (demo)", () => {
     expect(text).toContain("count · Number");
   });
 
-  it("renders 2 rows × 4 columns of inputs with the seeded values", () => {
-    expect(markup.match(/<input/g)).toHaveLength(8);
+  it("renders 2 rows × 4 columns of data inputs, plus one row-index gutter input per row", () => {
+    // 8 data cells + 2 gutter fields (§3.6, ◆42 — the gutter is an <input> now).
+    expect(markup.match(/<input/g)).toHaveLength(10);
     for (const value of ["Dragon", "5", "4", "Imp", "1"]) {
       expect(markup).toContain(`value="${value}"`);
     }
+  });
+
+  it("the row-index gutter shows the 1-based position, matching what [row] resolves to (§3.6, ◆42)", () => {
+    expect(markup).toContain('aria-label="row position, currently 1 of 2"');
+    expect(markup).toContain('aria-label="row position, currently 2 of 2"');
   });
 
   it("has no dropdown (the demo declares no enum column)", () => {
@@ -136,7 +143,7 @@ describe("SpreadsheetContent (demo variations)", () => {
     expect(markup).not.toContain("BOO");
     expect(markup).not.toContain("ZOMBIE");
     expect(markup).not.toContain("__orphan__");
-    expect(markup.match(/<input/g)).toHaveLength(4); // schema columns only
+    expect(markup.match(/<input/g)).toHaveLength(5); // 4 schema columns + 1 row-index gutter
   });
 });
 
@@ -244,9 +251,11 @@ describe("SpreadsheetContent (zero-column sheet)", () => {
     <SpreadsheetContent schema={schema} sheets={sheets} dataDiagnostics={[]} actions={noopActions} />,
   );
 
-  it("renders numbered rows with add/delete only, plus the no-columns hint", () => {
+  it("renders numbered rows with add/delete and an editable gutter only, plus the no-columns hint", () => {
     expect(stripTags(markup)).toContain("this sheet has no columns; rows control card count");
-    expect(markup).not.toContain("<input");
+    // No DATA-cell inputs — but the row-index gutter is itself an <input>
+    // now (§3.6, ◆42), and works the same on a zero-column, loop-only sheet.
+    expect(markup.match(/<input/g)).toHaveLength(2);
     expect(markup).not.toContain("<select");
     expect(markup).toContain('aria-label="delete row 1"');
     expect(markup).toContain('aria-label="delete row 2"');
@@ -256,6 +265,42 @@ describe("SpreadsheetContent (zero-column sheet)", () => {
   it("zero-column rows are never dimmed pristine (⚑13† — existence is the edit)", () => {
     expect(markup).not.toContain("pristine — excluded");
     expect(markup).not.toContain("opacity-50");
+  });
+});
+
+// -- row-index gutter reordering (§3.6, ◆42) ---------------------------------
+
+describe("SpreadsheetContent (row-index gutter reordering)", () => {
+  it("is a plain, tab-reachable <input> — no tabindex override hiding it from keyboard users", () => {
+    const markup = renderState(createEditorStore().getState());
+    const gutterInputs = markup.match(/<input[^>]*aria-label="row position[^>]*>/g) ?? [];
+    expect(gutterInputs).toHaveLength(2);
+    for (const tag of gutterInputs) {
+      expect(tag).not.toContain("tabindex");
+    }
+  });
+
+  it("pristine dimming (◆29) survives a move — the row keeps opacity-50 at its NEW position", () => {
+    const store = createEditorStore();
+    store.getState().addRow("Monsters"); // index 2, pristine
+    store.getState().flushCompile();
+    store.getState().moveRow("Monsters", 2, 0); // jump the pristine row to the front
+    const markup = renderState(store.getState());
+    expect(markup).toContain("opacity-50");
+    expect(markup).toContain("pristine — excluded");
+    // The gutter reads the row's NEW 1-based position — the number a moved
+    // row shows is the number its cards would print via [row] (§3.6).
+    expect(markup).toContain('aria-label="row position, currently 1 of 3"');
+  });
+
+  it("a flagged cell's red highlight follows its row after a move (synchronous recompile)", () => {
+    const store = createEditorStore();
+    store.getState().setCell("Monsters", 1, "health", "garbage"); // Imp
+    store.getState().flushCompile();
+    store.getState().moveRow("Monsters", 1, 0); // Imp jumps ahead of Dragon
+    const markup = renderState(store.getState());
+    expect(markup.match(/bg-red-950/g)).toHaveLength(1); // still exactly one flag
+    expect(markup.indexOf("Imp")).toBeLessThan(markup.indexOf("Dragon")); // order actually changed
   });
 });
 

@@ -118,7 +118,11 @@ export type Resolution =
   /** Bare `auto` as the ENTIRE width:/height: value of an Image (§3.3): the
    * dimension derives from the art's intrinsic ratio at LOAD time, so the
    * model carries the keyword and the renderer/exporter resolve it. */
-  | { kind: "autoDim" };
+  | { kind: "autoDim" }
+  /** Built-in `[row]`/`[card]` position bindings (§3.6, ◆42): resolved LAST,
+   * after sheet columns, so a sheet's own row/card column shadows them
+   * (warned at the column's declaration — buildSheetInfo, not here). */
+  | { kind: "position"; which: "row" | "card" };
 
 /** AST nodes that get an entry in `CardBindings.resolutions`. */
 export type ResolvableNode = DataRef | IdentifierExpr | QualifiedName | StringRefPart;
@@ -535,6 +539,18 @@ class Checker {
           col.name.range,
         );
         continue;
+      }
+      if (name === "row" || name === "card") {
+        // ◆42: a sheet's own row/card column shadows the built-in binding of
+        // the same name for every Card that binds this sheet (§3.6 resolves
+        // columns before built-ins) — warn at the column's declaration, like
+        // the loop-/Repeat-variable shadow warnings below, rather than at
+        // each `[ref]` that happens to resolve to it.
+        this.warn(
+          "W001",
+          `Column '${name}' of sheet '${decl.name.name}' shadows the built-in [${name}] binding`,
+          col.name.range,
+        );
       }
       columns.set(name, { decl: col, type: this.resolveColumnType(col) });
     }
@@ -1505,9 +1521,12 @@ class Checker {
   // -- name resolution (§3.5, §3.6) -----------------------------------------
 
   /** `[name]`: innermost Repeat vars → the Card's loop vars → the bound
-   * sheet's columns. When the context has no usable sheet (unknown/missing
-   * sheet, unused template), unmatched refs poison silently — the cause has
-   * its own diagnostic already. */
+   * sheet's columns → the built-in `[row]`/`[card]` position bindings (§3.6,
+   * ◆42). When the context has no usable sheet (unknown/missing sheet,
+   * unused template), sheet-column lookup is skipped and unmatched refs
+   * poison silently — the cause has its own diagnostic already — but the
+   * built-ins still resolve: they never depend on sheet DATA, only on a
+   * Card's generation position, so there is nothing to poison against. */
   private resolveRef(name: string, range: Range, ctx: Ctx, node: ResolvableNode): ValueType {
     for (let i = ctx.repeats.length - 1; i >= 0; i--) {
       if (ctx.repeats[i].name === name) {
@@ -1534,6 +1553,15 @@ class Checker {
         });
         return col.type;
       }
+    }
+    // Built-in position bindings (§3.6, ◆42): resolved LAST — a sheet column
+    // named row/card already returned above, so reaching here means no such
+    // column shadows this reference.
+    if (name === "row" || name === "card") {
+      this.recordResolution(ctx, node, { kind: "position", which: name });
+      return NUMBER;
+    }
+    if (ctx.sheet) {
       // Message is deliberately context-free so a template used by several
       // Cards dedupes to ONE diagnostic at the template's range (§3.6).
       this.error("E002", `Unknown reference [${name}]`, range);

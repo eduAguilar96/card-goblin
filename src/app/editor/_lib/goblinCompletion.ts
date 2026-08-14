@@ -594,6 +594,27 @@ function bracketSuggestions(scope: RefScope): CompletionSuggestion[] {
       group: 0,
     });
   }
+  // Built-in position bindings (§3.6, ◆42): offered LAST, after every real
+  // column — matching their resolution order, and (since sortText combines
+  // group with array position, goblinLanguage.ts) sorting after them in the
+  // menu too. A column literally named row/card shadows the built-in and
+  // already claimed the label above — dedupeByLabel (computeCompletions)
+  // drops this one for free, the same "first occurrence wins" mechanism
+  // that already resolves every other shadowing case here.
+  out.push({
+    label: "row",
+    insertText: "row",
+    kind: "variable",
+    detail: "built-in — 1-based row position in its sheet (the grid gutter number)",
+    group: 0,
+  });
+  out.push({
+    label: "card",
+    insertText: "card",
+    kind: "variable",
+    detail: "built-in — 1-based card position in the generated deck (rows × loop × count)",
+    group: 0,
+  });
   return out;
 }
 

@@ -26,6 +26,7 @@ import {
   parseClipboardBlock,
   pasteCommitsDirectly,
   pasteOps,
+  resolveIndexEdit,
   type PasteOp,
 } from "@/app/editor/_components/gridModel";
 
@@ -235,6 +236,63 @@ describe("cellEditReduce", () => {
       draft: null,
       commit: "",
     });
+  });
+});
+
+// -- row-index gutter reducer (§3.6, ◆42) ------------------------------------
+
+describe("resolveIndexEdit", () => {
+  it("moves forward: typing 2 on row 10 of a 10-row sheet (A..J) targets index 1", () => {
+    // "move and shift", not swap: A J B C D E F G H I — J (currentIndex 9)
+    // lands at index 1, matching moveRow's splice-out/splice-in semantics.
+    expect(resolveIndexEdit("2", 9, 10)).toEqual({ kind: "move", to: 1 });
+  });
+
+  it("moves backward: typing 4 on row 1 of a 5-row sheet targets index 3", () => {
+    expect(resolveIndexEdit("4", 0, 5)).toEqual({ kind: "move", to: 3 });
+  });
+
+  it("clamps ≤ 0 to the first row (index 0)", () => {
+    expect(resolveIndexEdit("0", 5, 10)).toEqual({ kind: "move", to: 0 });
+    expect(resolveIndexEdit("-3", 5, 10)).toEqual({ kind: "move", to: 0 });
+  });
+
+  it("clamps beyond the row count to the last row (index rowCount - 1)", () => {
+    expect(resolveIndexEdit("999", 0, 10)).toEqual({ kind: "move", to: 9 });
+  });
+
+  it("reverts on garbage: blank, whitespace-only, non-numeric, or decimal", () => {
+    expect(resolveIndexEdit("", 2, 10)).toEqual({ kind: "none" });
+    expect(resolveIndexEdit("   ", 2, 10)).toEqual({ kind: "none" });
+    expect(resolveIndexEdit("abc", 2, 10)).toEqual({ kind: "none" });
+    expect(resolveIndexEdit("3abc", 2, 10)).toEqual({ kind: "none" });
+    // A row position is an ordinal, not a measurement — decimals revert
+    // rather than truncating (a deliberate simplification).
+    expect(resolveIndexEdit("2.5", 2, 10)).toEqual({ kind: "none" });
+    // A leading "+" is outside the accepted spelling too.
+    expect(resolveIndexEdit("+3", 2, 10)).toEqual({ kind: "none" });
+  });
+
+  it("reverts when the (clamped) target is the row's own current position", () => {
+    expect(resolveIndexEdit("3", 2, 10)).toEqual({ kind: "none" }); // unchanged
+    expect(resolveIndexEdit("1", 0, 10)).toEqual({ kind: "none" }); // already first
+    expect(resolveIndexEdit("999", 9, 10)).toEqual({ kind: "none" }); // already last, clamped target ties
+  });
+
+  it("tolerates surrounding whitespace on an otherwise-valid number", () => {
+    expect(resolveIndexEdit("  4  ", 0, 10)).toEqual({ kind: "move", to: 3 });
+  });
+
+  it("a single-row sheet always reverts — there is nowhere else to move to", () => {
+    expect(resolveIndexEdit("1", 0, 1)).toEqual({ kind: "none" });
+    expect(resolveIndexEdit("5", 0, 1)).toEqual({ kind: "none" });
+    expect(resolveIndexEdit("0", 0, 1)).toEqual({ kind: "none" });
+    expect(resolveIndexEdit("abc", 0, 1)).toEqual({ kind: "none" });
+  });
+
+  it("a zero row count reverts unconditionally (unreachable from the real UI, but never negative)", () => {
+    expect(resolveIndexEdit("1", 0, 0)).toEqual({ kind: "none" });
+    expect(resolveIndexEdit("abc", 0, 0)).toEqual({ kind: "none" });
   });
 });
 

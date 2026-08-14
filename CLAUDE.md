@@ -136,8 +136,10 @@ Each is documented at its site and enforced by tests:
 
 - `parse`, `check`, `generateModel`, `compileProject` **never throw** — they degrade to
   diagnostics. One bad cell must never blank the deck.
-- The RenderModel is **immutable by contract**; `count:` copies share shape arrays —
-  derive, never mutate.
+- The RenderModel is **immutable by contract**; `count:` copies share one evaluation
+  (one Shape array, one hash) unless a face reads `[card]` (§3.6, ◆42), which makes
+  copies print different numbers and so forces each to resolve its own — derive,
+  never mutate either way.
 - The preview reads `lastGoodModel`; the grid's tabs read `lastGoodSchema`; red cell
   flags read the *current* compile. The status bar's stale indicator reconciles them.
 - Row objects may carry orphaned `__orphan__*` keys (data preserved across schema

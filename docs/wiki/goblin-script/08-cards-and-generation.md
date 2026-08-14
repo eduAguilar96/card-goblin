@@ -35,6 +35,9 @@ for each non-empty row of the bound sheet
     emit `count` copies
 ```
 
+Those copies are identical UNLESS your template prints [`[card]`](sheets-and-data.md) —
+then each one resolves on its own, since its own number is genuinely different content.
+
 So the deck is **rows × loop options × count**. With the demo's two rows, three suits,
 and counts of 2 and 1:
 
@@ -43,6 +46,9 @@ and counts of 2 and 1:
 
 Multiple `loop:` lines nest in declaration order — rows × suits × elements × … Cases
 come out in the order you declared them in the enum.
+
+Every card generated this way can reference its own place in that math: see
+[`[row]` and `[card]`](sheets-and-data.md), the two built-in numbering bindings.
 
 ## `count:`
 

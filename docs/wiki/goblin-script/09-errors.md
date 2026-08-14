@@ -14,7 +14,7 @@ kept as small as the mistake.
 | You see | It means |
 |---|---|
 | **Red squiggle in the code** | A code problem — typo, type mismatch, missing property. The preview and grid hold their last good state; the status bar shows "stale". |
-| **Red cell in the grid** | That cell's value doesn't fit its column: not a number, not a valid enum option, or empty but needed. Only the cards using that cell become placeholders. |
+| **Red cell in the grid** | That cell's value doesn't fit its column: not a number, not a valid enum option, or empty but needed. Only the cards built from that cell's row become placeholders — and if that row makes several copies (`count:`), the whole group goes together, since they're built from one evaluation. |
 | **A grey placeholder card** | One card's data couldn't be evaluated — a bad cell, a divide by zero, a runaway repeat. The error messages are printed on the card. |
 | **An amber dot on a card** | A [`TextBox`](text.md) on that card had its text clipped or shrunk to fit the box — not an error, just worth a look. |
 | **A dimmed spreadsheet row** | A brand-new, never-edited empty row. It's excluded from the deck until you type into it. |
@@ -28,9 +28,12 @@ preview keeps showing the last render that worked, and the grid keeps the last s
 columns that compiled, so nothing flickers while you're mid-edit.
 
 **Data problems** are found while building actual cards — a cell that isn't a number,
-an empty cell that a template needs, a `count:` that isn't a whole number. These flag
-the offending cell red where there is one, and turn the affected cards into
-placeholders. The rest of the deck renders normally.
+an empty cell that a template needs, a `count:` that isn't a whole number, a
+computed value that breaks (division by zero, a runaway repeat). These flag the
+offending cell red where there is one, and turn the affected cards into
+placeholders — a row's `count:` copies always fail as ONE group, never
+individually, even when only one of them actually triggered the problem (the
+placeholder message says which one). The rest of the deck renders normally.
 
 ## Warnings
 

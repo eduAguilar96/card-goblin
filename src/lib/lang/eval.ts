@@ -110,6 +110,17 @@ export interface EvalContext {
   emptyCellIssue: (column: string, typeLabel: "Number" | "Enum") => DataDiagnostic;
   /** Loop variable → enum case for the current combination. */
   loopValues: ReadonlyMap<string, LoopCaseBinding>;
+  /** `[row]` (§3.6, ◆42): 1-based position of the current row within its
+   * bound sheet (pristine rows counted — it's exactly the grid gutter
+   * number). Fixed for the whole combination; every copy shares it. */
+  rowNumber: number;
+  /** `[card]` (§3.6, ◆42): 1-based position of the CURRENT copy within its
+   * deck. `.value` is mutable — generate.ts advances it per copy ONLY when
+   * `.used` shows a face actually read [card] (set by resolveName below), so
+   * a face that never reads it still evaluates once and its copies still
+   * share one Shape array / one contentHash, exactly as before this binding
+   * existed. */
+  cardPosition: { value: number; used: boolean };
   /** Innermost-last stack of enclosing Repeat variables. */
   repeatStack: { name: string; value: number }[];
   /** Remaining Repeat iterations for this instance (◆27). */
@@ -363,6 +374,14 @@ function resolveName(name: string, node: ResolvableNode, ctx: EvalContext): Valu
     }
     case "column":
       return readCell(res, ctx);
+    case "position": {
+      // §3.6, ◆42: [row] is fixed for the whole combination; [card] flags
+      // `.used` so generate.ts knows this combination's copies must each
+      // resolve their OWN faces (they can no longer share one evaluation).
+      if (res.which === "row") return num(ctx.rowNumber);
+      ctx.cardPosition.used = true;
+      return num(ctx.cardPosition.value);
+    }
     default:
       return poisoned();
   }

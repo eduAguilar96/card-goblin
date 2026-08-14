@@ -83,6 +83,7 @@ the section that elaborates it:
 | ◆39 | QR codes (§7.3) | A drawable **`Qr:` element**, not the sketched `QR(...)` call form; encoded at eval time so the shape carries the resolved module matrix, never the source data | The language has no call grammar, and custom sizes already rejected inventing one; an element reuses the practiced element pipeline (checker, evaluator, autocomplete) end to end |
 | ◆40 | Local image assets (§7.4) | **IndexedDB** (not localStorage) + an **`asset:` scheme** inside Image `src:` + a **project-file v2** that bundles asset bytes as base64 | localStorage is string-only with a small quota; IDB stores Blobs natively, and v2 keeps art traveling with the file without inventing a second file format |
 | ◆41 | Text/TextBox fonts (§3.3) | **Repo-bundled closed vocabulary**: `geist` (default, unchanged) + eight faces — Cormorant Garamond and Courier Prime, four weights/styles each — resolved like Icon `style:`, each with its own generated metrics table | A deliberate PRAGMATIC unblock, not a font system: the owner needed these two families now; per-project **uploaded** fonts are real future work, deferred because wrapping needs a metrics table per face and building that pipeline for arbitrary uploads is a bigger project than unblocking two known families |
+| ◆42 | Row/card position bindings (§3.6) | **`[row]` and `[card]` as built-in, derived bindings** resolving after sheet columns; the grid's row gutter becomes the editable index, and typing a position **moves the row and shifts the rest** (out-of-range clamps, garbage reverts) | Position IS row order, so storing a number would create a second source of truth that can disagree with it — deriving costs nothing and keeps the sheet payload, autosave slot, and project file unchanged. Two bindings because `loop:`/`count:` make one row into several cards: `[row]` labels the data, `[card]` serialises the deck. Resolving last means a sheet declaring its own `row`/`card` column shadows the built-in, so no existing project's COLUMN can be silently reinterpreted. (Narrow exception, not a column: a template that put an unresolvable `row`/`card` name where only Number/Text/Enum ever coerced — e.g. `color: [row]` — used to poison silently to Unknown with no sheet in scope; it now resolves and can genuinely E003, which is more correct, not less.) Editing the gutter rather than adding a column keeps ⚑3 (columns come from code) intact |
 
 ---
 
@@ -413,7 +414,49 @@ useful total order on Text or enum cases a game designer should rely on.
 
 1. enclosing `Repeat` variables,
 2. the Card's `loop` variables,
-3. the bound sheet's columns.
+3. the bound sheet's columns,
+4. the **built-in position bindings** (M3, 2026-08-13 — ◆42):
+   - `[row]` — the row's **1-based position in its sheet**, i.e. exactly the
+     number shown (and edited) in the grid's row gutter. Every card generated
+     from one row shares it.
+   - `[card]` — the card's **1-based position within its generated deck**,
+     counting loop combinations and `count:` copies. With 2 rows × 3 suits,
+     `[row]` runs 1,1,1,2,2,2 while `[card]` runs 1…6.
+
+   Both are Numbers, and both are **derived, never stored**: position IS row
+   order, so nothing enters the sheet payload, the autosave slot, or the
+   project file. They resolve LAST, so a sheet that declares its own `row` or
+   `card` column shadows the built-in (with the usual shadowing warning) — an
+   existing project's COLUMN can never be silently reinterpreted. (The one
+   narrow exception, not a column: a template that put an unresolvable
+   `row`/`card` name in a position only Number ever satisfies — e.g.
+   `color: [row]` — used to poison silently to Unknown with no sheet in
+   scope; it now resolves and can genuinely E003, which is more correct, not
+   less.) Note the deliberate 1-based/0-based split with `Repeat`'s index
+   (◆18): the repeat index is for arithmetic, these are for humans and for
+   serialising a deck. `[row]` counts **pristine rows too** (◆29) — it is the
+   sheet position, exactly the grid gutter's number, not a count of generated
+   rows; a card's `[row]` is always the number its designer would point at in
+   the grid.
+
+   A face that reads `[card]` can't share one evaluation across its `count:`
+   copies the way every other face still does (§3.7) — each copy resolves on
+   its own and earns its own `contentHash` (two copies differing only in a
+   printed `[card]` number ARE different cards). Front and Back are tracked
+   INDEPENDENTLY: a Back that never reads `[card]` keeps sharing one
+   evaluation across every copy even when Front diverges on all of them. A
+   data error on any one of those copies still fails the WHOLE group
+   together, though — ⚑8's per-card isolation stops at the row × loop-case
+   boundary `count:` multiplies, same as every other data error here, not at
+   the individual copy — but the shared placeholder message names WHICH copy
+   actually failed ("… (copy 3 of 3)"), since the group's other inputs would
+   otherwise read as if copy 1 had caused it.
+
+   `count:` may itself read `[card]`: a combination's `[card]` is fixed
+   BEFORE its own `count:` runs (the position its first copy would occupy),
+   so `count: [card]` is legal and self-referential — four rows request
+   counts 1, 2, 4, 8 (each group's size equals the position it started at),
+   still bounded by the same 2,000-instance cap as any other `count:` (◆27†).
 
 Shadowing produces a warning. Because templates are checked **per using Card**, every
 `[ref]` in a template is statically known-good or squiggled — the README's "error
@@ -427,8 +470,12 @@ For each `Card` block, in declaration order:
 for each edited row of the bound sheet (grid order; pristine rows excluded, ◆29)
   for each combination of loop cases (loops nested in declaration order, cases in enum order)
     n = evaluate count (default 1; must be integer ≥ 0 — else D006, one placeholder card)
-    emit n identical card instances with context {row, loop bindings}
+    emit n card instances with context {row, loop bindings, card}
 ```
+
+The `n` instances are identical in content UNLESS a face reads the built-in `[card]`
+binding (§3.6, ◆42) — a printed run number is resolved data like any other, so a face
+that reads it resolves independently per instance instead of sharing one evaluation.
 
 Generation for a Card stops at **2,000 instances** (◆27†) with a D007 entry — a bad
 `count` cell must not freeze the tab any more than a bad `Repeat` may.

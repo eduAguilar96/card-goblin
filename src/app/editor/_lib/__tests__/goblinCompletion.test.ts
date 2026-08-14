@@ -216,7 +216,8 @@ describe("bracket refs", () => {
     const r = at(
       src("Card: Monster", "  sheet: Monsters", "  loop: Rarity as r", "  count: [¦"),
     );
-    expect(labels(r)).toEqual(["r", "name", "cost", "suit"]);
+    // row/card (§3.6, ◆42) sort last, after every real column.
+    expect(labels(r)).toEqual(["r", "name", "cost", "suit", "row", "card"]);
     expect(byLabel(r, "r").detail).toBe("loop — enum Rarity");
     expect(byLabel(r, "cost").detail).toBe("Number — Monsters");
     expect(byLabel(r, "suit").detail).toBe("enum Suit — Monsters");
@@ -235,7 +236,7 @@ describe("bracket refs", () => {
         "  Front: MonsterFront",
       ),
     );
-    expect(labels(r)).toEqual(["name", "cost", "suit"]);
+    expect(labels(r)).toEqual(["name", "cost", "suit", "row", "card"]);
   });
 
   it("two Cards using one Template union their sheets' columns", () => {
@@ -252,7 +253,7 @@ describe("bracket refs", () => {
         "  Back: T",
       ),
     );
-    expect(labels(r)).toEqual(["name", "cost", "suit", "flavor"]);
+    expect(labels(r)).toEqual(["name", "cost", "suit", "flavor", "row", "card"]);
   });
 
   it("string interpolation offers the same refs (◆30: brackets always mean data)", () => {
@@ -287,26 +288,26 @@ describe("bracket refs", () => {
   });
 
   it("unplaceable context degrades to the union of all sheets' columns", () => {
-    expect(labels(at("count: [¦"))).toEqual(["name", "cost", "suit", "flavor"]);
+    expect(labels(at("count: [¦"))).toEqual(["name", "cost", "suit", "flavor", "row", "card"]);
   });
 
   it("a Card naming an unknown sheet degrades to the union too", () => {
     const r = at(src("Card: M", "  sheet: Nonexistent", "  count: [¦"));
-    expect(labels(r)).toEqual(["name", "cost", "suit", "flavor"]);
+    expect(labels(r)).toEqual(["name", "cost", "suit", "flavor", "row", "card"]);
   });
 
   it("a Template no Card uses degrades to the union", () => {
     const r = at(src("Template: Orphan", "  Text:", "    y: [¦"));
-    expect(labels(r)).toEqual(["name", "cost", "suit", "flavor"]);
+    expect(labels(r)).toEqual(["name", "cost", "suit", "flavor", "row", "card"]);
   });
 
-  it("a Card bound to a zero-column sheet resolves and stays column-less", () => {
+  it("a Card bound to a zero-column sheet resolves to just the built-ins (§3.6, ◆42 — they never depend on columns)", () => {
     const zeroSnap = buildCompletionSnapshot(
       compileSource(src("Sheet: Blanks", "Sheet: Full", "  column a: Text")).bindings,
       null,
     );
     const r = at(src("Card: B", "  sheet: Blanks", "  count: [¦"), zeroSnap);
-    expect(labels(r)).toEqual([]);
+    expect(labels(r)).toEqual(["row", "card"]);
   });
 
   it("nested Repeats reusing a variable name suggest it once (innermost wins)", () => {
@@ -328,6 +329,34 @@ describe("bracket refs", () => {
     );
     expect(labels(r).filter((l) => l === "suit")).toHaveLength(1);
     expect(byLabel(r, "suit").detail).toBe("loop — enum Rarity");
+  });
+
+  // -- built-in row/card (§3.6, ◆42) -----------------------------------------
+
+  it("offers row and card LAST, after every real column, with explanatory detail text", () => {
+    const r = at(src("Card: M", "  sheet: Monsters", "  count: [¦"));
+    const all = labels(r);
+    expect(all.slice(-2)).toEqual(["row", "card"]);
+    expect(byLabel(r, "row").detail).toBe(
+      "built-in — 1-based row position in its sheet (the grid gutter number)",
+    );
+    expect(byLabel(r, "card").detail).toBe(
+      "built-in — 1-based card position in the generated deck (rows × loop × count)",
+    );
+  });
+
+  it("a column literally named row/card shadows the built-in — only ONE suggestion, the column's", () => {
+    const shadowed = buildCompletionSnapshot(
+      compileSource(src("Sheet: Numbered", "  column row: Text", "  column cost: Number")).bindings,
+      null,
+    );
+    const r = at(src("Card: M", "  sheet: Numbered", "  count: [¦"), shadowed);
+    expect(labels(r).filter((l) => l === "row")).toHaveLength(1);
+    // The COLUMN's detail wins (first occurrence), not the built-in's.
+    expect(byLabel(r, "row").detail).toBe("Text — Numbered");
+    // card is untouched by the shadow — still offered as the built-in.
+    expect(labels(r)).toContain("card");
+    expect(byLabel(r, "card").detail).toContain("built-in");
   });
 
   it("mid-word: the replace range spans the whole identifier", () => {

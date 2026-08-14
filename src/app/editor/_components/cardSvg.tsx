@@ -12,9 +12,12 @@
  * (`preserveAspectRatio="none"`).
  *
  * Memoization (§4.2 †): `React.memo` with `cardSvgPropsEqual` below —
- * `contentHash` is the key. Shape arrays are SHARED between `count:` copies
- * and replaced wholesale on every recompile, so array identity is
- * deliberately ignored: equal hashes mean equal pixels. Never mutate a shape.
+ * `contentHash` is the key, never array identity. Shape arrays are replaced
+ * wholesale on every recompile regardless, and — since a face that reads the
+ * built-in `[card]` binding (§3.6, ◆42) resolves independently per copy —
+ * are no longer even always shared between `count:` copies the way they used
+ * to be unconditionally. Either way, equal hashes mean equal pixels; that's
+ * the one invariant this component leans on. Never mutate a shape.
  */
 
 import {

@@ -1965,3 +1965,295 @@ describe("evaluation depth budget", () => {
     );
   });
 });
+
+// -- built-in [row]/[card] bindings — values (§3.6, ◆42) --------------------
+
+describe("built-in [row]/[card] bindings", () => {
+  const textsOf = (p: ProjectResult): string[] =>
+    p.model.decks[0].cards.map((c) => (c.front[0] as TextShape).text);
+
+  it("a plain deck (no loop, no count): [row] and [card] coincide, 1-based", () => {
+    const p = textProject('"R[row]C[card]"', [], [{}, {}, {}]);
+    expect(textsOf(p)).toEqual(["R1C1", "R2C2", "R3C3"]);
+  });
+
+  it("with loop: — 2 rows × 3 suits — matches the §3.6 table exactly (1,1,1,2,2,2 vs 1…6)", () => {
+    const p = textProject('"R[row]C[card]"', [], [{}, {}], {
+      enums: ["Enum: Suit", "  case Rock", "  case Paper", "  case Scissors"],
+      cardExtra: ["loop: Suit as s"],
+    });
+    expect(textsOf(p)).toEqual(["R1C1", "R1C2", "R1C3", "R2C4", "R2C5", "R2C6"]);
+    // Every combination's [row]-[card] pair is unique, so all 6 hash distinctly.
+    expect(new Set(p.model.decks[0].cards.map((c) => c.contentHash)).size).toBe(6);
+  });
+
+  it("with count: copies — one row, three copies: [row] repeats, [card] increments", () => {
+    const p = textProject('"R[row]C[card]"', [], [{}], { cardExtra: ["count: 3"] });
+    expect(textsOf(p)).toEqual(["R1C1", "R1C2", "R1C3"]);
+    // Two cards differing only in [card] ARE different cards (§3.6, ◆42):
+    // three copies of the same row/loop combo still earn three hashes.
+    expect(new Set(p.model.decks[0].cards.map((c) => c.contentHash)).size).toBe(3);
+  });
+
+  it("loop: AND count: together: [row] steps once per row, [card] runs 1…12 straight through", () => {
+    const p = textProject('"R[row]C[card]"', [], [{}, {}], {
+      enums: ["Enum: Suit", "  case Rock", "  case Paper", "  case Scissors"],
+      cardExtra: ["loop: Suit as s", "count: 2"],
+    });
+    expect(textsOf(p)).toEqual([
+      "R1C1",
+      "R1C2",
+      "R1C3",
+      "R1C4",
+      "R1C5",
+      "R1C6",
+      "R2C7",
+      "R2C8",
+      "R2C9",
+      "R2C10",
+      "R2C11",
+      "R2C12",
+    ]);
+  });
+
+  it("a real column named row/card SHADOWS the built-in — the cell value wins, not the position", () => {
+    const p = textProject("[row]", ["row: Text"], [{ row: "hello" }, { row: "world" }]);
+    expect(textsOf(p)).toEqual(["hello", "world"]);
+  });
+
+  it("count: copies that fail (a [card]-dependent D008) degrade ATOMICALLY, and never renumber", () => {
+    // row 0's copy #3 (card 3) divides by (3-3)=0 → D008 — the WHOLE 3-copy
+    // group becomes placeholders together (§3.7: failure stays combination-
+    // scoped, not per copy). Row 1 starts at card 4 regardless — a failed
+    // group still consumed its [card] numbers.
+    const p = textProject("60 / ([card] - 3)", [], [{}, {}], { cardExtra: ["count: 3"] });
+    const cards = p.model.decks[0].cards;
+    expect(cards).toHaveLength(6);
+    expect(cards.slice(0, 3).every((c) => c.error !== undefined)).toBe(true);
+    expect(errorCodes(p, 0)).toEqual(["D008"]);
+    expect(p.dataDiagnostics.filter((d) => d.code === "D008")).toHaveLength(1);
+    // MAJOR-2 (adversarial review): copy 1's own expression is 60 / -2 —
+    // it's copy 3 (card 3) whose 60 / 0 actually threw. The shared message
+    // must name the ACTUAL offender, not silently imply all three computed
+    // the same (false) thing.
+    expect(cards[0].error?.diagnostics[0].message).toContain("(copy 3 of 3)");
+    expect(cards[0].error?.diagnostics[0].message).toContain("60 / 0");
+    // Placeholder copies still share one hash (unchanged §4.1 rule).
+    expect(cards[1].contentHash).toBe(cards[0].contentHash);
+    expect(cards[2].contentHash).toBe(cards[0].contentHash);
+
+    // Row 1: NOT renumbered back to 1 — cards 4, 5, 6 divide cleanly.
+    expect(cards.slice(3).every((c) => c.error === undefined)).toBe(true);
+    expect(cards.slice(3).map((c) => (c.front[0] as TextShape).text)).toEqual(["60", "30", "20"]);
+    // Each of row 1's copies resolved its own [card] → its own hash.
+    expect(new Set(cards.slice(3).map((c) => c.contentHash)).size).toBe(3);
+  });
+
+  it("MAJOR-2 repro 2: Repeat: [card] as i at count: 501 blames copy 501, not copy 1 (which draws one element)", () => {
+    // Copy 1's repeat draws exactly ONE element — nowhere near the 500 cap —
+    // but the whole 501-copy group still degrades together (atomic
+    // failure), so the message must name copy 501 (whose repeat count IS
+    // 501, one past the cap), not copy 1.
+    const p = projectOf(
+      src(
+        ...sheetLines([]),
+        "Template: T",
+        "  Repeat: [card] as i",
+        "    Rectangle:",
+        "      x: 0",
+        "      y: 0",
+        "      width: 1",
+        "      height: 1",
+        "      color: red",
+        ...CARD_LINES,
+        "  count: 501",
+        "  Front: T",
+      ),
+      { Sh: [{}] },
+    );
+    const cards = p.model.decks[0].cards;
+    expect(cards).toHaveLength(501);
+    expect(cards.every((c) => c.error !== undefined)).toBe(true);
+    const d004 = p.dataDiagnostics.filter((d) => d.code === "D004");
+    expect(d004).toHaveLength(1);
+    expect(d004[0].message).toContain("(copy 501 of 501)");
+  });
+
+  it("MINOR-7: count: [card] is legal and self-referential — deterministic, cap-bounded", () => {
+    // Each combination's [card] is fixed BEFORE its own count: runs (the
+    // position its first copy would occupy), so four rows request counts
+    // 1, 2, 4, 8 — each group's size equals where it started.
+    const p = textProject('"row"', [], [{}, {}, {}, {}], { cardExtra: ["count: [card]"] });
+    const cards = p.model.decks[0].cards;
+    expect(cards).toHaveLength(1 + 2 + 4 + 8); // 15
+    expect(cards.map((c) => c.meta.rowIndex)).toEqual([
+      0, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3,
+    ]);
+    expect(p.dataDiagnostics).toEqual([]); // no D007 — well under CARD_CAP
+  });
+
+  it("using [row]/[card] never writes back into the SheetRows input (nothing to leak into persistence)", () => {
+    // [row]/[card] are derived from rowIndex/cards.length alone — there is no
+    // code path that could inject them into a row object. This is the
+    // compiler-level half of that guarantee; the store/persistence half
+    // (serializeProject's actual output) is covered in editorStore.test.ts.
+    const rows: SheetRows = { Sh: [{}, {}] };
+    const before = JSON.parse(JSON.stringify(rows));
+    textProject('"R[row]C[card]"', [], rows.Sh);
+    expect(rows).toEqual(before);
+  });
+
+  // -- reference identity (adversarial review MAJOR-1) -----------------------
+  // The whole point of tracking [card]-usage is to keep the FAST path fast:
+  // count: copies must share their Shape arrays BY REFERENCE (not merely by
+  // equal content) whenever nothing in that face reads [card]. Every
+  // existing contentHash-equality assertion above stays green even if the
+  // fast path silently stopped firing (equal content still hashes equal) —
+  // these tests are what actually pins reference sharing in place.
+
+  describe("copies share Shape arrays BY REFERENCE unless a face reads [card]", () => {
+    it("no [card] anywhere: front AND back are the SAME array reference across every copy", () => {
+      const p = textProject('"R[row]"', [], [{}], { cardExtra: ["count: 3"] });
+      const cards = p.model.decks[0].cards;
+      expect(cards).toHaveLength(3);
+      expect(cards[0].front).toBe(cards[1].front);
+      expect(cards[1].front).toBe(cards[2].front);
+      expect(cards[0].back).toBe(cards[1].back);
+      expect(cards[1].back).toBe(cards[2].back);
+    });
+
+    it("front reads [card]: front diverges, but back (never reads it) STAYS shared by reference", () => {
+      const p = projectOf(
+        src(
+          ...sheetLines([]),
+          "Template: F",
+          "  Text:",
+          "    x: 0",
+          "    y: 0",
+          "    size: 1",
+          '    text: "F[card]"',
+          "Template: B",
+          "  Text:",
+          "    x: 0",
+          "    y: 0",
+          "    size: 1",
+          '    text: "B"',
+          ...CARD_LINES,
+          "  count: 3",
+          "  Front: F",
+          "  Back: B",
+        ),
+        { Sh: [{}] },
+      );
+      const cards = p.model.decks[0].cards;
+      expect(cards).toHaveLength(3);
+      expect(cards.map((c) => (c.front[0] as TextShape).text)).toEqual(["F1", "F2", "F3"]);
+      expect(cards[0].front).not.toBe(cards[1].front);
+      expect(cards[1].front).not.toBe(cards[2].front);
+      // MINOR-5 (adversarial review): Back never reads [card] — re-evaluating
+      // it per copy would be pure waste. It must be the literal SAME array.
+      expect(cards[0].back).toBe(cards[1].back);
+      expect(cards[1].back).toBe(cards[2].back);
+    });
+
+    it("back reads [card]: back diverges, but front (never reads it) STAYS shared by reference", () => {
+      // The adversarial review's exact counterexample: "back reads it → 2000
+      // identical front arrays" if front were re-evaluated needlessly.
+      const p = projectOf(
+        src(
+          ...sheetLines([]),
+          "Template: F",
+          "  Text:",
+          "    x: 0",
+          "    y: 0",
+          "    size: 1",
+          '    text: "F"',
+          "Template: B",
+          "  Text:",
+          "    x: 0",
+          "    y: 0",
+          "    size: 1",
+          '    text: "B[card]"',
+          ...CARD_LINES,
+          "  count: 3",
+          "  Front: F",
+          "  Back: B",
+        ),
+        { Sh: [{}] },
+      );
+      const cards = p.model.decks[0].cards;
+      expect(cards).toHaveLength(3);
+      expect(cards.map((c) => (c.back[0] as TextShape).text)).toEqual(["B1", "B2", "B3"]);
+      expect(cards[0].back).not.toBe(cards[1].back);
+      expect(cards[1].back).not.toBe(cards[2].back);
+      expect(cards[0].front).toBe(cards[1].front);
+      expect(cards[1].front).toBe(cards[2].front);
+    });
+
+    it("both faces read [card]: both diverge independently", () => {
+      const p = projectOf(
+        src(
+          ...sheetLines([]),
+          "Template: F",
+          "  Text:",
+          "    x: 0",
+          "    y: 0",
+          "    size: 1",
+          '    text: "F[card]"',
+          "Template: B",
+          "  Text:",
+          "    x: 0",
+          "    y: 0",
+          "    size: 1",
+          '    text: "B[card]"',
+          ...CARD_LINES,
+          "  count: 3",
+          "  Front: F",
+          "  Back: B",
+        ),
+        { Sh: [{}] },
+      );
+      const cards = p.model.decks[0].cards;
+      expect(cards[0].front).not.toBe(cards[1].front);
+      expect(cards[0].back).not.toBe(cards[1].back);
+    });
+
+    it("error placeholders still share BOTH arrays by reference (the fast path, unchanged)", () => {
+      const p = textProject("60 / ([card] - 3)", [], [{}], { cardExtra: ["count: 3"] });
+      const cards = p.model.decks[0].cards;
+      expect(cards[0].front).toBe(cards[1].front);
+      expect(cards[1].front).toBe(cards[2].front);
+      expect(cards[0].back).toBe(cards[1].back);
+      expect(cards[1].back).toBe(cards[2].back);
+    });
+
+    it("mixed case pins PER-COMBINATION granularity: one row diverges via a conditional, the other doesn't", () => {
+      // Row 1 ([row] == 1) takes the [card]-reading branch; row 2 takes the
+      // other branch, which never touches [card] — only the TAKEN branch
+      // evaluates (eval.ts), so row 2's context never sees [card] read at
+      // all, regardless of what row 1 did with ITS OWN fresh context.
+      const p = textProject(
+        'if [row] == 1 then "R[row]C[card]" else "R[row]"',
+        [],
+        [{}, {}],
+        { cardExtra: ["count: 3"] },
+      );
+      const cards = p.model.decks[0].cards;
+      expect(cards).toHaveLength(6);
+      expect(cards.map((c) => (c.front[0] as TextShape).text)).toEqual([
+        "R1C1",
+        "R1C2",
+        "R1C3",
+        "R2",
+        "R2",
+        "R2",
+      ]);
+      // Row 1 (cards 0–2): diverges.
+      expect(cards[0].front).not.toBe(cards[1].front);
+      expect(cards[1].front).not.toBe(cards[2].front);
+      // Row 2 (cards 3–5): shares — untouched by row 1's divergence.
+      expect(cards[3].front).toBe(cards[4].front);
+      expect(cards[4].front).toBe(cards[5].front);
+    });
+  });
+});

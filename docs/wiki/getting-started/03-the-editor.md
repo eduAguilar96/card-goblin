@@ -64,6 +64,13 @@ One tab per `Sheet:` you declare in code. The **columns come from your code**; t
   in.
 - Your data survives schema edits. Rename a column in code (same position, same type)
   and its data comes with it.
+- **The row number is editable.** Click it and type a new position — the row moves
+  there and every row between shifts to make room (typing `2` on row 10 of A..J
+  yields A J B C D E F G H I; a number ≤ 0 or past the end clamps to the first or last
+  row). Typing something that isn't a number, or the row's own current position,
+  leaves the grid untouched. This number is exactly what
+  [`[row]`](../goblin-script/sheets-and-data.md) resolves to inside your templates —
+  reordering rows in the grid is how you reorder what your cards print.
 
 ## Status bar
 

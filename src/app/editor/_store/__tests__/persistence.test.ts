@@ -134,6 +134,25 @@ describe("round-trip", () => {
     const store = createEditorStore(seed ?? undefined);
     expect(store.getState().sheets.S.editedRows).toEqual([true, false]);
   });
+
+  it("[row]/[card] (§3.6, ◆42) never enter the payload — derived, never stored", () => {
+    // A project that actually REFERENCES both built-ins in its template —
+    // serializeProject must still carry only what the user typed.
+    const store = createEditorStore({
+      code:
+        "Sheet: S\n  column label: Text\n" +
+        'Template: T\n  Text:\n    x: 1\n    y: 1\n    size: 1\n    text: "[row] [card] [label]"\n' +
+        "Card: C\n  sheet: S\n  size: poker\n  x_units: 20\n  y_units: auto\n  count: 2\n  Front: T\n",
+      sheets: { S: { rows: [{ label: "A" }, { label: "B" }], editedRows: [true, true] } },
+    });
+    expect(store.getState().isStale).toBe(false); // compiles clean, [row]/[card] resolve
+    expect(store.getState().lastGoodModel?.model.decks[0].cards).toHaveLength(4); // 2 rows × count 2
+    const payload = JSON.parse(serializeProject(store.getState().code, store.getState().sheets));
+    expect(payload.sheets.S.rows).toEqual([{ label: "A" }, { label: "B" }]);
+    for (const row of payload.sheets.S.rows) {
+      expect(Object.keys(row)).toEqual(["label"]); // no injected row/card key
+    }
+  });
 });
 
 // -- fallbacks that never destroy data (§6.2) --------------------------------

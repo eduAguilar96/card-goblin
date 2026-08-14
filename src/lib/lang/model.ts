@@ -8,8 +8,12 @@
  *
  * Sharing/immutability contract: the model is read-only after generation.
  * Copies produced by `count:` share their Shape arrays and `loopBindings`
- * record (identical resolved faces, identical `contentHash`); consumers must
- * treat every part of the model as immutable.
+ * record (identical resolved faces, identical `contentHash`) — UNLESS a face
+ * reads the built-in `[card]` binding (§3.6, ◆42), in which case that face
+ * resolves independently per copy and earns its own `contentHash`. Front and
+ * Back are tracked separately: a Back that never reads `[card]` keeps
+ * sharing its array even when Front diverges on every copy (generate.ts).
+ * Either way, consumers must treat every part of the model as immutable.
  */
 
 // ---------------------------------------------------------------------------
@@ -492,19 +496,31 @@ export interface CardMeta {
 }
 
 export interface CardInstance {
-  /** `readonly` (adversarial review): count: copies SHARE this array — a
-   * stray push/splice on one instance would corrupt every sibling copy. The
-   * immutability contract above was previously prose-only; TypeScript now
-   * enforces it (generate.ts builds each face array once, locally, before
-   * any instance is constructed). */
+  /** `readonly` (adversarial review): count: copies SHARE this array
+   * whenever this face never reads the built-in `[card]` binding (§3.6,
+   * ◆42) — a stray push/splice on one instance would corrupt every sibling
+   * copy in that case. When a face DOES read `[card]`, each copy gets its
+   * OWN array instead (a printed run number makes them genuinely different
+   * content) — Front and Back are tracked independently, so one face can
+   * share while the other diverges on the same instance. Either way, the
+   * immutability contract above is TypeScript-enforced, not prose-only:
+   * generate.ts builds each face array once — per combination, or per copy
+   * when `[card]` forces it — before any instance is constructed, and never
+   * mutates one after. */
   readonly front: readonly Shape[];
   readonly back: readonly Shape[];
   meta: CardMeta;
   /**
    * Deterministic content hash (FNV-1a) of the resolved faces + deck
-   * geometry — the preview's memoization key (§4.2 †). Copies share it; any
-   * resolved-value change changes it. Error placeholders hash their
-   * diagnostics instead of their (empty) faces.
+   * geometry — the preview's memoization key (§4.2 †) and the PDF
+   * rasterizer's dedup key (pdfLayout.ts). Copies share it UNLESS a face
+   * reads `[card]` (§3.6, ◆42): a copy's own printed number is genuinely
+   * different resolved content, so it earns its own hash — a numbered print
+   * run rasterizes N times, correctly, not once. Any other resolved-value
+   * change changes the hash too. Error placeholders always share one hash
+   * per failed group: they hash their diagnostics instead of their (empty)
+   * faces, and a group's diagnostics are one shared array regardless of
+   * which copy actually triggered them (generate.ts, MAJOR-2).
    */
   contentHash: string;
   /**

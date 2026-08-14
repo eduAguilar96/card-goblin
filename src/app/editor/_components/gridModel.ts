@@ -145,6 +145,45 @@ export function cellEditReduce(
 }
 
 // ---------------------------------------------------------------------------
+// Row-index gutter (§3.6, ◆42: the editable row-position field)
+// ---------------------------------------------------------------------------
+
+export type IndexEditResult = { kind: "move"; to: number } | { kind: "none" };
+
+/**
+ * Pure position→ops mapping behind the row-number gutter (the component is a
+ * thin wire, same discipline as cellEditReduce). `currentIndex`/`to` are
+ * BOTH 0-based array indices — `to` is ready to pass straight to the store's
+ * `moveRow(sheet, currentIndex, to)` — while `rawInput` is what the user
+ * typed, which reads as the 1-based position shown in the gutter.
+ *
+ * - Blank, non-numeric, or non-integer (a decimal — a row position is an
+ *   ordinal, not a measurement) input reverts with NO move: garbage must
+ *   never reach the store and spend the row's ◆29 edited flag on a no-op.
+ * - Clamp: a typed position ≤ 1 → the first row (index 0); ≥ rowCount → the
+ *   last row (index rowCount - 1) — "move and shift", never "swap": typing
+ *   2 on row 10 of A..J yields A J B C D E F G H I (◆42).
+ * - Landing back on the row's OWN current position (after clamping) is also
+ *   `"none"` — typing the unchanged number must not call the store either.
+ * - `rowCount <= 0` reverts unconditionally: the gutter only ever renders
+ *   for an existing row (rowCount is always >= 1 in real UI calls), but a
+ *   pure function shouldn't hand back a negative index just because a
+ *   future caller passed it a row count that can't exist.
+ */
+export function resolveIndexEdit(
+  rawInput: string,
+  currentIndex: number,
+  rowCount: number,
+): IndexEditResult {
+  if (rowCount <= 0) return { kind: "none" };
+  const trimmed = rawInput.trim();
+  if (!/^-?\d+$/.test(trimmed)) return { kind: "none" };
+  const oneBased = Math.min(Math.max(Number(trimmed), 1), rowCount);
+  const to = oneBased - 1;
+  return to === currentIndex ? { kind: "none" } : { kind: "move", to };
+}
+
+// ---------------------------------------------------------------------------
 // Red flags (D001–D003 cell provenance)
 // ---------------------------------------------------------------------------
 

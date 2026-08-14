@@ -19,14 +19,19 @@
  *   never shows a one-compile D003 flash for a committed rename.
  *
  * Decisions beyond the spec text (documented at their code sites too):
- * - addRow/deleteRow recompile SYNCHRONOUSLY (task 7, grid MAJOR-1): a row
- *   op shifts every following row's index, so a debounced recompile would
- *   leave the cell-flag index (dataDiagnostics carry rowIndex provenance)
+ * - addRow/deleteRow/moveRow recompile SYNCHRONOUSLY (task 7, grid MAJOR-1;
+ *   moveRow added §3.6/◆42): a row op shifts every following row's index, so
+ *   a debounced recompile would leave the cell-flag index (dataDiagnostics
+ *   carry rowIndex provenance) — and now the [row]/[card] binding values —
  *   pointing at the WRONG rows for up to 300 ms. Row ops are discrete
  *   clicks, not keystroke bursts — the debounce buys nothing there. setCell/
  *   setCode keep the debounce (they never shift indices mid-burst).
- * - setCell/deleteRow ignore out-of-range rows and unknown sheets (the grid
- *   cannot address them); addRow materializes a missing sheet entry.
+ * - setCell/deleteRow/moveRow ignore out-of-range rows and unknown sheets
+ *   (the grid cannot address them); addRow materializes a missing sheet
+ *   entry. moveRow additionally clamps `toIndex` into range rather than
+ *   ignoring it — the gutter's whole point is that any typed number lands
+ *   somewhere sane (§3.6, ◆42) — and no-ops when clamping leaves `to`
+ *   exactly at `from`.
  * - `recompile()` is synchronous-unconditional; `flushCompile()` runs a
  *   PENDING debounced compile immediately and is otherwise a no-op.
  *
@@ -134,6 +139,18 @@ export interface EditorState {
   /** Removes the row and its edited flag together. Recompiles synchronously
    * (MAJOR-1: shifted rows must never wear stale cell flags). */
   deleteRow(sheet: string, row: number): void;
+  /** Moves the row at `fromIndex` to `toIndex` within one sheet (§3.6, ◆42:
+   * the grid's editable row-index gutter) — `editedRows` moves in lockstep
+   * so a row's ◆29 pristine/edited flag follows the ROW, not the position it
+   * vacates. `toIndex` clamps into range (≤0 → first row, ≥ rowCount → last
+   * — mirrors the standard splice-out/splice-in composition: remove `from`,
+   * then insert at `to` in the now-shorter array). An unknown sheet, an
+   * out-of-range `fromIndex`, or a `fromIndex === toIndex` (after clamping)
+   * is a no-op returning the same state reference (mirrors addRow/deleteRow).
+   * Recompiles synchronously (MAJOR-1): a move re-indexes every row between
+   * `from` and `to`, so a debounced recompile would show stale per-row flags
+   * — and a stale [row]/[card] binding value — for up to 300 ms. */
+  moveRow(sheet: string, fromIndex: number, toIndex: number): void;
   /** Replace the whole project (§6.2: autosave restore, reset-to-demo) —
    * equivalent to seeding a fresh store while keeping subscribers: seed
    * normalized, last-goods cleared, pending debounce cancelled, eager
@@ -530,6 +547,30 @@ export function createEditorStore(
         // SYNCHRONOUS (MAJOR-1): deleting row i shifts every later row's
         // index — cell flags keyed by rowIndex must recompute NOW, not after
         // the 300 ms debounce, or the grid flags the wrong rows meanwhile.
+        cancelPending();
+        runCompile();
+      },
+
+      moveRow: (sheet, fromIndex, toIndex) => {
+        const sheets = get().sheets;
+        const entry = Object.hasOwn(sheets, sheet) ? sheets[sheet] : undefined;
+        if (!entry || fromIndex < 0 || fromIndex >= entry.rows.length) return; // unaddressable
+        // Clamp into the post-removal array's valid insertion range — which
+        // is exactly [0, rows.length - 1], the same bound as the ORIGINAL
+        // array's last index (removing one element then inserting one keeps
+        // the length unchanged): ≤0 clamps to first, ≥ rowCount to last.
+        const to = Math.max(0, Math.min(toIndex, entry.rows.length - 1));
+        if (to === fromIndex) return; // no-op — nothing actually moves
+        const rows = entry.rows.slice();
+        const [movedRow] = rows.splice(fromIndex, 1);
+        rows.splice(to, 0, movedRow);
+        const editedRows = entry.editedRows.slice();
+        const [movedFlag] = editedRows.splice(fromIndex, 1);
+        editedRows.splice(to, 0, movedFlag);
+        set({ sheets: { ...sheets, [sheet]: { rows, editedRows } } });
+        // SYNCHRONOUS (MAJOR-1): a move re-indexes every row between `from`
+        // and `to` — cell flags AND [row]/[card] binding values must
+        // recompute NOW, not after the 300 ms debounce.
         cancelPending();
         runCompile();
       },

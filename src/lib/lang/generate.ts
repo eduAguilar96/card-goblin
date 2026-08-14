@@ -25,15 +25,30 @@
  *   keeps the data); flagged, it is edited like any other row.
  * - D003 is deduped per cell: every combination (or Card) referencing the
  *   same empty cell shares ONE diagnostic, exactly like reused D001/D002.
+ * - `[row]`/`[card]` (§3.6, ◆42): [row] is the row's 1-based position in its
+ *   sheet (rowIndex + 1 — pristine rows counted, so it's exactly the number
+ *   the grid gutter shows); [card] is the 1-based position of the CARD
+ *   INSTANCE within its deck, in emission order — it increments per copy,
+ *   including placeholders (a failed combination still consumes its [card]
+ *   numbers; generation never renumbers around a failure). Both are derived
+ *   fresh per generateModel call, never stored.
  * - contentHash: FNV-1a 32-bit over deck geometry + a JSON serialization of
- *   the resolved faces (or of the error diagnostics for placeholders).
- *   Pure and deterministic — no Date/random; meta (rowIndex/copyIndex) is
- *   deliberately excluded so `count:` copies share the hash.
+ *   the resolved faces (or of the error diagnostics for placeholders). Pure
+ *   and deterministic — no Date/random; meta (rowIndex/copyIndex) is
+ *   deliberately excluded so `count:` copies SHARE the hash whenever their
+ *   faces don't read [card] — which also makes [card] participate in the
+ *   hash for free: a face that prints it resolves different content (hence
+ *   a different hash) per copy (see the next bullet).
  * - Copies of one combination share their Shape arrays and loopBindings
- *   record: faces and `count:` are evaluated ONCE per combination (the
- *   model is immutable by contract — see model.ts).
+ *   record — faces and `count:` are evaluated ONCE per combination (the
+ *   model is immutable by contract — see model.ts) — UNLESS a face reads
+ *   [card] (◆42), in which case each copy resolves its OWN faces and earns
+ *   its own hash; emit()'s `copies` parameter carries either shape.
  * - When face evaluation fails but `count:` was valid, ALL n copies become
- *   placeholders (the count is real data; the deck size must reflect it).
+ *   placeholders (the count is real data; the deck size must reflect it) —
+ *   including on the divergent [card] path, where a LATER copy's own
+ *   failure still degrades the whole group together, deliberately: a
+ *   per-copy diagnostic-registration model is out of scope (see fillDeck).
  * - generateModel NEVER throws (⚑8): a per-Card try/catch degrades one deck
  *   to a D000 diagnostic (keeping the instances generated so far), and a
  *   whole-run catch degrades to an empty model + D000, mirroring check()'s
@@ -327,12 +342,36 @@ class Generator {
     rows: for (let rowIndex = 0; rowIndex < data.rows.length; rowIndex++) {
       if (data.pristine[rowIndex]) continue;
       for (const loopValues of loopCombinations(card.loops)) {
-        const ctx = this.makeContext(card, data, rowIndex, loopValues, xUnits, yUnits);
+        // §3.6/◆42: [row] is fixed for this whole combination; [card] starts
+        // at cards.length + 1 — exactly this combination's first emitted
+        // position, whether or not it ends up emitting anything (a failed or
+        // zero-count combination simply never advances it). A fresh
+        // iconIssues map is hoisted OUTSIDE the per-copy re-evaluation below
+        // so D005 keeps deduping across every copy of one combination, not
+        // just its first, matching the pre-◆42 "once per combination" rule.
+        const iconIssues = new Map<string, DataDiagnostic>();
+        const firstCardNumber = cards.length + 1;
+        const ctx = this.makeContext(
+          card,
+          data,
+          rowIndex,
+          loopValues,
+          xUnits,
+          yUnits,
+          firstCardNumber,
+          iconIssues,
+        );
         const loopRecord = toLoopRecord(loopValues);
 
         // count: default 1; integer ≥ 0 required — else D006 + exactly ONE
         // placeholder for this combination (§3.7 †). An unevaluable count
-        // (bad/empty cell, D008…) carries its cause plus the D006.
+        // (bad/empty cell, D008…) carries its cause plus the D006. count:
+        // may itself read [card] — it's evaluated ONCE regardless (never on
+        // the divergent per-copy path), so `count: [card]` is legal and
+        // self-referential: a combination's [card] is fixed BEFORE its count
+        // runs (the position of its own first copy), so four rows produce
+        // counts 1, 2, 4, 8 — deterministic, and still CARD_CAP-bounded like
+        // any other count: (§3.6 †).
         let count = 1;
         let countFailure: DataDiagnostic[] | null = null;
         if (card.countExpr) {
@@ -361,49 +400,86 @@ class Generator {
 
         let emitted: boolean;
         if (countFailure) {
-          emitted = this.emit(
-            deck,
-            cards,
-            deckIndex,
-            rowIndex,
-            loopRecord,
-            1,
-            [],
-            [],
-            countFailure,
-            [],
-          );
+          emitted = this.emit(deck, cards, deckIndex, rowIndex, loopRecord, 1, null, countFailure, []);
         } else if (count === 0) {
           emitted = true; // a legal zero — nothing to emit, no diagnostic
         } else {
-          // EVALUATION happens once per combination; the n copies share the
-          // resulting shapes and hash (§3.7 "n identical card instances").
-          let frontShapes: Shape[] = [];
-          let backShapes: Shape[] = [];
+          // EVALUATION happens once per combination — the n copies share the
+          // resulting shapes and hash (§3.7 "n identical card instances") —
+          // UNLESS a face reads [card] (◆42), in which case that FACE must
+          // resolve its own shapes per copy so it can print a different
+          // number. Front and back are tracked INDEPENDENTLY (adversarial
+          // review MINOR-5): a card whose Back never reads [card] keeps
+          // sharing ONE back array across all 2,000 copies even when Front
+          // diverges on every one — re-evaluating a face that provably can't
+          // have changed would be pure waste (front0/back0 below are reused
+          // by reference, not merely by equal content). `ctx.cardPosition`
+          // is reset before EACH face so count:'s own read (if any) can't
+          // bleed into whether that face counts as diverging.
+          //
+          // Bounded by what emit() could ever accept (CARD_CAP), never by
+          // the raw `count:` value: a huge count: paired with [card] must
+          // not hang the tab any more than a huge count: alone does (◆27†).
           let error: DataDiagnostic[] | null = null;
+          let copies: { front: Shape[]; back: Shape[] }[] | null = null;
           try {
-            frontShapes = evalFace(front, ctx);
-            // Back absent (◆16) → a single full-card white rect, generated
-            // HERE so the renderer stays dumb.
-            backShapes = card.back
-              ? evalFace(card.back, ctx)
-              : [
-                  {
-                    kind: "rect",
-                    x: 0,
-                    y: 0,
-                    width: xUnits,
-                    height: yUnits,
-                    color: "white",
-                    pivot: DEFAULT_PIVOT,
-                  },
-                ];
+            ctx.cardPosition.used = false;
+            const front0 = evalFace(front, ctx);
+            const frontUsed = ctx.cardPosition.used;
+            ctx.cardPosition.used = false;
+            const back0 = this.evalBackFace(card, ctx, xUnits, yUnits);
+            const backUsed = ctx.cardPosition.used;
+            copies = [{ front: front0, back: back0 }];
+            if ((frontUsed || backUsed) && count > 1) {
+              const evalLimit = Math.min(count, CARD_CAP - (firstCardNumber - 1));
+              for (let copyIndex = 1; copyIndex < evalLimit; copyIndex++) {
+                const copyCtx = this.makeContext(
+                  card,
+                  data,
+                  rowIndex,
+                  loopValues,
+                  xUnits,
+                  yUnits,
+                  firstCardNumber + copyIndex,
+                  iconIssues,
+                );
+                try {
+                  copies.push({
+                    front: frontUsed ? evalFace(front, copyCtx) : front0,
+                    back: backUsed ? this.evalBackFace(card, copyCtx, xUnits, yUnits) : back0,
+                  });
+                } catch (copyErr) {
+                  // MAJOR-2 (adversarial review): the group's placeholder
+                  // message is otherwise attributed to copy 1's inputs (its
+                  // context is what created it) even though a LATER copy is
+                  // what actually failed — e.g. `60 / ([card] - 3)` at
+                  // count: 3 fails on copy 3 (60/0), not copy 1 (60/-2), and
+                  // `Repeat: [card] as i` at count: 501 hits the 500-cap on
+                  // copy 501, not copy 1 (which draws a single element).
+                  // Stamp which copy actually threw, on THIS path only —
+                  // copy 1's own failure (below) never reaches here, and
+                  // never claims a divergence that was never established.
+                  if (copyErr instanceof DataError) {
+                    annotateCopyFailure(copyErr.diagnostics, copyIndex + 1, count);
+                  }
+                  throw copyErr;
+                }
+              }
+            }
           } catch (err) {
             if (!(err instanceof DataError)) throw err;
-            error = err.diagnostics; // ⚑8: this combination only — siblings unaffected
+            // ⚑8: this combination only — siblings unaffected. Success/
+            // failure stays ATOMIC across the group's copies even on the
+            // divergent path: a later copy's own [card]-dependent failure
+            // (e.g. a Repeat count or QR payload that grows with [card])
+            // degrades the WHOLE combination to placeholders together,
+            // exactly like every other data error here — a per-copy
+            // diagnostic-registration model is out of scope for what is
+            // still fundamentally "one row × one loop case" (§3.7).
+            error = err.diagnostics;
           }
           emitted = error
-            ? this.emit(deck, cards, deckIndex, rowIndex, loopRecord, count, [], [], error, [])
+            ? this.emit(deck, cards, deckIndex, rowIndex, loopRecord, count, null, error, [])
             : this.emit(
                 deck,
                 cards,
@@ -411,10 +487,9 @@ class Generator {
                 rowIndex,
                 loopRecord,
                 count,
-                frontShapes,
-                backShapes,
+                copies,
                 null,
-                ctx.iconIssues.values(),
+                iconIssues.values(),
               );
         }
         if (!emitted) break rows; // D007 — the Card is truncated (◆27†)
@@ -422,10 +497,37 @@ class Generator {
     }
   }
 
+  /** Back absent (◆16) → a single full-card white rect, generated HERE so
+   * the renderer stays dumb. */
+  private evalBackFace(
+    card: CardBindings,
+    ctx: EvalContext,
+    xUnits: number,
+    yUnits: number,
+  ): Shape[] {
+    return card.back
+      ? evalFace(card.back, ctx)
+      : [
+          {
+            kind: "rect",
+            x: 0,
+            y: 0,
+            width: xUnits,
+            height: yUnits,
+            color: "white",
+            pivot: DEFAULT_PIVOT,
+          },
+        ];
+  }
+
   /**
-   * Emit up to `n` copies of one evaluated combination (placeholder when
-   * `error` is set), registering its diagnostics once against the FIRST
-   * copy. Returns false when the 2,000-instance cap fired (D007) — the Card
+   * Emit up to `n` copies of one evaluated combination, registering
+   * card-scoped diagnostics once against the FIRST copy. `copies` is either
+   * null (an error placeholder — `error` is set) or a non-empty array: a
+   * SINGLETON is the common case (every copy shares one evaluation, one
+   * Shape array, one hash — unchanged from before ◆42) and a LONGER array is
+   * the divergent [card] path, one entry per copy, each earning its own
+   * hash. Returns false when the 2,000-instance cap fired (D007) — the Card
    * must stop generating.
    */
   private emit(
@@ -435,8 +537,7 @@ class Generator {
     rowIndex: number,
     loopBindings: Record<string, LoopCaseBinding>,
     n: number,
-    front: Shape[],
-    back: Shape[],
+    copies: readonly { front: Shape[]; back: Shape[] }[] | null,
     error: DataDiagnostic[] | null,
     iconIssues: Iterable<DataDiagnostic>,
   ): boolean {
@@ -458,16 +559,37 @@ class Generator {
         d.cardRef = cardRef; // D005 — diagnostic only, the icon rendered (§3.8 †)
         this.diagnostics.push(d);
       }
-      const contentHash = hashInstance(deck, front, back, error);
-      for (let copyIndex = 0; copyIndex < allowed; copyIndex++) {
-        const instance: CardInstance = {
-          front,
-          back,
-          meta: { rowIndex, loopBindings, copyIndex },
-          contentHash,
-        };
-        if (error) instance.error = { diagnostics: error };
-        cards.push(instance);
+      if (!copies || copies.length === 1) {
+        // Fast/shared path: an error placeholder, or a face that never read
+        // [card] — ONE evaluation and ONE hash for every copy, exactly the
+        // pre-◆42 behavior (hashed once, not per copy, so a huge count:
+        // stays cheap).
+        const face = copies ? copies[0] : { front: [] as Shape[], back: [] as Shape[] };
+        const contentHash = hashInstance(deck, face.front, face.back, error);
+        for (let copyIndex = 0; copyIndex < allowed; copyIndex++) {
+          const instance: CardInstance = {
+            front: face.front,
+            back: face.back,
+            meta: { rowIndex, loopBindings, copyIndex },
+            contentHash,
+          };
+          if (error) instance.error = { diagnostics: error };
+          cards.push(instance);
+        }
+      } else {
+        // Divergent path (◆42): a face read [card], so each copy resolved
+        // its own shapes — and earns its own hash. Two copies differing
+        // only in a printed [card] number are, correctly, different cards.
+        // `error` is always null here (see the caller).
+        for (let copyIndex = 0; copyIndex < allowed; copyIndex++) {
+          const face = copies[copyIndex];
+          cards.push({
+            front: face.front,
+            back: face.back,
+            meta: { rowIndex, loopBindings, copyIndex },
+            contentHash: hashInstance(deck, face.front, face.back, null),
+          });
+        }
       }
     }
     if (allowed < n) {
@@ -480,6 +602,14 @@ class Generator {
     return true;
   }
 
+  /** `cardNumber` (§3.6, ◆42): the 1-based [card] value THIS context's face
+   * evaluation resolves to (fillDeck advances it per copy on the divergent
+   * path). `iconIssues` is SHARED across every copy of one combination
+   * (passed in, never minted here) so D005 keeps deduping per combination,
+   * not per copy — a fresh REPEAT_CAP `budget` per call is what makes the
+   * cap genuinely "per card instance" (§3.7 †) once copies can differ: a
+   * shared running budget would let an early copy's Repeat starve a later
+   * one that would have fit on its own. */
   private makeContext(
     card: CardBindings,
     data: SheetData,
@@ -487,6 +617,8 @@ class Generator {
     loopValues: ReadonlyMap<string, LoopCaseBinding>,
     xUnits: number,
     yUnits: number,
+    cardNumber: number,
+    iconIssues: Map<string, DataDiagnostic>,
   ): EvalContext {
     const row = data.rows[rowIndex];
     const sheetName = data.info.decl.name.name;
@@ -513,10 +645,36 @@ class Generator {
         return d;
       },
       loopValues,
+      rowNumber: rowIndex + 1,
+      cardPosition: { value: cardNumber, used: false },
       repeatStack: [],
       budget: { remaining: REPEAT_CAP },
-      iconIssues: new Map(),
+      iconIssues,
     };
+  }
+}
+
+// -- divergent-copy diagnostics (§3.6, ◆42 — adversarial review MAJOR-2) ----
+
+/**
+ * Append "(copy N of count)" to every CARD-scoped diagnostic (never a
+ * cell-scoped D001–D003 — those are shared/deduped objects owned by other
+ * combinations too, and mutating one would corrupt every sibling reference).
+ * Called ONLY on the divergent per-copy path, where `copyNumber`/`count`
+ * are both well-defined and a face has already proven it reads [card] — a
+ * copy-1 failure (evaluated before divergence is even established) is never
+ * annotated, so an ordinary [card]-independent error (a plain D003, say)
+ * never grows a confusing "(copy 1 of 3)" it has nothing to do with.
+ */
+function annotateCopyFailure(
+  diagnostics: readonly DataDiagnostic[],
+  copyNumber: number,
+  count: number,
+): void {
+  const suffix = ` (copy ${copyNumber} of ${count})`;
+  for (const d of diagnostics) {
+    if (d.cell) continue;
+    d.message += suffix;
   }
 }
 

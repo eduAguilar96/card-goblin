@@ -64,7 +64,8 @@ Inside a template, `[name]` is looked up in this order, innermost first:
 
 1. the nearest enclosing **`Repeat` variable**,
 2. the Card's **`loop` variables**,
-3. the bound **sheet's columns**.
+3. the bound **sheet's columns**,
+4. the built-in **`[row]`** and **`[card]`** position bindings (below).
 
 ```goblin
 Card: Monster
@@ -82,6 +83,40 @@ Templates are checked **per Card that uses them**, so a template referencing
 `[health]` is valid when used by a Card whose sheet has a `health` column, and
 squiggled when used by one that doesn't. A shadowed name (a `Repeat` variable with the
 same name as a column) still works, innermost-first, but warns.
+
+## `[row]` and `[card]`
+
+Two built-in Number bindings, always available inside a template — no column to
+declare:
+
+- **`[row]`** — the row's 1-based position in its sheet. It's exactly the number
+  shown (and edited — see [The editor](../getting-started/the-editor.md)) in the
+  grid's row gutter, so every card generated from one row shares it.
+- **`[card]`** — the card's 1-based position within its *generated deck*, counting
+  every `loop:` combination and `count:` copy. It increments once per physical card.
+
+They only differ once `loop:` or `count:` turns one row into several cards. Two rows
+(Dragon, Imp) times the demo's three suits:
+
+| Sheet row | Suit | `[row]` | `[card]` |
+|---|---|---|---|
+| Dragon | Rock | 1 | 1 |
+| Dragon | Paper | 1 | 2 |
+| Dragon | Scissors | 1 | 3 |
+| Imp | Rock | 2 | 4 |
+| Imp | Paper | 2 | 5 |
+| Imp | Scissors | 2 | 6 |
+
+`[row]` labels the *data* — every card from one row agrees on it. `[card]` labels the
+*deck* — a running count across the whole Card block, useful for numbering a print run
+(`text: "Card #[card]"`) or spot-checking which row produced a card while debugging.
+
+Both are derived, not stored: nothing about them lives in your rows, your autosave, or
+an exported [project file](../export-and-project/project-files.md) — moving a row in
+the grid is what changes what `[row]` (and, downstream, `[card]`) resolve to for it.
+If a sheet declares its own `row` or `card` column, that column **shadows** the
+built-in of the same name for any Card bound to it (with the usual shadowing warning)
+— existing projects that already used those names keep working unchanged.
 
 ## Interpolation
 

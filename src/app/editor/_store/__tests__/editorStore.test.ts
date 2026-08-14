@@ -348,6 +348,131 @@ describe("cell and row edits", () => {
   });
 });
 
+// -- moveRow (§3.6, ◆42: the grid's editable row-index gutter) --------------
+
+describe("moveRow", () => {
+  /** A ten-row, single-Text-column sheet, unbound (no Card) — plain enough
+   * that row identity is legible from the letters (the brief's own A..J
+   * example), and irrelevant to compile-goodness (an unbound sheet is only
+   * W002, not an error). */
+  function lettersStore(): EditorStore {
+    return createEditorStore({
+      code: "Sheet: S\n  column label: Text\n",
+      sheets: {
+        S: {
+          rows: "ABCDEFGHIJ".split("").map((label) => ({ label })),
+          editedRows: "ABCDEFGHIJ".split("").map(() => true),
+        },
+      },
+    });
+  }
+  const labelsOf = (store: EditorStore): string[] =>
+    store.getState().sheets.S.rows.map((r) => r.label);
+
+  it("moves forward and SHIFTS the rest, never swaps: row 10 → position 2 of A..J", () => {
+    const store = lettersStore();
+    store.getState().moveRow("S", 9, 1);
+    expect(labelsOf(store)).toEqual(["A", "J", "B", "C", "D", "E", "F", "G", "H", "I"]);
+  });
+
+  it("moves backward and shifts the rest: row 1 → position 5", () => {
+    const store = lettersStore();
+    store.getState().moveRow("S", 0, 4);
+    expect(labelsOf(store)).toEqual(["B", "C", "D", "E", "A", "F", "G", "H", "I", "J"]);
+  });
+
+  it("clamps toIndex into range independently of the caller: negative → first, huge → last", () => {
+    const low = lettersStore();
+    low.getState().moveRow("S", 5, -100);
+    expect(labelsOf(low)).toEqual(["F", "A", "B", "C", "D", "E", "G", "H", "I", "J"]);
+
+    const high = lettersStore();
+    high.getState().moveRow("S", 5, 100);
+    expect(labelsOf(high)).toEqual(["A", "B", "C", "D", "E", "G", "H", "I", "J", "F"]);
+  });
+
+  it("editedRows (◆29) follows the MOVED row, not the position it vacates", () => {
+    const store = lettersStore();
+    store.getState().addRow("S"); // index 10: pristine (editedRows[10] = false)
+    store.getState().moveRow("S", 10, 0); // the new pristine row jumps to the front
+    const s = store.getState();
+    expect(s.sheets.S.rows.map((r) => r.label ?? "")).toEqual([
+      "",
+      "A",
+      "B",
+      "C",
+      "D",
+      "E",
+      "F",
+      "G",
+      "H",
+      "I",
+      "J",
+    ]);
+    // The pristine flag traveled with ITS row (now at 0); every displaced
+    // row kept ITS OWN flag (true) rather than inheriting the mover's.
+    expect(s.sheets.S.editedRows).toEqual([
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+    ]);
+  });
+
+  it("no-ops (same state reference): unknown sheet, out-of-range fromIndex, or a from===to tie after clamping", () => {
+    const store = lettersStore();
+    const before = store.getState().sheets;
+    store.getState().moveRow("Nope", 0, 5);
+    store.getState().moveRow("S", -1, 5);
+    store.getState().moveRow("S", 99, 5);
+    store.getState().moveRow("S", 3, 3); // exact tie
+    store.getState().moveRow("S", 0, -5); // clamps to 0 — ties fromIndex 0
+    store.getState().moveRow("S", 9, 999); // clamps to 9 — ties fromIndex 9
+    expect(store.getState().sheets).toBe(before);
+  });
+
+  it("reindexes cell flags IMMEDIATELY — no flush needed (MAJOR-1, same discipline as addRow/deleteRow)", () => {
+    const store = createEditorStore();
+    store.getState().setCell("Monsters", 1, "health", "garbage"); // Imp, row 1 — debounced
+    store.getState().flushCompile(); // land the debounced compile before moving
+    expect(store.getState().compile?.dataDiagnostics.map((d) => d.cell?.rowIndex)).toEqual([1]);
+    store.getState().moveRow("Monsters", 1, 0); // Imp jumps to the front — flags must follow NOW
+    const diags = store.getState().compile?.dataDiagnostics ?? [];
+    expect(diags).toHaveLength(1);
+    expect(diags[0].code).toBe("D002");
+    expect(diags[0].cell).toEqual({ sheet: "Monsters", rowIndex: 0, column: "health" });
+  });
+
+  it("changes what [row] resolves to for the moved row's NEW position (§3.6 end to end)", () => {
+    const store = createEditorStore({
+      code:
+        "Sheet: S\n  column label: Text\n" +
+        'Template: T\n  Text:\n    x: 1\n    y: 1\n    size: 1\n    text: "[row]:[label]"\n' +
+        "Card: C\n  sheet: S\n  size: poker\n  x_units: 20\n  y_units: auto\n  Front: T\n",
+      sheets: {
+        S: {
+          rows: [{ label: "A" }, { label: "B" }, { label: "C" }],
+          editedRows: [true, true, true],
+        },
+      },
+    });
+    const textsOf = (): (string | undefined)[] =>
+      (store.getState().lastGoodModel?.model.decks[0].cards ?? []).map(
+        (c) => (c.front[0] as TextShape).text,
+      );
+    expect(textsOf()).toEqual(["1:A", "2:B", "3:C"]);
+    store.getState().moveRow("S", 2, 0); // C jumps to the front
+    expect(textsOf()).toEqual(["1:C", "2:A", "3:B"]);
+  });
+});
+
 // -- keep-last-good (§4.2 †) -------------------------------------------------
 
 describe("keep-last-good", () => {

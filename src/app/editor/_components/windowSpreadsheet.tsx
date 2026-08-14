@@ -61,6 +61,7 @@ import {
   parseClipboardBlock,
   pasteCommitsDirectly,
   pasteOps,
+  resolveIndexEdit,
   type CellDraft,
   type CellEditAction,
   type PasteTarget,
@@ -73,6 +74,8 @@ const EMPTY_SHEET: SheetState = { rows: [], editedRows: [] };
 
 export interface SpreadsheetActions extends PasteTarget {
   deleteRow(sheet: string, row: number): void;
+  /** §3.6, ◆42: commits from the row-number gutter. */
+  moveRow(sheet: string, fromIndex: number, toIndex: number): void;
 }
 
 export default function WindowSpreadsheet(): ReactElement {
@@ -82,9 +85,10 @@ export default function WindowSpreadsheet(): ReactElement {
   const setCell = useEditorStore((s) => s.setCell);
   const addRow = useEditorStore((s) => s.addRow);
   const deleteRow = useEditorStore((s) => s.deleteRow);
+  const moveRow = useEditorStore((s) => s.moveRow);
   const actions = useMemo<SpreadsheetActions>(
-    () => ({ setCell, addRow, deleteRow }),
-    [setCell, addRow, deleteRow],
+    () => ({ setCell, addRow, deleteRow, moveRow }),
+    [setCell, addRow, deleteRow, moveRow],
   );
   return (
     <SpreadsheetContent
@@ -299,7 +303,11 @@ function SheetGrid({ sheet, state, flags, actions }: SheetGridProps): ReactEleme
                     >
                       ×
                     </button>
-                    {r + 1}
+                    <RowIndexCell
+                      rowIndex={r}
+                      rowCount={state.rows.length}
+                      onMove={(to) => actions.moveRow(sheet.name, r, to)}
+                    />
                   </span>
                 </th>
                 {sheet.columns.map((column, c) => {
@@ -359,6 +367,54 @@ function SheetGrid({ sheet, state, flags, actions }: SheetGridProps): ReactEleme
 
 const HEADER_TH =
   "sticky top-0 z-10 whitespace-nowrap border-b border-r border-gray-700 bg-gray-900 px-2 py-1.5 font-semibold text-gray-300";
+
+interface RowIndexCellProps {
+  /** 0-based — the row's CURRENT position. */
+  rowIndex: number;
+  rowCount: number;
+  /** Called with the resolved 0-based target index — never called on a
+   * no-op (gridModel.resolveIndexEdit already filtered those out). */
+  onMove(toIndex: number): void;
+}
+
+/**
+ * The row-number gutter (§3.6, ◆42): a small editable field showing the
+ * row's 1-based position — exactly the number [row] resolves to for it.
+ * Thin wire over gridModel's resolveIndexEdit (same MINOR-5 discipline as
+ * TextCell/cellEditReduce): committing a real move calls the store; garbage,
+ * a blank, or the unchanged number reverts locally with NO store call, so a
+ * no-op edit never spends the row's ◆29 flag.
+ */
+function RowIndexCell({ rowIndex, rowCount, onMove }: RowIndexCellProps): ReactElement {
+  const [draft, setDraft] = useState<CellDraft>(null);
+  const commit = (): void => {
+    const result = resolveIndexEdit(draft ?? String(rowIndex + 1), rowIndex, rowCount);
+    setDraft(null);
+    if (result.kind === "move") onMove(result.to);
+  };
+  const onKeyDown = (e: KeyboardEvent<HTMLInputElement>): void => {
+    if (e.key === "Enter") {
+      // Same fix as TextCell's Enter handling: commit without blur()'s side
+      // effect of throwing focus to document.body (which would restart the
+      // next Tab at the top of the page instead of continuing through the
+      // grid) — stay in the field.
+      e.preventDefault();
+      commit();
+    } else if (e.key === "Escape") {
+      setDraft(null); // revert in place
+    }
+  };
+  return (
+    <input
+      value={draft ?? String(rowIndex + 1)}
+      onChange={(e) => setDraft(e.currentTarget.value)}
+      onBlur={commit}
+      onKeyDown={onKeyDown}
+      aria-label={`row position, currently ${rowIndex + 1} of ${rowCount}`}
+      className="w-7 shrink-0 bg-transparent px-0.5 py-1 text-right outline-none focus:bg-gray-900/50 focus:ring-1 focus:ring-inset focus:ring-sky-600"
+    />
+  );
+}
 
 interface TextCellProps {
   value: string;
