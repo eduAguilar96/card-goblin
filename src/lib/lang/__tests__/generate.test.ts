@@ -166,6 +166,7 @@ describe("demo fixture end to end (§3.9)", () => {
       height: 3,
       color: "grey",
       pivot: { h: "left", v: "top" }, // §3.4 default, materialized
+      rotate: 0, // §3.4 default (◆43), materialized
     });
   });
 
@@ -180,6 +181,7 @@ describe("demo fixture end to end (§3.9)", () => {
       text: "Dragon",
       pivot: { h: "center", v: "top" }, // the sugar centers horizontally (§3.4)
       font: "geist", // no font: in the demo → the §3.3 default (◆41)
+      rotate: 0, // no rotate: in the demo → the §3.4 default (◆43)
     });
   });
 
@@ -202,6 +204,7 @@ describe("demo fixture end to end (§3.9)", () => {
       code: "SWORDS",
       pivot: { h: "left", v: "top" },
       style: "flat_dark", // no style: in the demo → the §3.3 default
+      rotate: 0, // §3.4 default (◆43)
     });
   });
 
@@ -217,7 +220,7 @@ describe("demo fixture end to end (§3.9)", () => {
 
   it("PlainBack: one full-card teal rect using the exact 28-unit height", () => {
     expect(deck.cards[0].back).toEqual([
-      { kind: "rect", x: 0, y: 0, width: 20, height: 28, color: "teal", pivot: { h: "left", v: "top" } },
+      { kind: "rect", x: 0, y: 0, width: 20, height: 28, color: "teal", pivot: { h: "left", v: "top" }, rotate: 0 },
     ]);
   });
 
@@ -347,7 +350,7 @@ describe("geometry resolution: full / half / middle, fractional y (⚑7†)", ()
   it("absent Back (◆16) → a single full-card white rect generated here", () => {
     const p = textProject("[t]", ["t: Text"], [{ t: "x" }]);
     expect(p.model.decks[0].cards[0].back).toEqual([
-      { kind: "rect", x: 0, y: 0, width: 20, height: 28, color: "white", pivot: { h: "left", v: "top" } },
+      { kind: "rect", x: 0, y: 0, width: 20, height: 28, color: "white", pivot: { h: "left", v: "top" }, rotate: 0 },
     ]);
   });
 });
@@ -419,7 +422,7 @@ describe("custom card sizes flow to the RenderModel (§3.4 M2)", () => {
     expect(deck.yUnits).toBe(30);
     // The synthetic default back spans the custom grid exactly (◆16).
     expect(deck.cards[0].back).toEqual([
-      { kind: "rect", x: 0, y: 0, width: 20, height: 30, color: "white", pivot: { h: "left", v: "top" } },
+      { kind: "rect", x: 0, y: 0, width: 20, height: 30, color: "white", pivot: { h: "left", v: "top" }, rotate: 0 },
     ]);
   });
 
@@ -660,6 +663,7 @@ describe("Image flows to the shape (§3.3 M2)", () => {
       src: "img/dragon.png",
       fit: "contain",
       pivot: { h: "left", v: "top" },
+      rotate: 0, // §3.4 default (◆43)
     });
   });
 
@@ -771,6 +775,7 @@ describe("Qr flows to the shape (§7.1a)", () => {
       color: "black",
       background: "white",
       pivot: { h: "left", v: "top" },
+      rotate: 0, // §3.4 default (◆43)
       moduleCount: expected.moduleCount,
       modules: expected.modules,
     });
@@ -1073,6 +1078,112 @@ describe("nine-point pivot flows to the shape (§3.4 M3)", () => {
   });
 });
 
+// -- rotate: (§3.4, M4 — ◆43) ------------------------------------------------
+
+describe("rotate: flows to the shape (§3.4 M4, ◆43)", () => {
+  const rectProject = (extra: string[], rows: Record<string, string>[] = [{ n: "3" }]) =>
+    projectOf(
+      src(
+        ...sheetLines(["n: Number"]),
+        "Template: T",
+        "  Rectangle:",
+        "    x: 10",
+        "    y: 10",
+        "    width: 4",
+        "    height: 2",
+        "    color: teal",
+        ...extra.map((l) => `    ${l}`),
+        ...CARD_LINES,
+        "  Front: T",
+      ),
+      { Sh: rows },
+    );
+  const rectShape = (extra: string[]): RectShape =>
+    rectProject(extra).model.decks[0].cards[0].front[0] as RectShape;
+
+  it("omitted rotate: materializes the 0 default on every shape kind", () => {
+    const p = projectOf(
+      src(
+        ...sheetLines(["t: Text"]),
+        "Template: T",
+        "  Rectangle:",
+        "    x: 0",
+        "    y: 0",
+        "    width: 1",
+        "    height: 1",
+        "    color: teal",
+        "  Text:",
+        "    x: 0",
+        "    y: 2",
+        "    size: 1",
+        '    text: "a"',
+        "  TextBox:",
+        "    x: 0",
+        "    y: 4",
+        "    width: 5",
+        "    height: 2",
+        '    text: "b"',
+        "    size: 1",
+        "  Icon:",
+        "    x: 0",
+        "    y: 7",
+        "    size: 1",
+        '    code: "HEARTS"',
+        "  Image:",
+        "    x: 0",
+        "    y: 9",
+        "    width: 2",
+        "    height: 2",
+        '    src: "a.png"',
+        "  Qr:",
+        "    x: 0",
+        "    y: 12",
+        "    size: 2",
+        '    data: "a"',
+        ...CARD_LINES,
+        "  Front: T",
+      ),
+      { Sh: [{ t: "x" }] },
+    );
+    const front = p.model.decks[0].cards[0].front;
+    expect(front).toHaveLength(6);
+    for (const shape of front) {
+      expect(shape.rotate, shape.kind).toBe(0);
+    }
+  });
+
+  it("the resolved value is carried on the shape — x/y stay as authored (paint-time only)", () => {
+    const rect = rectShape(["rotate: 45"]);
+    expect(rect.rotate).toBe(45);
+    expect(rect.x).toBe(10);
+    expect(rect.y).toBe(10);
+  });
+
+  it("negative and >360 pass through UNCHANGED — SVG rotation is periodic, not the model's business", () => {
+    expect(rectShape(["rotate: -90"]).rotate).toBe(-90);
+    expect(rectShape(["rotate: 400"]).rotate).toBe(400);
+  });
+
+  it("data-driven: [n] * 15 resolves per row, like any Number property", () => {
+    const p = rectProject(["rotate: [n] * 15"], [{ n: "3" }, { n: "0" }]);
+    const cards = p.model.decks[0].cards;
+    expect((cards[0].front[0] as RectShape).rotate).toBe(45);
+    expect((cards[1].front[0] as RectShape).rotate).toBe(0);
+  });
+
+  it("rotate is visible content — a non-zero angle changes the contentHash; explicit 0 ≡ omitted", () => {
+    const omitted = rectProject([]).model.decks[0].cards[0].contentHash;
+    expect(rectProject(["rotate: 0"]).model.decks[0].cards[0].contentHash).toBe(omitted);
+    expect(rectProject(["rotate: 45"]).model.decks[0].cards[0].contentHash).not.toBe(omitted);
+  });
+
+  it("division-by-zero rotate → the existing D008 placeholder path", () => {
+    const p = rectProject(["rotate: 1 / 0"]);
+    expect(errorCodes(p)).toEqual(["D008"]);
+    expect(p.model.decks[0].cards[0].front).toEqual([]);
+  });
+});
+
 // -- TextBox (§3.3, M3): the compiler is the wrapping authority --------------
 
 describe("TextBox evaluates to a wrapped TextBoxShape (§3.3 M3)", () => {
@@ -1124,6 +1235,7 @@ describe("TextBox evaluates to a wrapped TextBoxShape (§3.3 M3)", () => {
       clipped: false,
       shrunk: false,
       font: "geist", // no font: → the §3.3 default (◆41)
+      rotate: 0, // §3.4 default (◆43)
     });
   });
 

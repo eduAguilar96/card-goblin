@@ -188,6 +188,12 @@ const PIVOT_KEY = {
   key: "pivot",
   detail: `which point x/y name (optional, default ${DEFAULT_PIVOT_TOKEN})`,
 };
+/** §3.4 rotation (M4 — ◆43): one key detail for every drawable element. No
+ * value completion — an angle is an open Number, not a closed vocabulary. */
+const ROTATE_KEY = {
+  key: "rotate",
+  detail: "Number — degrees clockwise, around the pivot (optional, default 0)",
+};
 
 const ELEMENT_KEYS: Record<ElementKind, { key: string; detail: string }[]> = {
   Rectangle: [
@@ -197,6 +203,7 @@ const ELEMENT_KEYS: Record<ElementKind, { key: string; detail: string }[]> = {
     { key: "height", detail: "Number — units" },
     { key: "color", detail: "Color" },
     PIVOT_KEY,
+    ROTATE_KEY,
   ],
   Text: [
     { key: "x", detail: "Number — units (or middle)" },
@@ -206,6 +213,7 @@ const ELEMENT_KEYS: Record<ElementKind, { key: string; detail: string }[]> = {
     { key: "color", detail: "Color (optional, default black)" },
     PIVOT_KEY,
     { key: "font", detail: `bundled font face (optional, default ${DEFAULT_FONT})` },
+    ROTATE_KEY,
   ],
   TextBox: [
     { key: "x", detail: "Number — units" },
@@ -220,6 +228,7 @@ const ELEMENT_KEYS: Record<ElementKind, { key: string; detail: string }[]> = {
     { key: "overflow", detail: `${TEXTBOX_OVERFLOWS.join(" | ")} (optional, default ${DEFAULT_TEXTBOX_OVERFLOW})` },
     PIVOT_KEY,
     { key: "font", detail: `bundled font face (optional, default ${DEFAULT_FONT}) — wraps per font` },
+    ROTATE_KEY,
   ],
   Icon: [
     { key: "x", detail: "Number — units (or middle)" },
@@ -229,6 +238,7 @@ const ELEMENT_KEYS: Record<ElementKind, { key: string; detail: string }[]> = {
     { key: "color", detail: "Color (optional, default black)" },
     PIVOT_KEY,
     { key: "style", detail: `Dicier face (optional, default ${DEFAULT_ICON_STYLE})` },
+    ROTATE_KEY,
   ],
   Image: [
     { key: "x", detail: "Number — units" },
@@ -238,6 +248,7 @@ const ELEMENT_KEYS: Record<ElementKind, { key: string; detail: string }[]> = {
     { key: "src", detail: "Text — image URL" },
     { key: "fit", detail: `${IMAGE_FITS.join(" | ")} (optional, default ${DEFAULT_IMAGE_FIT})` },
     PIVOT_KEY,
+    ROTATE_KEY,
   ],
   Qr: [
     { key: "x", detail: "Number — units" },
@@ -248,6 +259,7 @@ const ELEMENT_KEYS: Record<ElementKind, { key: string; detail: string }[]> = {
     { key: "background", detail: "Color (optional, default white)" },
     { key: "level", detail: `${QR_LEVELS.join(" | ")} (optional, default ${DEFAULT_QR_LEVEL})` },
     PIVOT_KEY,
+    ROTATE_KEY,
   ],
 };
 

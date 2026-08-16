@@ -334,19 +334,32 @@ interface ElementSpec {
  * to left, line_height to 1.3 × size, overflow to clip (M3); Qr color
  * defaults to black, background to white, level to m (§7.1a); Text/TextBox
  * font defaults to geist (M3 — ◆41). EVERY drawable element takes an
- * optional nine-point `pivot:` (§3.4, M3; default top_left). */
+ * optional nine-point `pivot:` (§3.4, M3; default top_left) and an optional
+ * Number `rotate:` (§3.4, M4 — ◆43; degrees clockwise, default 0). */
 const ELEMENT_SPECS: Record<ElementNode["element"], ElementSpec> = {
-  Rectangle: { required: ["x", "y", "width", "height", "color"], optional: ["pivot"] },
-  Text: { required: ["x", "y", "size", "text"], optional: ["color", "pivot", "font"] },
+  Rectangle: {
+    required: ["x", "y", "width", "height", "color"],
+    optional: ["pivot", "rotate"],
+  },
+  Text: {
+    required: ["x", "y", "size", "text"],
+    optional: ["color", "pivot", "font", "rotate"],
+  },
   TextBox: {
     required: ["x", "y", "width", "height", "text", "size"],
-    optional: ["color", "align", "line_height", "overflow", "pivot", "font"],
+    optional: ["color", "align", "line_height", "overflow", "pivot", "font", "rotate"],
   },
-  Icon: { required: ["x", "y", "size", "code"], optional: ["color", "pivot", "style"] },
-  Image: { required: ["x", "y", "width", "height", "src"], optional: ["fit", "pivot"] },
+  Icon: {
+    required: ["x", "y", "size", "code"],
+    optional: ["color", "pivot", "style", "rotate"],
+  },
+  Image: {
+    required: ["x", "y", "width", "height", "src"],
+    optional: ["fit", "pivot", "rotate"],
+  },
   Qr: {
     required: ["x", "y", "size", "data"],
-    optional: ["color", "background", "level", "pivot"],
+    optional: ["color", "background", "level", "pivot", "rotate"],
   },
 };
 
@@ -1047,6 +1060,14 @@ class Checker {
       case "y":
       case "size":
         this.checkValue(value, EXP_NUMBER, ctx, true);
+        return;
+      case "rotate":
+        // Every drawable element (§3.4, M4 — ◆43): degrees clockwise around
+        // the pivot point, any Number expression (data-driven allowed),
+        // default 0. An ANGLE, not a length — geometryOk is false, so a bare
+        // `full`/`half` here is the usual E007 keyword misuse, exactly as in
+        // any non-geometry Number position. Non-Number is the usual E003.
+        this.checkValue(value, EXP_NUMBER, ctx, false);
         return;
       case "color":
         this.checkValue(value, EXP_COLOR, ctx, false);

@@ -276,6 +276,10 @@ export interface Pivot {
  * share the instance (the model is immutable by contract). */
 export const DEFAULT_PIVOT: Pivot = Object.freeze({ h: "left", v: "top" });
 
+/** `rotate:` when omitted (§3.4, ◆43) — unrotated. The wiki's shape table
+ * states this default per element; docFacts pins the two together. */
+export const DEFAULT_ROTATE = 0;
+
 /**
  * Normalize one `pivot:` token (§3.4), or null when it is outside the
  * vocabulary — the checker then E008s naming PIVOT_TOKENS. Accepted, case-
@@ -330,6 +334,10 @@ export interface RectShape {
   color: string;
   /** Which point of the box x/y name (§3.4); top-left when omitted. */
   pivot: Pivot;
+  /** Degrees CLOCKWISE around the (x, y) pivot point (§3.4, M4 — ◆43);
+   * 0 = unrotated. Paint-time only — resolved number, applied by the
+   * renderer as an SVG transform; never part of layout. */
+  rotate: number;
 }
 
 export interface TextShape {
@@ -350,6 +358,9 @@ export interface TextShape {
    * pre-existing default. Affects both the renderer's font-family AND (on
    * TextBox) the wrap engine's per-character advances — see wrap.ts. */
   font: FontFace;
+  /** Degrees clockwise around the (x, y) pivot point (§3.4, M4 — ◆43);
+   * 0 = unrotated. */
+  rotate: number;
 }
 
 export interface IconShape {
@@ -365,6 +376,9 @@ export interface IconShape {
   pivot: Pivot;
   /** Which Dicier face draws the glyph (§3.3); `flat_dark` when omitted. */
   style: IconStyle;
+  /** Degrees clockwise around the (x, y) pivot point (§3.4, M4 — ◆43);
+   * 0 = unrotated. */
+  rotate: number;
 }
 
 /** Raster art from a URL (§3.3, M2). The model carries only the resolved URL
@@ -394,6 +408,11 @@ export interface ImageShape {
    * square fallback box pivots on this point until the art's ratio is
    * known. */
   pivot: Pivot;
+  /** Degrees clockwise around the (x, y) pivot point (§3.4, M4 — ◆43);
+   * 0 = unrotated. The rotation center is (x, y) itself, so it needs no
+   * load-time knowledge — an `auto` box rotates around the same point
+   * before and after the art's ratio arrives. */
+  rotate: number;
 }
 
 /**
@@ -439,6 +458,10 @@ export interface TextBoxShape {
    * against this font's advances) and rendering use (§3.3, M3 — ◆41);
    * `geist` when omitted, the pre-existing default. */
   font: FontFace;
+  /** Degrees clockwise around the (x, y) pivot point (§3.4, M4 — ◆43);
+   * 0 = unrotated. Paint-time only — the box WRAPS against its unrotated
+   * width (`lines` never change with the angle). */
+  rotate: number;
 }
 
 /**
@@ -463,6 +486,10 @@ export interface QrShape {
   background: string;
   /** Which point of the box x/y name (§3.4); top-left when omitted. */
   pivot: Pivot;
+  /** Degrees clockwise around the (x, y) pivot point (§3.4, M4 — ◆43);
+   * 0 = unrotated. QR codes scan at any angle, but keeping the quiet zone
+   * clear is still the designer's job. */
+  rotate: number;
   /** Modules per side — one of the legal QR sizes, 21 + 4k. */
   moduleCount: number;
   /** Row-major "1" (dark) / "0" (light) string, length moduleCount². The

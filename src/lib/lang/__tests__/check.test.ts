@@ -895,6 +895,60 @@ describe("pivot: on every drawable element (§3.4 M3)", () => {
   });
 });
 
+// -- rotate: (§3.4, M4 — ◆43) ------------------------------------------------
+
+describe("rotate: on every drawable element (§3.4 M4, ◆43)", () => {
+  /** Every drawable, each with a different legal Number value — literals,
+   * arithmetic, negatives, >360, and the data-driven [cost] ref. */
+  const CASES: { header: string; props: string[] }[] = [
+    {
+      header: "Rectangle:",
+      props: ["x: 0", "y: 0", "width: 1", "height: 1", "color: teal", "rotate: 45"],
+    },
+    { header: "Text:", props: [...TEXT_BASE, 'text: "a"', "rotate: [cost] * 15"] },
+    {
+      header: "TextBox:",
+      props: ["x: 1", "y: 1", "width: 10", "height: 6", 'text: "t"', "size: 1", "rotate: -90"],
+    },
+    { header: "Icon:", props: ["x: 1", "y: 1", "size: 1", 'code: "HEARTS"', "rotate: 400"] },
+    {
+      header: "Image:",
+      props: ["x: 1", "y: 1", "width: 5", "height: 5", 'src: "a.png"', "rotate: 5.5"],
+    },
+    {
+      header: "Qr:",
+      props: ["x: 1", "y: 1", "size: 5", 'data: "https://example.com/a"', "rotate: [cost]"],
+    },
+  ];
+
+  it("accepts a Number expression — literal, arithmetic, or data-driven — on all six", () => {
+    for (const { header, props } of CASES) {
+      expect(diagsOf(withElement(header, props)), header).toEqual([]);
+    }
+  });
+
+  it("a Text-typed value is the usual E003", () => {
+    const ds = diagsOf(
+      withElement("Rectangle:", [
+        "x: 0", "y: 0", "width: 1", "height: 1", "color: teal", "rotate: [name]",
+      ]),
+    );
+    expect(ds.map((d) => d.code)).toEqual(["E003"]);
+    expect(ds[0].message).toContain("expected Number");
+  });
+
+  it("rotate is an ANGLE, not a length — a bare geometry keyword is E007 keyword misuse", () => {
+    const ds = diagsOf(
+      withElement("Text:", [...TEXT_BASE, 'text: "a"', "rotate: full"]),
+    );
+    expect(ds.map((d) => d.code)).toEqual(["E007"]);
+    expect(ds[0].message).toContain("geometry positions");
+    expect(
+      codesOf(withElement("Icon:", ["x: 1", "y: 1", "size: 1", 'code: "HEARTS"', "rotate: half"])),
+    ).toEqual(["E007"]);
+  });
+});
+
 // -- Image (§3.3, M2) --------------------------------------------------------
 
 describe("Image (§3.3 M2)", () => {

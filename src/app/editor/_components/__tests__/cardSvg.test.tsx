@@ -39,6 +39,7 @@ import {
   pivotedBoxOrigin,
   resetImageStatusesForTests,
   resolveImageBox,
+  rotationTransform,
   setImageProbeForTests,
   subscribeImageStatus,
   textBoxLineX,
@@ -275,6 +276,7 @@ describe("CardFaceSvg: TextBox font: picks the family and the per-face ascent (�
     clipped: false,
     shrunk: false,
     font,
+    rotate: 0,
   });
 
   const render = (shape: TextBoxShape): string =>
@@ -369,6 +371,7 @@ describe("CardFaceSvg: TextBox shapes (§3.3 M3)", () => {
     clipped: false,
     shrunk: false,
     font: "geist",
+    rotate: 0,
     ...over,
   });
 
@@ -473,6 +476,7 @@ describe("CardSVG: the clipped/shrunk badge (§3.3 M3)", () => {
     clipped: false,
     shrunk: false,
     font: "geist",
+    rotate: 0,
     ...over,
   });
 
@@ -524,6 +528,7 @@ describe("CardFaceSvg: Image shapes (§3.3 M2)", () => {
     src: "https://example.com/a.png",
     fit,
     pivot: { h: "left", v: "top" },
+    rotate: 0,
   });
 
   const render = (shape: ImageShape, images?: ResolvedImages): string =>
@@ -611,6 +616,7 @@ describe("CardFaceSvg: auto dimension resolves at load time (§3.3)", () => {
     src: "https://example.com/banner.png",
     fit: "contain",
     pivot: { h: "left", v: "top" },
+    rotate: 0,
   };
 
   const render = (shape: ImageShape, images?: ResolvedImages): string =>
@@ -712,6 +718,7 @@ describe("CardFaceSvg: nine-point pivots (§3.4 M3)", () => {
       height: 2,
       color: "teal",
       pivot: pivot("right", "bottom"),
+      rotate: 0,
     };
     const [rect] = rectTags(render([shape]));
     expect(rect).toMatchObject({ x: "6", y: "8", width: "4", height: "2", fill: "teal" });
@@ -747,6 +754,7 @@ describe("CardFaceSvg: nine-point pivots (§3.4 M3)", () => {
       text: "mid",
       pivot: pivot("center", "center"),
       font: "geist",
+      rotate: 0,
     };
     const t = textTags(render([shape])).find((x) => x.content === "mid")!;
     expect(t.attrs["text-anchor"]).toBe("middle");
@@ -768,6 +776,7 @@ describe("CardFaceSvg: nine-point pivots (§3.4 M3)", () => {
         text: "t",
         pivot: pivot("left", v),
         font: "geist",
+        rotate: 0,
       };
       return textTags(render([shape]))[0].attrs.y;
     };
@@ -786,6 +795,7 @@ describe("CardFaceSvg: nine-point pivots (§3.4 M3)", () => {
       code: "HEARTS",
       pivot: pivot("right", "bottom"),
       style: "flat_dark",
+      rotate: 0,
     };
     const t = textTags(render([shape]))[0];
     expect(t.attrs["text-anchor"]).toBe("end");
@@ -814,6 +824,7 @@ describe("CardFaceSvg: nine-point pivots (§3.4 M3)", () => {
     src: "https://x/banner.png",
     fit: "contain",
     pivot: { h: "center", v: "bottom" },
+    rotate: 0,
   };
 
   it("Image bottom_center + auto height: the offset comes from the RESOLVED box", () => {
@@ -861,6 +872,7 @@ describe("CardFaceSvg: nine-point pivots (§3.4 M3)", () => {
       clipped: false,
       shrunk: false,
       font: "geist",
+      rotate: 0,
     };
     const markup = render([shape]);
     // Box origin: (12 − 10, 9 − 6) = (2, 3); align middle → line x = 2 + 10/2.
@@ -888,6 +900,7 @@ describe("CardFaceSvg: Qr shapes (§7.1a)", () => {
     color: "black",
     background: "white",
     pivot: { h: "left", v: "top" },
+    rotate: 0,
     moduleCount: 21,
     modules: "1" + "0".repeat(21 * 21 - 1),
   };
@@ -940,6 +953,115 @@ describe("CardFaceSvg: Qr shapes (§7.1a)", () => {
     const markup = render([blank]);
     const attrs = parseAttrs(/<path\b([^>]*)\/?>/.exec(markup)![1]);
     expect(attrs.d).toBe("");
+  });
+});
+
+// -- rotate: (§3.4, M4 — ◆43) -------------------------------------------------
+
+describe("CardFaceSvg: rotate: is an SVG transform around (x, y) (§3.4 M4, ◆43)", () => {
+  const render = (face: Shape[], images?: ResolvedImages): string =>
+    renderToStaticMarkup(
+      <CardFaceSvg xUnits={20} yUnits={28} face={face} images={images} />,
+    );
+
+  it("a rotated Rectangle carries rotate(deg x y) — the PIVOT point, not the drawn origin", () => {
+    const shape: RectShape = {
+      kind: "rect",
+      x: 10,
+      y: 10,
+      width: 4,
+      height: 2,
+      color: "teal",
+      pivot: { h: "right", v: "bottom" },
+      rotate: 45,
+    };
+    const [rect] = rectTags(render([shape]));
+    // Drawn origin still backs off by the §3.4 pivot offset (6, 8)…
+    expect(rect).toMatchObject({ x: "6", y: "8" });
+    // …but the rotation center is the shape's OWN (x, y) — the pivot point.
+    expect(rect.transform).toBe("rotate(45 10 10)");
+  });
+
+  it("a rotated Text turns around (x, y) — the em-box pivot point, not the baseline", () => {
+    const shape: TextShape = {
+      kind: "text",
+      x: 5,
+      y: 10,
+      size: 2,
+      color: "black",
+      text: "spin",
+      pivot: { h: "center", v: "center" },
+      font: "geist",
+      rotate: -30,
+    };
+    const t = textTags(render([shape])).find((x) => x.content === "spin")!;
+    // Baseline realization is unchanged (em-box math)…
+    expect(t.attrs.y).toBe(String(10 - 1 + TEXT_ASCENT * 2));
+    // …and the center is (x, y), NOT the computed baseline point. Negative
+    // angles pass through as written — SVG rotation is periodic.
+    expect(t.attrs.transform).toBe("rotate(-30 5 10)");
+  });
+
+  it("a rotated Qr rotates the whole group — background and modules as one node", () => {
+    const shape: QrShape = {
+      kind: "qr",
+      x: 2,
+      y: 2,
+      size: 10,
+      color: "black",
+      background: "white",
+      pivot: { h: "left", v: "top" },
+      rotate: 400,
+      moduleCount: 21,
+      modules: "1" + "0".repeat(21 * 21 - 1),
+    };
+    const markup = render([shape]);
+    const g = /<g\b([^>]*)>/.exec(markup)!;
+    expect(parseAttrs(g[1]).transform).toBe("rotate(400 2 2)");
+    // The interior rect/path carry NO transform of their own.
+    expect(rectTags(markup)[0].transform).toBeUndefined();
+  });
+
+  it("a rotated Image composes with the render-time auto box — the center stays (x, y)", () => {
+    const shape: ImageShape = {
+      kind: "image",
+      x: 10,
+      y: 20,
+      width: 16,
+      height: "auto",
+      src: "https://x/banner.png",
+      fit: "contain",
+      pivot: { h: "center", v: "bottom" },
+      rotate: 15,
+    };
+    const markup = render(
+      [shape],
+      new Map([
+        [
+          "https://x/banner.png",
+          { href: "data:image/png;base64,AAA", naturalWidth: 200, naturalHeight: 100 },
+        ],
+      ]),
+    );
+    const attrs = parseAttrs(/<image\b([^>]*)\/?>/.exec(markup)![1]);
+    // The resolved 16×8 box still pivots to origin (2, 12)…
+    expect(attrs).toMatchObject({ x: "2", y: "12", width: "16", height: "8" });
+    // …and rotates around the authored (x, y), which needed no load-time
+    // knowledge (◆43). The loading/failed placeholder rotates identically.
+    expect(attrs.transform).toBe("rotate(15 10 20)");
+    const loading = render([shape]);
+    expect(/<g\b([^>]*)>/.exec(loading)![1]).toContain('transform="rotate(15 10 20)"');
+  });
+
+  it("rotate: 0 emits NO transform attribute anywhere — the demo markup stays byte-identical", () => {
+    // The §3.9 demo uses no rotate:, so every shape resolves rotate 0 —
+    // both faces of every card must not contain a transform at all.
+    for (const card of deck.cards) {
+      expect(renderFace("front", card)).not.toContain("transform=");
+      expect(renderFace("back", card)).not.toContain("transform=");
+    }
+    expect(rotationTransform({ x: 10, y: 10, rotate: 0 })).toBeUndefined();
+    expect(rotationTransform({ x: 10, y: 10, rotate: 360 })).toBe("rotate(360 10 10)");
   });
 });
 

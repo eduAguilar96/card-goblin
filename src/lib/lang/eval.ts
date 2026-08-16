@@ -52,6 +52,7 @@ import {
   DEFAULT_IMAGE_FIT,
   DEFAULT_LINE_HEIGHT,
   DEFAULT_PIVOT,
+  DEFAULT_ROTATE,
   DEFAULT_QR_LEVEL,
   DEFAULT_TEXTBOX_OVERFLOW,
 } from "./model";
@@ -493,6 +494,7 @@ function evalElement(el: ElementNode, ctx: EvalContext): Shape {
         height: numberProp(el, "height", ctx, ctx.yUnits),
         color: colorProp(el, ctx, null), // required (§3.3) — no default
         pivot: pivotOf(el, ctx),
+        rotate: rotateOf(el, ctx),
       };
     case "Text": {
       const { x, pivot } = xAndPivot(el, ctx);
@@ -510,6 +512,7 @@ function evalElement(el: ElementNode, ctx: EvalContext): Shape {
         text: toText(evalExpr(requireProp(el, "text"), ctx, null)).replace(/\n/g, " "),
         pivot,
         font: fontOf(el, ctx),
+        rotate: rotateOf(el, ctx),
       };
     }
     case "TextBox": {
@@ -550,6 +553,7 @@ function evalElement(el: ElementNode, ctx: EvalContext): Shape {
         clipped: layout.clipped,
         shrunk: layout.shrunk,
         font,
+        rotate: rotateOf(el, ctx),
       };
     }
     case "Icon": {
@@ -576,6 +580,7 @@ function evalElement(el: ElementNode, ctx: EvalContext): Shape {
         code,
         pivot,
         style: styleOf(el, ctx),
+        rotate: rotateOf(el, ctx),
       };
     }
     case "Image":
@@ -592,6 +597,7 @@ function evalElement(el: ElementNode, ctx: EvalContext): Shape {
         src: toText(evalExpr(requireProp(el, "src"), ctx, null)),
         fit: fitOf(el, ctx),
         pivot: pivotOf(el, ctx), // §3.4: applied to the RESOLVED box at render time
+        rotate: rotateOf(el, ctx), // center is (x, y) — no load-time knowledge needed
       };
     case "Qr": {
       // §7.1a: data resolves like text (Text coercions apply, same as
@@ -617,6 +623,7 @@ function evalElement(el: ElementNode, ctx: EvalContext): Shape {
         color: colorProp(el, ctx, "black"),
         background: backgroundProp(el, ctx),
         pivot: pivotOf(el, ctx),
+        rotate: rotateOf(el, ctx),
         moduleCount: encoded.moduleCount,
         modules: encoded.modules,
       };
@@ -718,6 +725,21 @@ function pivotOf(el: ElementNode, ctx: EvalContext): Pivot {
   const res = ctx.card.resolutions.get(expr);
   if (res?.kind !== "pivot") return poisoned();
   return res.pivot;
+}
+
+/** `rotate:` (§3.4, M4 — ◆43), on every drawable element: an ordinary
+ * optional Number expression, default 0 — degrees clockwise around the (x, y)
+ * pivot point. No axis units: it is an angle, not a length (the checker
+ * already rejected `full`/`half` here, and a null axis poisons any stray
+ * geometry resolution). Values outside 0–360 pass through unchanged — SVG
+ * rotation is periodic. Non-finite results are D008 inside evalExpr like any
+ * other numeric property. */
+function rotateOf(el: ElementNode, ctx: EvalContext): number {
+  const expr = findProp(el, "rotate");
+  if (!expr) return DEFAULT_ROTATE;
+  const v = evalExpr(expr, ctx, null);
+  if (v.kind !== "number") return poisoned();
+  return v.value;
 }
 
 /** Icon `style:` (§3.3, M2): checker-blessed identifier or the flat_dark

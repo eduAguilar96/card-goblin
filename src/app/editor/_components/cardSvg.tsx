@@ -205,6 +205,25 @@ export function pivotedBaselineY(
   return shape.y - PIVOT_FRACTION_Y[shape.pivot.v] * shape.size + ascent * shape.size;
 }
 
+/**
+ * The `rotate:` transform (§3.4, M4 — ◆43): degrees CLOCKWISE around the
+ * shape's (x, y) — the exact card-space point the pivot names, so the pivot
+ * is the rotation center for every kind (box origins and em-box baselines are
+ * derived FROM that point, so rotating about it turns the shape on its own
+ * handle). The viewBox is the deck's unit grid, so x/y are usable in the SVG
+ * transform directly, no conversion. Returns `undefined` when rotate is 0 —
+ * React then omits the attribute entirely, keeping the markup of every
+ * existing (unrotated) card byte-identical. Pure and exported for the markup
+ * tests.
+ */
+export function rotationTransform(shape: {
+  x: number;
+  y: number;
+  rotate: number;
+}): string | undefined {
+  return shape.rotate === 0 ? undefined : `rotate(${shape.rotate} ${shape.x} ${shape.y})`;
+}
+
 /** Error placeholders clamp the first diagnostic's message to this many
  * characters (single line, no wrapping — ◆24 applies to us too). */
 export const ERROR_MESSAGE_MAX = 40;
@@ -547,7 +566,9 @@ function renderImagePlaceholder(
   const stroke = imagePlaceholderStroke(box);
   const failed = variant === "failed";
   return (
-    <g key={index} data-image-placeholder={variant}>
+    // ◆43: the rotation composes with the render-time pivot offset — the
+    // center is (x, y) itself, so it holds whatever box the art resolves to.
+    <g key={index} data-image-placeholder={variant} transform={rotationTransform(shape)}>
       <title>
         {failed ? `Image failed to load: ${shape.src}` : `Loading image: ${shape.src}`}
       </title>
@@ -602,6 +623,7 @@ function renderImageTag(
       width={box.width}
       height={box.height}
       preserveAspectRatio={IMAGE_PRESERVE_ASPECT[shape.fit]}
+      transform={rotationTransform(shape)}
     />
   );
 }
@@ -678,7 +700,8 @@ function renderQr(shape: QrShape, index: number): ReactElement {
     }
   }
   return (
-    <g key={index}>
+    // ◆43: one transform on the group rotates background and modules as one.
+    <g key={index} transform={rotationTransform(shape)}>
       <rect x={origin.x} y={origin.y} width={shape.size} height={shape.size} fill={shape.background} />
       <path d={d} fill={shape.color} />
     </g>
@@ -770,6 +793,7 @@ function renderShape(shape: Shape, index: number, images?: ResolvedImages): Reac
           width={shape.width}
           height={shape.height}
           fill={shape.color}
+          transform={rotationTransform(shape)}
         />
       );
     }
@@ -788,6 +812,7 @@ function renderShape(shape: Shape, index: number, images?: ResolvedImages): Reac
           fill={shape.color}
           textAnchor={SVG_PIVOT_H[shape.pivot.h]}
           fontFamily={TEXT_FONT_FAMILIES[shape.font]}
+          transform={rotationTransform(shape)}
         >
           {shape.text}
         </text>
@@ -811,6 +836,7 @@ function renderShape(shape: Shape, index: number, images?: ResolvedImages): Reac
           textAnchor={SVG_PIVOT_H[shape.pivot.h]}
           fontFamily={ICON_FONT_FAMILIES[shape.style]}
           style={ICON_STYLE}
+          transform={rotationTransform(shape)}
         >
           {shape.code}
         </text>
@@ -859,6 +885,7 @@ function renderTextBox(shape: TextBoxShape, index: number): ReactElement {
       fill={shape.color}
       textAnchor={SVG_ALIGN[shape.align]}
       fontFamily={TEXT_FONT_FAMILIES[shape.font]}
+      transform={rotationTransform(shape)}
     >
       {shape.lines.map((line, i) => (
         <tspan

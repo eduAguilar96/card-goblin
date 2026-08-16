@@ -376,24 +376,25 @@ describe("bracket refs", () => {
 describe("property keys", () => {
   it("Rectangle keys with type-hint details (pivot included, §3.4 M3)", () => {
     const r = at(src("Template: T", "  Rectangle:", "    ¦"));
-    expect(labels(r)).toEqual(["x", "y", "width", "height", "color", "pivot"]);
+    expect(labels(r)).toEqual(["x", "y", "width", "height", "color", "pivot", "rotate"]);
     expect(byLabel(r, "color").detail).toBe("Color");
+    expect(byLabel(r, "rotate").detail).toContain("degrees clockwise");
     expect(byLabel(r, "pivot").detail).toContain("top_left");
     expect(byLabel(r, "x").insertText).toBe("x: ");
   });
 
   it("Text keys include text/pivot/font; Icon keys include code and style", () => {
     expect(labels(at(src("Template: T", "  Text:", "    ¦")))).toEqual([
-      "x", "y", "size", "text", "color", "pivot", "font",
+      "x", "y", "size", "text", "color", "pivot", "font", "rotate",
     ]);
     expect(labels(at(src("Template: T", "  Icon:", "    ¦")))).toEqual([
-      "x", "y", "size", "code", "color", "pivot", "style",
+      "x", "y", "size", "code", "color", "pivot", "style", "rotate",
     ]);
   });
 
   it("Image keys include src and fit (§3.3 M2)", () => {
     const r = at(src("Template: T", "  Image:", "    ¦"));
-    expect(labels(r)).toEqual(["x", "y", "width", "height", "src", "fit", "pivot"]);
+    expect(labels(r)).toEqual(["x", "y", "width", "height", "src", "fit", "pivot", "rotate"]);
     expect(byLabel(r, "src").detail).toBe("Text — image URL");
     expect(byLabel(r, "fit").detail).toContain("contain | cover | stretch");
   });
@@ -401,7 +402,7 @@ describe("property keys", () => {
   it("Qr keys include data/level/background (§7.1a)", () => {
     const r = at(src("Template: T", "  Qr:", "    ¦"));
     expect(labels(r)).toEqual([
-      "x", "y", "size", "data", "color", "background", "level", "pivot",
+      "x", "y", "size", "data", "color", "background", "level", "pivot", "rotate",
     ]);
     expect(byLabel(r, "data").detail).toBe("Text — the encoded content");
     expect(byLabel(r, "background").detail).toBe("Color (optional, default white)");
@@ -412,7 +413,7 @@ describe("property keys", () => {
     const r = at(src("Template: T", "  TextBox:", "    ¦"));
     expect(labels(r)).toEqual([
       "x", "y", "width", "height", "text", "size", "color", "align", "line_height", "overflow",
-      "pivot", "font",
+      "pivot", "font", "rotate",
     ]);
     expect(byLabel(r, "text").detail).toContain("hard break");
     expect(byLabel(r, "line_height").detail).toContain("1.3");
@@ -717,7 +718,7 @@ describe("value positions", () => {
     expect(labels(r)).toContain("red");
     // A same-indent sibling line is a KEY position, not a continuation.
     const sibling = at(src("Template: T", "  Rectangle:", "    color: red", "    ¦"));
-    expect(labels(sibling)).toEqual(["x", "y", "width", "height", "color", "pivot"]);
+    expect(labels(sibling)).toEqual(["x", "y", "width", "height", "color", "pivot", "rotate"]);
   });
 });
 
@@ -888,6 +889,7 @@ describe("compiler pins (E008 probes)", () => {
     "    height: half",
     "    color: navy",
     "    pivot: bottom_right",
+    "    rotate: 15",
     "  Repeat: [cost] as i",
     "    Text:",
     "      x: middle",
@@ -897,6 +899,7 @@ describe("compiler pins (E008 probes)", () => {
     "      color: black",
     "      pivot: middle",
     "      font: garamond",
+    "      rotate: [i] * 10",
     "  Icon:",
     "    x: middle",
     "    y: 2",
@@ -905,6 +908,7 @@ describe("compiler pins (E008 probes)", () => {
     "    color: red",
     "    pivot: right",
     "    style: round_heavy",
+    "    rotate: -30",
     "  Image:",
     "    x: 2",
     "    y: 4",
@@ -913,6 +917,7 @@ describe("compiler pins (E008 probes)", () => {
     '    src: "https://example.com/[name].png"',
     "    fit: cover",
     "    pivot: center",
+    "    rotate: 400",
     "  TextBox:",
     "    x: 2",
     "    y: 17",
@@ -926,6 +931,7 @@ describe("compiler pins (E008 probes)", () => {
     "    overflow: shrink",
     "    pivot: center_right",
     "    font: courier_bold_italic",
+    "    rotate: 5.5",
     "  Qr:",
     "    x: 2",
     "    y: 26",
@@ -935,6 +941,7 @@ describe("compiler pins (E008 probes)", () => {
     "    background: white",
     "    level: h",
     "    pivot: bottom_left",
+    "    rotate: 90",
     "Template: BackT",
     "  Rectangle:",
     "    x: 0",

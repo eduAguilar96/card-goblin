@@ -19,15 +19,16 @@ Text: "Title"
   text: [name]
 ```
 
-`x y size text` are required; `color` (default `black`) and `pivot` (default
-`top_left`) are optional. `Text` always draws a single line — `size` is the text's
+`x y size text` are required; `color` (default `black`), `pivot` (default
+`top_left`), and `rotate` (default `0`) are optional. `Text` always draws a single line — `size` is the text's
 height in units, not a font-size number. However long the resolved text is, it
 keeps going in one line rather than wrapping; when it needs to fill an area
 instead, that's `TextBox`, below. A newline character in the resolved text (from
 cell data, say) renders as a space in `Text` — hard breaks are a `TextBox`
 feature.
 
-`pivot:` follows the same nine-point vocabulary every shape uses — see
+`pivot:` follows the same nine-point vocabulary every shape uses, and
+`rotate:` turns the line around that pivot point, in degrees clockwise — see
 [Pivots](templates-and-shapes.md) on Templates & shapes.
 
 `font:` picks the typeface — `geist` (the default) or one of eight bundled serif
@@ -62,6 +63,10 @@ and the [exported PDF](pdf-export.md) show the exact same line breaks, always.
 - `font:` picks the typeface — see [Fonts](#fonts) below. Because wrapping
   measures actual letterforms, the SAME text in the SAME box can wrap onto a
   different number of lines depending on `font:`.
+- `rotate:` (default `0`) turns the whole box around its pivot point, in
+  degrees clockwise — see [Rotation](templates-and-shapes.md) on Templates &
+  shapes. It's paint-only: the text wraps against the box's unrotated width,
+  exactly as if the box weren't rotated.
 
 ### Line breaks you write yourself
 

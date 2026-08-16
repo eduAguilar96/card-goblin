@@ -84,6 +84,7 @@ the section that elaborates it:
 | ◆40 | Local image assets (§7.4) | **IndexedDB** (not localStorage) + an **`asset:` scheme** inside Image `src:` + a **project-file v2** that bundles asset bytes as base64 | localStorage is string-only with a small quota; IDB stores Blobs natively, and v2 keeps art traveling with the file without inventing a second file format |
 | ◆41 | Text/TextBox fonts (§3.3) | **Repo-bundled closed vocabulary**: `geist` (default, unchanged) + eight faces — Cormorant Garamond and Courier Prime, four weights/styles each — resolved like Icon `style:`, each with its own generated metrics table | A deliberate PRAGMATIC unblock, not a font system: the owner needed these two families now; per-project **uploaded** fonts are real future work, deferred because wrapping needs a metrics table per face and building that pipeline for arbitrary uploads is a bigger project than unblocking two known families |
 | ◆42 | Row/card position bindings (§3.6) | **`[row]` and `[card]` as built-in, derived bindings** resolving after sheet columns; the grid's row gutter becomes the editable index, and typing a position **moves the row and shifts the rest** (out-of-range clamps, garbage reverts) | Position IS row order, so storing a number would create a second source of truth that can disagree with it — deriving costs nothing and keeps the sheet payload, autosave slot, and project file unchanged. Two bindings because `loop:`/`count:` make one row into several cards: `[row]` labels the data, `[card]` serialises the deck. Resolving last means a sheet declaring its own `row`/`card` column shadows the built-in, so no existing project's COLUMN can be silently reinterpreted. (Narrow exception, not a column: a template that put an unresolvable `row`/`card` name where only Number/Text/Enum ever coerced — e.g. `color: [row]` — used to poison silently to Unknown with no sheet in scope; it now resolves and can genuinely E003, which is more correct, not less.) Editing the gutter rather than adding a column keeps ⚑3 (columns come from code) intact |
+| ◆43 | Rotation (§3.4) | **`rotate:` as an optional Number property on every drawable element** — degrees, clockwise, any expression (data-driven allowed), default 0 — rotating the element **around its `pivot:` point**, which is exactly the card-space point `x`/`y` name | The pivot is the element's own handle (◆36†), so it is the one rotation center that needs no new vocabulary — `pivot: center_center` + `rotate:` spins a shape in place, the default `top_left` swings it around its corner, and `Repeat` + `rotate: [i] * step` makes fans and dials from index math (⚑9). Paint-time only: wrap, generation, caps, and PDF layout are geometry-in-card-units and never see the transform (the rasterizer serializes the same SVG markup, so PDF inherits rotation for free). An ordinary Number property needs zero new grammar — the ◆33 argument — and a non-numeric value is the usual E003, non-finite the usual D008 |
 
 ---
 
@@ -176,12 +177,12 @@ own subsection below.
 
 | Element | Properties | Summary |
 |---|---|---|
-| `Rectangle` | `x y width height color pivot` | A filled box — §3.3.1. |
-| `Text` | `x y size color text pivot font` | One line of text — §3.3.2. |
-| `TextBox` | `x y width height text size color align line_height overflow pivot font` | Wrapped, multi-line text in a box — §3.3.3. |
-| `Icon` | `x y size color code pivot style` | A Dicier glyph, one of ten style faces — §3.3.4. |
-| `Image` | `x y width height src fit pivot` | Raster art from a URL or uploaded asset — §3.3.5. |
-| `Qr` | `x y size data color background level pivot` | A scannable QR code — §3.3.6. |
+| `Rectangle` | `x y width height color pivot rotate` | A filled box — §3.3.1. |
+| `Text` | `x y size color text pivot font rotate` | One line of text — §3.3.2. |
+| `TextBox` | `x y width height text size color align line_height overflow pivot font rotate` | Wrapped, multi-line text in a box — §3.3.3. |
+| `Icon` | `x y size color code pivot style rotate` | A Dicier glyph, one of ten style faces — §3.3.4. |
+| `Image` | `x y width height src fit pivot rotate` | Raster art from a URL or uploaded asset — §3.3.5. |
+| `Qr` | `x y size data color background level pivot rotate` | A scannable QR code — §3.3.6. |
 | `Repeat` | `Repeat: <Number expr> as <var>` (single line) | Draws its children N times — §3.3.7. |
 
 #### 3.3.1 Rectangle
@@ -378,6 +379,19 @@ Repeat: [health] as i
   center; the vertical component still comes from `pivot:`. (Renderer keeps
   the per-font ascent realization — `dy = ascent/em × size`, not
   `dominant-baseline`; §4.2.)
+- **Rotation (M4, 2026-08-16 — ◆43):** every drawable element accepts an
+  optional `rotate:` — a Number expression in **degrees, clockwise**,
+  default 0 — rotating the element **around its `pivot:` point**, i.e.
+  around the exact card-space point `x`/`y` place. The pivot is the shape's
+  handle, and rotation turns the shape on that handle: `pivot:
+  center_center` + `rotate: 45` spins it in place; the default `top_left`
+  swings it around its top-left corner. Values outside 0–360 wrap the
+  obvious way (`-90` ≡ `270`; the renderer passes the number through — SVG
+  rotation is periodic). Rotation is **paint-time only**: it never changes
+  wrap (a rotated TextBox wraps against its unrotated width), generation,
+  `full`/`half` resolution, or PDF card placement — the rasterizer
+  serializes the same markup, so the PDF inherits it. Non-numeric value →
+  E003; non-finite at data time → D008, like any other numeric property.
 
 ### 3.5 Expressions and types (⚑6)
 

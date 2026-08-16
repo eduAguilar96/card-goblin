@@ -30,6 +30,7 @@ import {
   DEFAULT_IMAGE_FIT,
   DEFAULT_LINE_HEIGHT,
   DEFAULT_PIVOT,
+  DEFAULT_ROTATE,
   DEFAULT_QR_LEVEL,
   DEFAULT_TEXTBOX_OVERFLOW,
   FONT_FACES,
@@ -394,6 +395,21 @@ describe("the Qr level table matches QR_LEVELS", () => {
 // ---------------------------------------------------------------------------
 // Nine-point pivots
 // ---------------------------------------------------------------------------
+
+describe("the shape table's rotate default matches DEFAULT_ROTATE (\u25c643)", () => {
+  const text = pageText("templates-and-shapes");
+
+  it("every drawable row lists rotate with the code's default", () => {
+    const { rows } = tableWithHeader(text, "optional (default)");
+    const drawables = rows.filter((cells) => !plain(cells[0]).startsWith("Repeat"));
+    expect(drawables).toHaveLength(6);
+    for (const cells of drawables) {
+      expect(plain(cells[2] ?? ""), `${plain(cells[0])} must document rotate's default`).toContain(
+        `rotate (${DEFAULT_ROTATE})`,
+      );
+    }
+  });
+});
 
 describe("the pivot table matches PIVOT_TOKENS", () => {
   const text = pageText("templates-and-shapes");

@@ -1,7 +1,7 @@
 ---
 title: Templates & shapes
 status: stable
-summary: Templates, the coordinate grid, the shape index, pivots, and Repeat — the drawing model every shape shares.
+summary: Templates, the grid, the shape index, pivots, rotation, and Repeat — the drawing model shapes share.
 ---
 
 # Templates & shapes
@@ -56,12 +56,12 @@ card, whatever size the card turns out to be.
 
 | Shape | Required | Optional (default) | Notes |
 |---|---|---|---|
-| `Rectangle` | `x y width height color` | `pivot` (top_left) | a filled box |
-| `Text` | `x y size text` | `color` (black), `pivot` (top_left) | one line; `size` is text height in units — see [Text & TextBox](text.md) |
-| `TextBox` | `x y width height text size` | `color` (black), `align` (left), `line_height` (1.3), `overflow` (clip), `pivot` (top_left) | wrapped multi-line text in a box — see [Text & TextBox](text.md) |
-| `Icon` | `x y size code` | `color` (black), `pivot` (top_left), `style` (flat_dark) | a game glyph — see [Icons](icons.md) |
-| `Image` | `x y width height src` | `fit` (contain), `pivot` (top_left) | your own artwork, from a URL or an uploaded asset — see [Images](images.md) |
-| `Qr` | `x y size data` | `color` (black), `background` (white), `level` (m), `pivot` (top_left) | a scannable QR code — see [QR codes](qr-codes.md) |
+| `Rectangle` | `x y width height color` | `pivot` (top_left), `rotate` (0) | a filled box |
+| `Text` | `x y size text` | `color` (black), `pivot` (top_left), `rotate` (0) | one line; `size` is text height in units — see [Text & TextBox](text.md) |
+| `TextBox` | `x y width height text size` | `color` (black), `align` (left), `line_height` (1.3), `overflow` (clip), `pivot` (top_left), `rotate` (0) | wrapped multi-line text in a box — see [Text & TextBox](text.md) |
+| `Icon` | `x y size code` | `color` (black), `pivot` (top_left), `style` (flat_dark), `rotate` (0) | a game glyph — see [Icons](icons.md) |
+| `Image` | `x y width height src` | `fit` (contain), `pivot` (top_left), `rotate` (0) | your own artwork, from a URL or an uploaded asset — see [Images](images.md) |
+| `Qr` | `x y size data` | `color` (black), `background` (white), `level` (m), `pivot` (top_left), `rotate` (0) | a scannable QR code — see [QR codes](qr-codes.md) |
 | `Repeat: N as i` | — | — | draws its children N times — see below |
 
 ## Pivots — which point of the shape `x`/`y` place
@@ -132,6 +132,51 @@ What the pivot moves, per shape:
 It always wins horizontally, and a written `pivot:` keeps its vertical say:
 `x: middle` + `pivot: bottom_left` centers horizontally and pivots the
 bottom of the line.
+
+## Rotation — turning a shape on its pivot
+
+Every shape also takes an optional `rotate:` — an angle in **degrees,
+clockwise**, and like any other number it can come from data or arithmetic.
+The shape turns **around its pivot point**: `x`/`y` stay planted, and the
+shape swings around them. That's why the two properties pair so naturally —
+the pivot names the shape's handle, and `rotate:` turns it on that handle.
+
+To spin a shape in place, pivot it on its own center:
+
+```goblin
+Icon: "Compass"
+  x: half
+  y: half
+  size: 4
+  code: "STARS"
+  pivot: center_center
+  rotate: 45
+```
+
+With the default `top_left` pivot, the shape swings around its top-left
+corner instead — sometimes exactly what you want, often a surprise. If a
+rotation lands somewhere unexpected, check the pivot first.
+
+Because the angle is ordinary arithmetic, `Repeat` makes fans and dials for
+free — each copy at its own angle, all sharing one pivot point:
+
+```goblin
+Repeat: 5 as i
+  Rectangle: "Fan blade"
+    x: half
+    y: full
+    width: 1
+    height: 6
+    color: teal
+    pivot: bottom_center
+    rotate: [i] * 15 - 30
+```
+
+Rotation changes how a shape is **painted, nothing more**: a rotated
+`TextBox` still wraps against its unrotated width, and the
+[exported PDF](pdf-export.md) shows exactly what the preview shows. Angles
+outside 0–360 work the obvious way — `rotate: -90` is a quarter-turn
+counter-clockwise, the same as `270`.
 
 ## `Repeat` — the interesting one
 

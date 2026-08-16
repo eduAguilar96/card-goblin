@@ -74,7 +74,7 @@ import type {
   RenderModel,
   Shape,
 } from "./model";
-import { DEFAULT_PIVOT } from "./model";
+import { DEFAULT_PIVOT, DEFAULT_ROTATE } from "./model";
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -516,6 +516,7 @@ class Generator {
             height: yUnits,
             color: "white",
             pivot: DEFAULT_PIVOT,
+            rotate: DEFAULT_ROTATE,
           },
         ];
   }

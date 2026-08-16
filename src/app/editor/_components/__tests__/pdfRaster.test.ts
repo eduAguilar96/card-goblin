@@ -53,6 +53,7 @@ const icon = (style: IconStyle): Shape => ({
   code: "HEARTS",
   pivot: { h: "left", v: "top" },
   style,
+  rotate: 0,
 });
 
 const image = (src: string): Shape => ({
@@ -64,6 +65,7 @@ const image = (src: string): Shape => ({
   src,
   fit: "contain",
   pivot: { h: "left", v: "top" },
+  rotate: 0,
 });
 
 const text: Shape = {
@@ -75,6 +77,7 @@ const text: Shape = {
   text: "hi",
   pivot: { h: "left", v: "top" },
   font: "geist",
+  rotate: 0,
 };
 
 const textbox: Shape = {
@@ -92,6 +95,7 @@ const textbox: Shape = {
   clipped: false,
   shrunk: false,
   font: "geist",
+  rotate: 0,
 };
 
 /** Like `text`/`textbox` above but with a chosen `font:` (§3.3 M3, ◆41). */
@@ -241,6 +245,7 @@ describe("imageUrlsUsed (§3.3 M2)", () => {
       src: "https://x/banner.png",
       fit: "contain",
       pivot: { h: "left", v: "top" },
+      rotate: 0,
     };
     expect(imageUrlsUsed(new Map([["a:front", spec([banner])]]))).toEqual([
       "https://x/banner.png",
@@ -297,6 +302,7 @@ describe("auto dimension in the rasterized markup (§3.3, 2026-08-10)", () => {
     src: "https://x/banner.png",
     fit: "contain",
     pivot: { h: "left", v: "top" },
+    rotate: 0,
   };
 
   const serialize = (images: ResolvedImages): string =>
