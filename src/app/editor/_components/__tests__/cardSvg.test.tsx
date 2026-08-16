@@ -30,6 +30,7 @@ import {
   ICON_ASCENT,
   IMAGE_PRESERVE_ASPECT,
   TEXT_ASCENT,
+  assetObjectUrlForTests,
   cardSvgPropsEqual,
   faceHasTextBoxOverflow,
   imagePlaceholderStroke,
@@ -1105,6 +1106,81 @@ describe("asset: resolution — cache per name, revoke/re-resolve on change (§7
     // A fresh object URL — the stale one from before the replace was revoked
     // and dropped from the cache, not reused.
     expect(second.state === "loaded" && second.href).not.toBe(firstHref);
+  });
+
+  // -- staleness fencing (delete/replace racing an in-flight chain) ----------
+  //
+  // The synchronously-resolving probe/adapter above can never interleave a
+  // drawer event INSIDE a resolution chain, which is exactly where the fenced
+  // races live — so these two tests hold one link of the stale chain open with
+  // a manually-resolved promise, land the event, let the FRESH chain settle,
+  // and only then release the stale one. The epoch fence must make the stale
+  // settle a no-op: neither the status nor the per-name URL cache may move.
+
+  it("delete during an in-flight getBytes: the stale chain neither revives the status nor re-caches an object URL", async () => {
+    const base = createInMemoryAssetAdapter([dragonAsset]);
+    let interceptGet = false;
+    const pendingGets: Array<(asset: StoredAsset | null) => void> = [];
+    attachAssetAdapterForTests({
+      ...base,
+      get: (name) =>
+        interceptGet
+          ? new Promise<StoredAsset | null>((resolve) => pendingGets.push(resolve))
+          : base.get(name),
+    });
+    const { assetStore } = await import("@/app/editor/_store/assetStore");
+    await assetStore.refresh(); // remove() validates against the store's meta cache
+
+    interceptGet = true;
+    const unsubscribe = subscribeImageStatus("asset:dragon", () => {});
+    expect(pendingGets).toHaveLength(1); // the stale chain, hung on getBytes
+    interceptGet = false; // the re-resolution after the delete reads the real (now empty) store
+
+    await assetStore.remove("dragon"); // → revoke + invalidate → fresh chain settles "failed"
+    await flush();
+    expect(imageStatusOf("asset:dragon")).toEqual({ state: "failed" });
+
+    // Only now does the stale chain get its answer: the PRE-delete bytes.
+    pendingGets[0]({ ...dragonAsset });
+    await flush();
+    unsubscribe();
+    expect(imageStatusOf("asset:dragon")).toEqual({ state: "failed" });
+    // The fresh chain cached "no such asset" (null); the stale chain must not
+    // have repopulated the entry with a blob: URL minted from deleted bytes.
+    expect(assetObjectUrlForTests("dragon")).toBeNull();
+  });
+
+  it("replace during an in-flight probe: the stale probe's failure cannot overwrite the fresh loaded status", async () => {
+    attachAssetAdapterForTests(createInMemoryAssetAdapter([dragonAsset]));
+    const pendingProbes: Array<{
+      href: string;
+      resolve: (natural: { naturalWidth: number; naturalHeight: number } | null) => void;
+    }> = [];
+    setImageProbeForTests(
+      (href) => new Promise((resolve) => pendingProbes.push({ href, resolve })),
+    );
+
+    const unsubscribe = subscribeImageStatus("asset:dragon", () => {});
+    await flush(); // getBytes settled, object URL minted — stale chain hung on its probe
+    expect(pendingProbes).toHaveLength(1);
+    const staleProbe = pendingProbes[0];
+
+    const { assetStore } = await import("@/app/editor/_store/assetStore");
+    await assetStore.upload("dragon", "image/png", new Uint8Array([9, 9, 9]));
+    await flush(); // fresh chain minted a NEW url, now hung on its own probe
+    expect(pendingProbes).toHaveLength(2);
+    pendingProbes[1].resolve({ naturalWidth: 200, naturalHeight: 100 });
+    await flush();
+    const fresh = imageStatusOf("asset:dragon");
+    expect(fresh).toMatchObject({ state: "loaded", href: pendingProbes[1].href });
+    expect(fresh.state === "loaded" && fresh.href).not.toBe(staleProbe.href);
+
+    // The stale probe was aimed at the now-revoked URL — it fails (the probe
+    // contract resolves null on error) AFTER the fresh chain loaded.
+    staleProbe.resolve(null);
+    await flush();
+    unsubscribe();
+    expect(imageStatusOf("asset:dragon")).toBe(fresh); // untouched, same snapshot
   });
 
   it("clear() invalidates every cached asset src at once", async () => {

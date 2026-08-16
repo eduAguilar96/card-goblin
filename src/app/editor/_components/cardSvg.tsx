@@ -312,6 +312,13 @@ let imageProbe: ImageProbe = browserImageProbe;
 const LOADING_STATUS: ImageLoadStatus = { state: "loading" };
 const imageStatuses = new Map<string, ImageLoadStatus>();
 const imageListeners = new Map<string, Set<() => void>>();
+/** Staleness fence (the resolution chains below are async and can't be
+ * cancelled): each chain captures its src's epoch at launch, and every write
+ * it would make is dropped if the epoch has moved on. `invalidateSrc` bumps
+ * the epoch, so an older chain settling AFTER a newer one can never overwrite
+ * the newer status (without this, a delete/replace racing an in-flight probe
+ * was last-writer-wins). Missing entry reads as epoch 0. */
+const imageStatusEpochs = new Map<string, number>();
 
 /** Test seam: replace (or with null, restore) the browser probe. */
 export function setImageProbeForTests(probe: ImageProbe | null): void {
@@ -323,11 +330,13 @@ export function setImageProbeForTests(probe: ImageProbe | null): void {
 export function resetImageStatusesForTests(): void {
   imageStatuses.clear();
   imageListeners.clear();
+  imageStatusEpochs.clear();
   for (const url of assetObjectUrls.values()) {
     if (url !== null) URL.revokeObjectURL(url);
   }
   assetObjectUrls.clear();
   assetObjectUrlPromises.clear();
+  assetUrlEpochs.clear();
 }
 
 /** Exported ONLY for tests: the live resolution machinery (this whole
@@ -359,12 +368,24 @@ function notifySrc(src: string): void {
  * scheme has no other variation). */
 const assetObjectUrls = new Map<string, string | null>();
 const assetObjectUrlPromises = new Map<string, Promise<string | null>>();
+/** Per-NAME staleness fence, same contract as `imageStatusEpochs`: a
+ * `getBytes` chain still in flight when `revokeAssetUrl` runs must not
+ * repopulate the cache with an object URL minted from pre-event bytes. */
+const assetUrlEpochs = new Map<string, number>();
 
 function revokeAssetUrl(name: string): void {
+  assetUrlEpochs.set(name, (assetUrlEpochs.get(name) ?? 0) + 1); // fence off in-flight chains
   const existing = assetObjectUrls.get(name);
   if (existing) URL.revokeObjectURL(existing);
   assetObjectUrls.delete(name);
   assetObjectUrlPromises.delete(name);
+}
+
+/** Test seam: the per-name cache entry, for the race tests — `undefined` =
+ * nothing cached (never resolved, or revoked), `null` = settled on "no such
+ * asset". Lets a test assert a superseded chain did not repopulate the cache. */
+export function assetObjectUrlForTests(name: string): string | null | undefined {
+  return assetObjectUrls.get(name);
 }
 
 /** Resolve one asset name to an object URL (cached; concurrent callers for
@@ -376,7 +397,12 @@ function resolveAssetObjectUrl(name: string): Promise<string | null> {
   if (assetObjectUrls.has(name)) return Promise.resolve(assetObjectUrls.get(name) ?? null);
   let pending = assetObjectUrlPromises.get(name);
   if (!pending) {
+    const epoch = assetUrlEpochs.get(name) ?? 0;
     pending = assetStore.getBytes(name).then((asset) => {
+      // Fence: revoked mid-flight — these are pre-event bytes. Skip the cache
+      // write (and don't mint an object URL that nothing would ever revoke);
+      // the caller's settle is epoch-fenced too, so null here is inert.
+      if ((assetUrlEpochs.get(name) ?? 0) !== epoch) return null;
       if (!asset) {
         assetObjectUrls.set(name, null);
         return null;
@@ -403,7 +429,12 @@ function resolveAssetObjectUrl(name: string): Promise<string | null> {
  * subscribe and by asset-change re-resolution. */
 function beginResolution(src: string): void {
   imageStatuses.set(src, LOADING_STATUS);
+  // Fence: capture the epoch now; if `invalidateSrc` supersedes this chain
+  // mid-flight, its late settle must be discarded, not applied over the
+  // replacement chain's result.
+  const epoch = imageStatusEpochs.get(src) ?? 0;
   const settle = (natural: ImageNaturalSize | null, href: string | null): void => {
+    if ((imageStatusEpochs.get(src) ?? 0) !== epoch) return; // superseded
     imageStatuses.set(
       src,
       natural && href !== null ? { state: "loaded", href, ...natural } : { state: "failed" },
@@ -428,6 +459,7 @@ function beginResolution(src: string): void {
  * re-resolve immediately (rather than waiting for a future subscribe) so a
  * mounted card heals/breaks live as the drawer changes the library. */
 function invalidateSrc(src: string): void {
+  imageStatusEpochs.set(src, (imageStatusEpochs.get(src) ?? 0) + 1); // fence off in-flight chains
   imageStatuses.delete(src);
   if ((imageListeners.get(src)?.size ?? 0) > 0) beginResolution(src);
 }
@@ -453,7 +485,11 @@ function onAssetChange(event: AssetChangeEvent): void {
       return;
     case "clear":
     case "replaceAll":
-      for (const name of [...assetObjectUrls.keys()]) revokeAssetUrl(name);
+      // Union with the pending map: a name whose first getBytes is still in
+      // flight has no cache entry yet, but its epoch must bump all the same.
+      for (const name of new Set([...assetObjectUrls.keys(), ...assetObjectUrlPromises.keys()])) {
+        revokeAssetUrl(name);
+      }
       for (const src of [...imageStatuses.keys()]) {
         if (parseAssetSrc(src) !== null) invalidateSrc(src);
       }

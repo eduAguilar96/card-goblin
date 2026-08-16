@@ -162,6 +162,66 @@ describe("layoutPdf on the real demo model", () => {
     expect(layout.pages.reduce((n, p) => n + p.cards.length, 0)).toBe(9);
   });
 
+  it("[card] copies (◆42): the divergent face rasterizes per copy, the shared face ONCE", () => {
+    // Front reads [card] → every copy's contentHash differs, so hash-keyed
+    // dedup alone would mint 5 bit-identical back specs. The generator shares
+    // the static Back's Shape array by reference across copies; registerFace
+    // dedupes on that reference, so the back stays a single spec/PNG.
+    const result = compileProject(
+      [
+        "Sheet: Sh",
+        "  column t: Text",
+        "Template: F",
+        "  Text:",
+        "    x: 0",
+        "    y: 0",
+        "    size: 1",
+        '    text: "[t] No. [card]"',
+        "Template: B",
+        "  Rectangle:",
+        "    x: 0",
+        "    y: 0",
+        "    width: full",
+        "    height: full",
+        "    color: teal",
+        "Card: Numbered",
+        "  sheet: Sh",
+        "  size: poker",
+        "  x_units: 20",
+        "  y_units: auto",
+        "  count: 5",
+        "  Front: F",
+        "  Back: B",
+      ].join("\n") + "\n",
+      { Sh: [{ t: "x" }] },
+    );
+    expect(result.diagnostics).toEqual([]);
+    const cards = result.model.decks[0].cards;
+    // Premise (generate.ts MINOR-5): one shared back array across copies.
+    expect(new Set(cards.map((c) => c.back)).size).toBe(1);
+
+    const layout = layoutPdf(result.model, opts({}));
+    expect(layout.placedCards).toBe(5);
+    // 5 numbered fronts + exactly 1 shared back.
+    const keys = [...layout.faceSpecs.keys()];
+    expect(keys.filter((k) => k.endsWith(":front"))).toHaveLength(5);
+    expect(keys.filter((k) => k.endsWith(":back"))).toHaveLength(1);
+    expect(layout.faceSpecs.size).toBe(6);
+    // Every copy's back page-slot resolves to that one key, and it is placed.
+    const backKey = keys.find((k) => k.endsWith(":back"))!;
+    const backSlots = layout.pages
+      .filter((p) => p.side === "back")
+      .flatMap((p) => p.cards.map((c) => c.imageKey));
+    expect(backSlots).toHaveLength(5);
+    for (const slot of backSlots) expect(slot).toBe(backKey);
+    // And every placement (both sides) still resolves to a registered spec.
+    for (const page of layout.pages) {
+      for (const card of page.cards) {
+        expect(layout.faceSpecs.has(card.imageKey)).toBe(true);
+      }
+    }
+  });
+
   it("custom-size decks (§3.4 M2) lay out from their own mm — fit both ways", () => {
     const customModel = (widthMm: number, heightMm: number) => {
       const result = compileProject(

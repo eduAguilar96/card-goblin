@@ -1004,6 +1004,11 @@ to unblock prototyping.
   replace semantics; the destructive confirm says so. Reset-to-demo clears
   the library too. The autosave slot is UNCHANGED (code+sheets in
   localStorage); assets persist in IDB at upload time — upload IS the save.
+- **Export is complete-or-fails, never silently partial (amended
+  2026-08-15):** any listed asset whose bytes can't be read at export time
+  (an IDB failure disables the store) aborts the export with an inline
+  error — a v2 file downloaded with `assets: {}` reads as a backup but
+  imports as `replaceAll([])`, deleting the library.
 
 ## 8. Open questions (explicitly deferred, not blocking the slice)
 

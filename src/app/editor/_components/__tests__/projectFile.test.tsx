@@ -33,10 +33,13 @@ import {
   ASSET_MAX_BYTES,
   createAssetStore,
   createInMemoryAssetAdapter,
+  type AssetAdapter,
   type StoredAsset,
 } from "@/app/editor/_store/assetStore";
 import {
   buildProjectExport,
+  collectExportAssets,
+  EXPORT_ASSETS_UNREADABLE_MESSAGE,
   EXPORT_FAILED_MESSAGE,
   IMPORT_INVALID_MESSAGE,
   PROJECT_FILE_VERSION,
@@ -400,6 +403,78 @@ describe("runExport (§7.1b m7 — exportEditorProject is async and can reject)"
     await expect(runExport(() => Promise.reject(new Error("IDB read failed")))).resolves.toBe(
       EXPORT_FAILED_MESSAGE,
     );
+  });
+});
+
+// -- complete-or-fails export (§7.4 amendment 2026-08-15: a hollow ----------
+// -- assets:{} "backup" is deferred data loss — import replaceAll([])s) -----
+
+describe("collectExportAssets (export is complete or fails, never silently partial)", () => {
+  const impAsset: StoredAsset = {
+    name: "imp",
+    mime: "image/png",
+    bytes: new Uint8Array([5, 6]),
+  };
+
+  /** A store whose adapter serves `get` reads until `failFrom`, then rejects
+   * — the real IDB failure shapes: 0 = every read fails (the store flips
+   * disabled on the first one), 1 = mid-export partial failure. `refresh()`
+   * runs while `list` is still healthy, so the snapshot's meta list stays
+   * populated after the store disables — exactly the state the old
+   * skip-and-continue turned into a hollow file. */
+  function storeWithFailingReads(seed: readonly StoredAsset[], failFrom: number) {
+    const inner = createInMemoryAssetAdapter(seed);
+    let reads = 0;
+    const adapter: AssetAdapter = {
+      ...inner,
+      get: (name) =>
+        reads++ < failFrom ? inner.get(name) : Promise.reject(new Error("IDB read failed")),
+    };
+    return createAssetStore(adapter);
+  }
+
+  it("rejects when the store lists assets but reads fail (store flips disabled)", async () => {
+    const store = storeWithFailingReads([dragonAsset], 0);
+    await store.refresh();
+    await expect(collectExportAssets(store)).rejects.toThrow(EXPORT_ASSETS_UNREADABLE_MESSAGE);
+    // The snapshot still listed the asset after the store disabled — the
+    // contract for what the file must contain, hence the abort.
+    expect(store.getSnapshot().disabled).toBe(true);
+    expect(store.getSnapshot().assets).toHaveLength(1);
+  });
+
+  it("rejects on a mid-export partial failure (first read succeeds, second answers null)", async () => {
+    const store = storeWithFailingReads([dragonAsset, impAsset], 1);
+    await store.refresh();
+    await expect(collectExportAssets(store)).rejects.toThrow(EXPORT_ASSETS_UNREADABLE_MESSAGE);
+  });
+
+  it("an empty library still exports, with an honest assets:{}", async () => {
+    const store = createAssetStore(createInMemoryAssetAdapter());
+    await store.refresh();
+    await expect(collectExportAssets(store)).resolves.toEqual([]);
+    const { json } = await buildProjectExport("", {}, null, []);
+    expect(JSON.parse(json).assets).toEqual({});
+  });
+
+  it("a healthy library resolves every listed asset", async () => {
+    const store = createAssetStore(createInMemoryAssetAdapter([dragonAsset, impAsset]));
+    await store.refresh();
+    const assets = await collectExportAssets(store);
+    expect(assets.map((a) => a.name)).toEqual(["dragon", "imp"]);
+  });
+
+  it("runExport surfaces the SPECIFIC abort message, and the download step never runs", async () => {
+    const store = storeWithFailingReads([dragonAsset], 0);
+    await store.refresh();
+    const download = vi.fn();
+    // Same ordering as exportEditorProject: gather bytes, THEN download.
+    const message = await runExport(async () => {
+      const assets = await collectExportAssets(store);
+      download(await buildProjectExport("", {}, null, assets));
+    });
+    expect(message).toBe(EXPORT_ASSETS_UNREADABLE_MESSAGE);
+    expect(download).not.toHaveBeenCalled();
   });
 });
 

@@ -67,6 +67,7 @@ import {
   assetStore,
   isImageMime,
   isValidAssetName,
+  type AssetStore,
   type StoredAsset,
 } from "@/app/editor/_store/assetStore";
 
@@ -226,18 +227,44 @@ export function parseImportedProjectFile(raw: string): ParsedProjectFile | { err
 // persistence.ts's resetEditorToDemo)
 // ---------------------------------------------------------------------------
 
+/** Export is complete-or-fails, never silently partial (§7.4 amendment,
+ * 2026-08-15): this file is billed as the user's backup, and importing one
+ * REPLACES the whole asset library — so a v2 file downloaded with
+ * `assets: {}` while the library holds art is deferred data loss, not a
+ * backup. `runExport` surfaces this error's message verbatim. */
+export class ExportAbortedError extends Error {}
+
+export const EXPORT_ASSETS_UNREADABLE_MESSAGE =
+  "Couldn't read your uploaded images — export aborted so you don't get a backup without them. Reload and try again.";
+
+/** Every asset the snapshot lists, bytes resolved — complete or throw
+ * (ExportAbortedError). `getBytes` answers null, never throws, BOTH for a
+ * name that vanished mid-export and for a store an IDB failure just flipped
+ * disabled — and the snapshot keeps its pre-disable meta list, so "listed
+ * but unreadable" covers the whole-library-lost case, not just a rare race.
+ * Any null for a listed asset therefore aborts the export; an empty library
+ * resolves to `[]` and exports fine. The store is injectable for tests
+ * (no IndexedDB in the headless suite). */
+export async function collectExportAssets(
+  store: Pick<AssetStore, "getSnapshot" | "getBytes"> = assetStore,
+): Promise<StoredAsset[]> {
+  const assets: StoredAsset[] = [];
+  for (const meta of store.getSnapshot().assets) {
+    const asset = await store.getBytes(meta.name);
+    if (asset === null) throw new ExportAbortedError(EXPORT_ASSETS_UNREADABLE_MESSAGE);
+    assets.push(asset);
+  }
+  return assets;
+}
+
 /** Download the CURRENT project, assets included. Flushes any pending
  * compile first so the filename's deck-count check matches the code being
- * exported. */
+ * exported. Rejects (via collectExportAssets) rather than downloading a
+ * file missing any listed asset. */
 export async function exportEditorProject(): Promise<void> {
   editorStore.getState().flushCompile();
   const { code, sheets, compile } = editorStore.getState();
-  const metas = assetStore.getSnapshot().assets;
-  const assets: StoredAsset[] = [];
-  for (const meta of metas) {
-    const asset = await assetStore.getBytes(meta.name);
-    if (asset) assets.push(asset); // vanished mid-export (rare race) — best effort, skip
-  }
+  const assets = await collectExportAssets();
   const { filename, json } = await buildProjectExport(
     code,
     sheets,
@@ -298,14 +325,15 @@ export const EXPORT_FAILED_MESSAGE = "Export failed — nothing was downloaded."
 
 /** Pure form of the export button's rejection handling — exported so the
  * catch behavior is unit-testable without a click driver (this project has
- * none): resolves to `null` on success, `EXPORT_FAILED_MESSAGE` on any
+ * none): resolves to `null` on success, an ExportAbortedError's own message
+ * (it is written for the user), and `EXPORT_FAILED_MESSAGE` on any other
  * throw/rejection from `onExport`. */
 export async function runExport(onExport: () => void | Promise<void>): Promise<string | null> {
   try {
     await onExport();
     return null;
-  } catch {
-    return EXPORT_FAILED_MESSAGE;
+  } catch (err) {
+    return err instanceof ExportAbortedError ? err.message : EXPORT_FAILED_MESSAGE;
   }
 }
 

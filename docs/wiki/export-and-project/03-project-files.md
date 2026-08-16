@@ -39,6 +39,10 @@ anything else (several decks, or code too broken to tell) downloads as
 Export saves what's in the editor *right now*, broken code and all — like
 autosave, it never swaps in some older working version behind your back.
 
+If your uploaded images can't be read at that moment (a browser storage
+hiccup), export stops with an error instead of downloading a file without
+them — a backup silently missing its art isn't a backup.
+
 ## Import
 
 **Import project** opens a file picker. Two things can happen:

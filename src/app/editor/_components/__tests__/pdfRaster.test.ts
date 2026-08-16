@@ -17,19 +17,32 @@
  * dispatches on, so the "never counted in the remote CORS pre-flight" claim
  * is checked directly rather than by proxy.
  */
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { FontFace, IconStyle, ImageShape, Shape } from "@/lib/lang";
-import { CardFaceSvg, type ResolvedImages } from "../cardSvg";
+import { CardFaceSvg, type ResolvedImage, type ResolvedImages } from "../cardSvg";
 import type { FaceRasterSpec } from "../pdfLayout";
 import {
+  getFamilyCss,
   iconFamiliesUsed,
   imageUrlsUsed,
   parseFontSrc,
   remoteImageUrlsUsed,
+  resetPdfRasterCachesForTests,
+  resolveImageSources,
+  setAssetLoaderForTests,
+  setFontFaceSourcesForTests,
+  setFontFetchForTests,
   textFontFamiliesUsed,
+  type FontFaceSource,
 } from "../pdfRaster";
+import {
+  assetStore,
+  attachAssetAdapterForTests,
+  createInMemoryAssetAdapter,
+  resetAssetStoreForTests,
+} from "@/app/editor/_store/assetStore";
 
 const icon = (style: IconStyle): Shape => ({
   kind: "icon",
@@ -316,5 +329,135 @@ describe("auto dimension in the rasterized markup (§3.3, 2026-08-10)", () => {
     expect(markup).toContain('data-image-placeholder="failed"');
     expect(markup).toContain('width="16"');
     expect(markup).toContain('height="16"');
+  });
+});
+
+describe("asset-data cache eviction on asset-store events (§7.1b — stale art in exports)", () => {
+  // The loader itself (Image/canvas) is DOM-only; the injected stub counts
+  // calls, so "evicted" is observable as "the next resolution re-reads the
+  // store" — the exact behavior a delete/replace/import needs from the PDF
+  // path (the preview already had it via cardSvg's own subscription).
+  const art: ResolvedImage = {
+    href: "data:image/png;base64,AAA",
+    naturalWidth: 4,
+    naturalHeight: 4,
+  };
+  const dragonAsset = { name: "dragon", mime: "image/png", bytes: new Uint8Array([1]) };
+  const impAsset = { name: "imp", mime: "image/png", bytes: new Uint8Array([2]) };
+
+  beforeEach(() => {
+    resetAssetStoreForTests();
+    resetPdfRasterCachesForTests();
+  });
+  afterEach(() => {
+    setAssetLoaderForTests(null);
+    resetAssetStoreForTests();
+    resetPdfRasterCachesForTests();
+  });
+
+  it("a successful resolution is cached across calls (the session cache still works)", async () => {
+    let calls = 0;
+    setAssetLoaderForTests(async () => {
+      calls += 1;
+      return art;
+    });
+    const first = await resolveImageSources(["asset:dragon"]);
+    const second = await resolveImageSources(["asset:dragon"]);
+    expect(first.get("asset:dragon")).toEqual(art);
+    expect(second.get("asset:dragon")).toEqual(art);
+    expect(calls).toBe(1);
+  });
+
+  it("delete evicts exactly the deleted name — the next export re-reads the store", async () => {
+    attachAssetAdapterForTests(createInMemoryAssetAdapter([dragonAsset, impAsset]));
+    const calls = new Map<string, number>();
+    setAssetLoaderForTests(async (name) => {
+      calls.set(name, (calls.get(name) ?? 0) + 1);
+      return art;
+    });
+    await resolveImageSources(["asset:dragon", "asset:imp"]);
+    await assetStore.remove("dragon");
+    await resolveImageSources(["asset:dragon", "asset:imp"]);
+    expect(calls.get("dragon")).toBe(2); // re-read → prod resolves the placeholder now
+    expect(calls.get("imp")).toBe(1); // untouched names stay cached
+  });
+
+  it("replace (re-upload under the same name) evicts that name's cached art", async () => {
+    let calls = 0;
+    setAssetLoaderForTests(async () => {
+      calls += 1;
+      return art;
+    });
+    await resolveImageSources(["asset:dragon"]);
+    await assetStore.upload("dragon", "image/png", new Uint8Array([9, 9, 9]));
+    await resolveImageSources(["asset:dragon"]);
+    expect(calls).toBe(2);
+  });
+
+  it("replaceAll (project import) clears the whole cache", async () => {
+    let calls = 0;
+    setAssetLoaderForTests(async () => {
+      calls += 1;
+      return art;
+    });
+    await resolveImageSources(["asset:dragon"]);
+    await assetStore.replaceAll([dragonAsset]);
+    await resolveImageSources(["asset:dragon"]);
+    expect(calls).toBe(2);
+  });
+});
+
+describe("getFamilyCss caching (§6.1 — one failed fetch must not poison later exports)", () => {
+  // buildFamilyCss swallows every fetch failure (non-OK and thrown alike)
+  // into a FULFILLED "" — so the cache must treat an empty result, not just
+  // a rejection, as "retry next export". The seams stand in for the two
+  // browser-only inputs (document.styleSheets and same-origin fetch); the
+  // real buildFamilyCss/getFamilyCss logic runs.
+  const faces = (): FontFaceSource[] => [
+    {
+      family: "Dicier-Pixel",
+      entries: [{ url: "https://example.com/pixel.woff2", format: "woff2" }],
+    },
+  ];
+
+  beforeEach(() => resetPdfRasterCachesForTests());
+  afterEach(() => {
+    setFontFetchForTests(null);
+    setFontFaceSourcesForTests(null);
+    resetPdfRasterCachesForTests();
+  });
+
+  it("a family whose fetch fails (non-OK) is NOT cached — the next export retries and succeeds", async () => {
+    setFontFaceSourcesForTests(faces);
+    setFontFetchForTests(async () => new Response(null, { status: 404 }));
+    expect(await getFamilyCss("Dicier-Pixel")).toBe("");
+    setFontFetchForTests(async () => new Response(new Uint8Array([1, 2, 3])));
+    const css = await getFamilyCss("Dicier-Pixel");
+    expect(css).toContain("@font-face");
+    expect(css).toContain("'Dicier-Pixel'");
+  });
+
+  it("a thrown (network-error) fetch is not cached either", async () => {
+    setFontFaceSourcesForTests(faces);
+    setFontFetchForTests(async () => {
+      throw new Error("offline");
+    });
+    expect(await getFamilyCss("Dicier-Pixel")).toBe("");
+    setFontFetchForTests(async () => new Response(new Uint8Array([1])));
+    expect(await getFamilyCss("Dicier-Pixel")).toContain("@font-face");
+  });
+
+  it("a successful family result IS cached — one fetch for the whole session", async () => {
+    let calls = 0;
+    setFontFaceSourcesForTests(faces);
+    setFontFetchForTests(async () => {
+      calls += 1;
+      return new Response(new Uint8Array([1, 2]));
+    });
+    const first = await getFamilyCss("Dicier-Pixel");
+    const second = await getFamilyCss("Dicier-Pixel");
+    expect(first).toContain("@font-face");
+    expect(second).toBe(first);
+    expect(calls).toBe(1);
   });
 });

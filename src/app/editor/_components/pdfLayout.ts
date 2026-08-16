@@ -306,9 +306,13 @@ export function computeCrossMarks(
  * CardInstances in the model, so they place (and count) individually. They
  * share a contentHash — one raster, embedded once, drawn N times — UNLESS a
  * face reads the built-in `[card]` binding (§3.6, ◆42): a numbered print run
- * has genuinely different pixels per copy, so it rasterizes N times, not
- * one — `faceSpecs`/`registerFace` below dedupe by hash either way, so this
- * needs no special-casing here, only an honest comment.
+ * has genuinely different pixels per copy, so THAT face rasterizes N times.
+ * Dedup is two-layered in `registerFace` below: identical copies collapse by
+ * hash, and when copies diverge (each copy carries its own contentHash even
+ * if only ONE face read `[card]`), the face that did NOT diverge still
+ * collapses by REFERENCE — the generator shares its Shape array across
+ * copies (generate.ts, MINOR-5), so array identity marks bit-identical
+ * pixels the hash key can no longer see.
  */
 export function layoutPdf(model: RenderModel, options: PdfExportOptions): PdfLayoutResult {
   const page = PAGE_SIZES[options.pageSize];
@@ -339,8 +343,19 @@ export function layoutPdf(model: RenderModel, options: PdfExportOptions): PdfLay
       return;
     }
 
+    /** Reference-identity dedup (◆42 — see the function comment): maps a face's
+     * Shape array to the key it was first registered under. Safe because the
+     * RenderModel is immutable by contract, so an array reference is a stable
+     * identity for its pixels. Scoped PER DECK — ◆42 sharing only ever spans
+     * one card's `count:` copies, so a wider map buys nothing and would let a
+     * hypothetical cross-deck shared array alias another deck's geometry. */
+    const keyByFaceRef = new Map<readonly Shape[], string>();
+
     const registerFace = (hash: string, side: PdfSide, face: readonly Shape[]): string => {
+      const existing = keyByFaceRef.get(face);
+      if (existing !== undefined) return existing; // shared face of a ◆42 copy
       const key = faceKey(hash, side);
+      keyByFaceRef.set(face, key);
       if (!faceSpecs.has(key)) {
         faceSpecs.set(key, {
           xUnits: deck.xUnits,

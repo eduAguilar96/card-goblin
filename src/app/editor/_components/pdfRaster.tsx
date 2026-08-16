@@ -64,7 +64,7 @@ import {
   type ResolvedImages,
 } from "@/app/editor/_components/cardSvg";
 import type { FaceRasterSpec } from "@/app/editor/_components/pdfLayout";
-import { assetStore } from "@/app/editor/_store/assetStore";
+import { assetStore, type AssetChangeEvent } from "@/app/editor/_store/assetStore";
 
 /** §6.1: rasterize at 300 DPI — px = mm × 300 / 25.4. */
 export const RASTER_DPI = 300;
@@ -166,7 +166,7 @@ function bytesToBase64(bytes: Uint8Array): string {
   return btoa(binary);
 }
 
-interface FontFaceSource {
+export interface FontFaceSource {
   family: string;
   entries: FontSrcEntry[];
 }
@@ -193,6 +193,28 @@ function findFontFaces(families: readonly string[]): FontFaceSource[] {
     }
   }
   return out;
+}
+
+/** Scrape/fetch seams: `findFontFaces` reads `document.styleSheets` and the
+ * font bytes come over `fetch` — both browser-only in vitest's node
+ * environment, so tests swap them (cardSvg's `setImageProbeForTests` idiom)
+ * and the REAL `buildFamilyCss`/`getFamilyCss` logic runs headless. The
+ * fetch wrapper keeps `window.fetch`'s required `this`. */
+type FindFontFaces = (families: readonly string[]) => FontFaceSource[];
+let findFontFacesImpl: FindFontFaces = findFontFaces;
+const browserFontFetch = (url: string): Promise<Response> => fetch(url);
+let fontFetch: (url: string) => Promise<Response> = browserFontFetch;
+
+/** Test seam: replace (or with null, restore) the stylesheet scrape. */
+export function setFontFaceSourcesForTests(find: FindFontFaces | null): void {
+  findFontFacesImpl = find ?? findFontFaces;
+}
+
+/** Test seam: replace (or with null, restore) the font-byte fetch. */
+export function setFontFetchForTests(
+  fetchImpl: ((url: string) => Promise<Response>) | null,
+): void {
+  fontFetch = fetchImpl ?? browserFontFetch;
 }
 
 /** The Geist family names behind cardSvg's `var(--font-geist-sans)` (next/
@@ -255,10 +277,10 @@ export function textFontFamiliesUsed(specs: ReadonlyMap<string, FaceRasterSpec>)
  */
 async function buildFamilyCss(family: string): Promise<string> {
   const parts: string[] = [];
-  for (const { family: found, entries } of findFontFaces([family])) {
+  for (const { family: found, entries } of findFontFacesImpl([family])) {
     for (const entry of entries) {
       try {
-        const response = await fetch(entry.url);
+        const response = await fontFetch(entry.url);
         if (!response.ok) continue;
         const bytes = new Uint8Array(await response.arrayBuffer());
         const mime = FONT_MIME[entry.format] ?? "application/octet-stream";
@@ -276,18 +298,32 @@ async function buildFamilyCss(family: string): Promise<string> {
   return parts.join("\n");
 }
 
-/** Per-family session cache (fonts never change at runtime) — but never a
- * REJECTED promise: an unexpected failure mid-scrape must poison only its own
- * export, not every later one. */
+/** Per-family session cache (fonts never change at runtime) — but only for
+ * a USEFUL result. `buildFamilyCss` never rejects for a fetch failure — its
+ * `continue`/catch swallow non-OK responses and thrown network errors alike
+ * into a fulfilled `""` — so an empty RESULT is how failure actually
+ * presents, and it is evicted on settle (same posture as `imageDataCache`/
+ * `assetDataCache` evicting null) so the next export retries instead of
+ * skipping the family until reload. A rejection (an unexpected mid-scrape
+ * throw) also evicts, poisoning only its own export. */
 const familyCssCache = new Map<string, Promise<string>>();
 
-function getFamilyCss(family: string): Promise<string> {
+/** Exported for unit tests (via the scrape/fetch seams above) — production
+ * callers reach it only through `getFontEmbedCss`. */
+export function getFamilyCss(family: string): Promise<string> {
   let cached = familyCssCache.get(family);
   if (cached === undefined) {
-    cached = buildFamilyCss(family).catch((error: unknown) => {
-      familyCssCache.delete(family); // evict so the next export retries
-      throw error;
-    });
+    cached = buildFamilyCss(family)
+      .then((css) => {
+        // "" = every source failed to fetch (or no rules matched yet) —
+        // evict so the next export retries rather than staying font-less.
+        if (css === "") familyCssCache.delete(family);
+        return css;
+      })
+      .catch((error: unknown) => {
+        familyCssCache.delete(family); // evict so the next export retries
+        throw error;
+      });
     familyCssCache.set(family, cached);
   }
   return cached;
@@ -443,20 +479,81 @@ async function loadAssetData(name: string): Promise<ResolvedImage | null> {
   }
 }
 
+/** Loader seam: `loadAssetData` is DOM-only (Image/canvas/object URLs), so
+ * tests swap it — cardSvg's `setImageProbeForTests` idiom — to exercise the
+ * real cache/eviction logic in `getAssetData` headless. */
+type AssetLoader = (name: string) => Promise<ResolvedImage | null>;
+let assetLoader: AssetLoader = loadAssetData;
+
+/** Test seam: replace (or with null, restore) the browser asset loader. */
+export function setAssetLoaderForTests(loader: AssetLoader | null): void {
+  assetLoader = loader ?? loadAssetData;
+}
+
 /** Per-name session cache, same eviction posture as `imageDataCache` — a
- * failed lookup retries next time (the asset may get uploaded mid-session). */
+ * failed lookup retries next time (the asset may get uploaded mid-session).
+ * Unlike an image URL's bytes, an asset's bytes are NOT stable for the
+ * session — the drawer can delete/replace/rename it, and a project import
+ * can swap the whole library — so `onAssetChange` below evicts per name. */
 const assetDataCache = new Map<string, Promise<ResolvedImage | null>>();
 
 function getAssetData(name: string): Promise<ResolvedImage | null> {
-  let cached = assetDataCache.get(name);
-  if (cached === undefined) {
-    cached = loadAssetData(name).then((data) => {
-      if (data === null) assetDataCache.delete(name);
-      return data;
-    });
-    assetDataCache.set(name, cached);
+  const cached = assetDataCache.get(name);
+  if (cached !== undefined) return cached;
+  const chain: Promise<ResolvedImage | null> = assetLoader(name).then((data) => {
+    // Evict only OUR OWN entry: `onAssetChange` may already have evicted it
+    // and a fresh chain may occupy the name — a stale null must not delete
+    // the replacement's cache entry (it would only cost a redundant re-read,
+    // but the whole point of the cache is not paying that).
+    if (data === null && assetDataCache.get(name) === chain) assetDataCache.delete(name);
+    return data;
+  });
+  assetDataCache.set(name, chain);
+  return chain;
+}
+
+/** Assets-drawer changes → evict exactly the affected name(s), mirroring
+ * cardSvg.tsx's `onAssetChange` (§7.1b: "cache per name; revoke + re-resolve
+ * on rename/delete/replace") — without this, every PDF export and modal
+ * pre-flight after a delete/replace/import would embed the art as it stood
+ * when this cache first saw the name, while the live preview had already
+ * moved on. Subscribed once at module load, like cardSvg's — this module's
+ * whole lifetime is the app's, and `assetStore.subscribe` touches no DOM
+ * (the singleton starts as an SSR-safe in-memory store), so importing this
+ * module server-side stays harmless. */
+function onAssetChange(event: AssetChangeEvent): void {
+  switch (event.type) {
+    case "put":
+    case "delete":
+      assetDataCache.delete(event.name);
+      return;
+    case "rename":
+      // The freed old name AND the target name are both stale: an in-flight
+      // resolution for either may still settle with pre-rename bytes.
+      assetDataCache.delete(event.from);
+      assetDataCache.delete(event.to);
+      return;
+    case "clear":
+    case "replaceAll":
+      // No names on these events — every cached name is stale (import may
+      // reuse names with different bytes).
+      assetDataCache.clear();
+      return;
+    case "disabled":
+      // Nothing cached becomes wrong when storage goes away — already-read
+      // art is still the art the deck shows; future misses resolve null.
+      return;
   }
-  return cached;
+}
+
+assetStore.subscribe(onAssetChange);
+
+/** Test seam: forget every cached font/image/asset resolution so cases don't
+ * leak into each other (cardSvg's `resetImageStatusesForTests` idiom). */
+export function resetPdfRasterCachesForTests(): void {
+  familyCssCache.clear();
+  imageDataCache.clear();
+  assetDataCache.clear();
 }
 
 /** The real (browser) ResolveImages — concurrent per src, cache-backed.
