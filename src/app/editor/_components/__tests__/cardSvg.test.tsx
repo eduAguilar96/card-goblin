@@ -10,6 +10,8 @@ import { renderToStaticMarkup } from "react-dom/server";
 import {
   compileProject,
   FONT_METRICS,
+  measureText,
+  metricsForFace,
   type DataDiagnostic,
   type Deck,
   type FontFace,
@@ -19,7 +21,9 @@ import {
   type QrShape,
   type RectShape,
   type Shape,
+  type TextBoxLine,
   type TextBoxShape,
+  type TextRun,
   type TextShape,
 } from "@/lib/lang";
 import { DEMO_PROJECT_ROWS, DEMO_PROJECT_SOURCE } from "@/lib/lang/demoProject";
@@ -43,6 +47,8 @@ import {
   setImageProbeForTests,
   subscribeImageStatus,
   textBoxLineX,
+  textRunsWidth,
+  ALIGN_FRACTION,
   type CardSvgProps,
   type ImageLoadStatus,
   type ResolvedImages,
@@ -55,6 +61,15 @@ import {
 } from "@/app/editor/_store/assetStore";
 
 // -- fixtures ----------------------------------------------------------------
+
+/** ◆44 fixture sugar: a plain string as one Text run at x 0. */
+const textRuns = (text: string): TextRun[] =>
+  text === "" ? [] : [{ kind: "text", text, x: 0 }];
+
+/** ◆44 fixture sugar: plain string lines → lines-of-runs (fixture width 0 —
+ * the legacy icon-free markup path never reads it). */
+const runLines = (...texts: string[]): TextBoxLine[] =>
+  texts.map((text) => ({ runs: textRuns(text), width: 0 }));
 
 const demoRows = (): Record<string, Record<string, string>[]> => ({
   Monsters: DEMO_PROJECT_ROWS.map((row) => ({ ...row })),
@@ -272,7 +287,7 @@ describe("CardFaceSvg: TextBox font: picks the family and the per-face ascent (�
     align: "left",
     pivot: { h: "left", v: "top" },
     lineHeight: 1.3,
-    lines: ["first", "second"],
+    lines: runLines("first", "second"),
     clipped: false,
     shrunk: false,
     font,
@@ -367,7 +382,7 @@ describe("CardFaceSvg: TextBox shapes (§3.3 M3)", () => {
     align: "left",
     pivot: { h: "left", v: "top" },
     lineHeight: 1.3,
-    lines: ["first", "second", "third"],
+    lines: runLines("first", "second", "third"),
     clipped: false,
     shrunk: false,
     font: "geist",
@@ -423,7 +438,7 @@ describe("CardFaceSvg: TextBox shapes (§3.3 M3)", () => {
   });
 
   it("blank lines (consecutive hard breaks) render as empty tspans holding their slot", () => {
-    const markup = render(boxShape({ lines: ["a", "", "b"] }));
+    const markup = render(boxShape({ lines: runLines("a", "", "b") }));
     const lines = tspans(markup);
     expect(lines.map((t) => t.content)).toEqual(["a", "", "b"]);
     expect(Number(lines[2].attrs.y)).toBeCloseTo(3 + TEXT_ASCENT * 1.5 + 2 * 1.3 * 1.5, 12);
@@ -472,7 +487,7 @@ describe("CardSVG: the clipped/shrunk badge (§3.3 M3)", () => {
     align: "left",
     pivot: { h: "left", v: "top" },
     lineHeight: 1.3,
-    lines: ["a"],
+    lines: runLines("a"),
     clipped: false,
     shrunk: false,
     font: "geist",
@@ -752,6 +767,7 @@ describe("CardFaceSvg: nine-point pivots (§3.4 M3)", () => {
       size: 2,
       color: "black",
       text: "mid",
+      runs: textRuns("mid"),
       pivot: pivot("center", "center"),
       font: "geist",
       rotate: 0,
@@ -774,6 +790,7 @@ describe("CardFaceSvg: nine-point pivots (§3.4 M3)", () => {
         size: 2,
         color: "black",
         text: "t",
+        runs: textRuns("t"),
         pivot: pivot("left", v),
         font: "geist",
         rotate: 0,
@@ -868,7 +885,7 @@ describe("CardFaceSvg: nine-point pivots (§3.4 M3)", () => {
       align: "middle",
       pivot: pivot("right", "bottom"),
       lineHeight: 1.3,
-      lines: ["a", "b"],
+      lines: runLines("a", "b"),
       clipped: false,
       shrunk: false,
       font: "geist",
@@ -990,6 +1007,7 @@ describe("CardFaceSvg: rotate: is an SVG transform around (x, y) (§3.4 M4, ◆4
       size: 2,
       color: "black",
       text: "spin",
+      runs: textRuns("spin"),
       pivot: { h: "center", v: "center" },
       font: "geist",
       rotate: -30,
@@ -1320,5 +1338,275 @@ describe("asset: resolution — cache per name, revoke/re-resolve on change (§7
     u2();
     expect(imageStatusOf("asset:dragon")).toEqual({ state: "failed" });
     expect(imageStatusOf("asset:imp")).toEqual({ state: "failed" });
+  });
+});
+
+// -- inline icon runs (◆44, §7.5) --------------------------------------------
+
+describe("CardFaceSvg: inline icon runs (◆44)", () => {
+  const metrics = metricsForFace("geist");
+
+  const iconText = (over: Partial<TextShape> = {}): TextShape => ({
+    kind: "text",
+    x: 5,
+    y: 2,
+    size: 1.5,
+    color: "maroon",
+    text: "A {HEARTS} B",
+    runs: [
+      { kind: "text", text: "A ", x: 0 },
+      { kind: "icon", x: 0.9, icon: { kind: "dicier", code: "HEARTS" } },
+      { kind: "text", text: " B", x: 2.4 },
+    ],
+    pivot: { h: "left", v: "top" },
+    font: "geist",
+    rotate: 0,
+    ...over,
+  });
+
+  const render = (face: Shape[], images?: ResolvedImages): string =>
+    renderToStaticMarkup(
+      <CardFaceSvg xUnits={20} yUnits={28} face={face} images={images} />,
+    );
+
+  interface Tspan {
+    attrs: Record<string, string>;
+    content: string;
+  }
+  const tspansOf = (markup: string): Tspan[] =>
+    [...markup.matchAll(/<tspan\b([^>]*)>([^<]*)<\/tspan>/g)].map((m) => ({
+      attrs: parseAttrs(m[1]),
+      content: unescapeHtml(m[2]),
+    }));
+
+  it("run-path <text> preserves whitespace; the legacy path stays untouched", () => {
+    // SVG collapses the space-adjacent sibling tspans an asset icon leaves
+    // behind (its <image> lives outside the <text>), shifting the next
+    // glyph off its compiler-computed offset — xml:space="preserve" is the
+    // fix, verified in headless Chrome (vitest cannot observe the collapse
+    // itself, so this pins the attribute). Marker-free text must NOT gain
+    // it: legacy markup is byte-identical by contract.
+    const runMarkup = render([iconText()]);
+    expect(/<text\b[^>]*xml:space="preserve"/.test(runMarkup)).toBe(true);
+    const legacy = iconText({
+      text: "plain",
+      runs: [{ kind: "text", text: "plain", x: 0 }],
+    });
+    expect(render([legacy])).not.toContain("xml:space");
+  });
+
+  it("each run is a tspan at its ABSOLUTE offset; the parent text carries fill, size, family", () => {
+    const markup = render([iconText()]);
+    const textTag = parseAttrs(/<text\b([^>]*)>/.exec(markup)![1]);
+    expect(textTag.fill).toBe("maroon");
+    expect(textTag["font-size"]).toBe("1.5");
+    expect(textTag["font-family"]).toContain("--font-geist-sans");
+    // Run markup positions absolutely — no anchor-based alignment.
+    expect(textTag["text-anchor"]).toBeUndefined();
+    const spans = tspansOf(markup);
+    expect(spans.map((t) => t.content)).toEqual(["A ", "HEARTS", " B"]);
+    // Left pivot: line start is shape.x — offsets add directly.
+    expect(spans.map((t) => Number(t.attrs.x))).toEqual([5, 5.9, 7.4]);
+  });
+
+  it("text runs sit on the font's baseline; the Dicier run on ICON_ASCENT — both from the em top", () => {
+    const spans = tspansOf(render([iconText()]));
+    expect(Number(spans[0].attrs.y)).toBeCloseTo(2 + TEXT_ASCENT * 1.5, 12);
+    expect(Number(spans[1].attrs.y)).toBeCloseTo(2 + ICON_ASCENT * 1.5, 12);
+    // The Dicier tspan carries the flat_dark family + all four features and
+    // NO fill of its own — it inherits the text color (§3.3.2).
+    expect(spans[1].attrs["font-family"]).toBe("Dicier-Flat-Dark");
+    for (const feature of ['"liga" 1', '"calt" 1', '"dlig" 1', '"kern" 1']) {
+      expect(spans[1].attrs.style).toContain(feature);
+    }
+    expect(spans[1].attrs.fill).toBeUndefined();
+  });
+
+  it("pivot h:center shifts the whole line back by half its measured width", () => {
+    const shape = iconText({ pivot: { h: "center", v: "top" } });
+    const width = textRunsWidth(shape.runs, shape.size, metrics);
+    const spans = tspansOf(render([shape]));
+    expect(Number(spans[0].attrs.x)).toBeCloseTo(5 - width / 2, 12);
+    expect(Number(spans[1].attrs.x)).toBeCloseTo(5 - width / 2 + 0.9, 12);
+  });
+
+  it("textRunsWidth: last run's offset + its advance (icon = exactly size; text = measured)", () => {
+    expect(textRunsWidth([], 1, metrics)).toBe(0);
+    expect(
+      textRunsWidth([{ kind: "icon", x: 2, icon: { kind: "dicier", code: "X" } }], 1.5, metrics),
+    ).toBe(3.5);
+    const runs = iconText().runs;
+    const last = runs[runs.length - 1];
+    expect(textRunsWidth(runs, 1.5, metrics)).toBe(
+      last.x + measureText(" B", 1.5, metrics),
+    );
+  });
+
+  it("an asset run renders as an <image> in its 1-em slot, letterboxed (static path)", () => {
+    const shape = iconText({
+      runs: [
+        { kind: "text", text: "A ", x: 0 },
+        { kind: "icon", x: 0.9, icon: { kind: "asset", name: "skull" } },
+      ],
+    });
+    const images: ResolvedImages = new Map([
+      ["asset:skull", { href: "data:image/png;base64,xyz", naturalWidth: 4, naturalHeight: 2 }],
+    ]);
+    const markup = render([shape], images);
+    const img = parseAttrs(/<image\b([^>]*)\/?>/.exec(markup)![1]);
+    // Slot: line start (5) + run.x (0.9), em top (y = 2), size × size.
+    expect(img).toMatchObject({
+      href: "data:image/png;base64,xyz",
+      x: "5.9",
+      y: "2",
+      width: "1.5",
+      height: "1.5",
+      preserveAspectRatio: "xMidYMid meet",
+    });
+  });
+
+  it("an asset missing from the static resolutions renders the failed slot placeholder", () => {
+    const shape = iconText({
+      runs: [{ kind: "icon", x: 0, icon: { kind: "asset", name: "ghost" } }],
+    });
+    const markup = render([shape], new Map());
+    expect(markup).toContain('data-inline-icon-placeholder="failed"');
+    const rect = rectTags(markup)[0];
+    expect(rect).toMatchObject({ x: "5", y: "2", width: "1.5", height: "1.5" });
+  });
+
+  it("rotation (◆43) wraps ONE group holding the text AND the asset <image>", () => {
+    const shape = iconText({
+      rotate: 30,
+      runs: [
+        { kind: "text", text: "A", x: 0 },
+        { kind: "icon", x: 1, icon: { kind: "asset", name: "skull" } },
+      ],
+    });
+    const images: ResolvedImages = new Map([
+      ["asset:skull", { href: "data:x", naturalWidth: 1, naturalHeight: 1 }],
+    ]);
+    const markup = render([shape], images);
+    const g = /<g transform="rotate\(30 5 2\)">([\s\S]*?)<\/g>/.exec(markup);
+    expect(g).not.toBeNull();
+    expect(g![1]).toContain("<text");
+    expect(g![1]).toContain("<image");
+  });
+
+  it("icon-free runs keep the LEGACY markup byte-for-byte (anchor, no group)", () => {
+    const plain = iconText({
+      text: "hello",
+      runs: [{ kind: "text", text: "hello", x: 0 }],
+    });
+    const markup = render([plain]);
+    expect(markup).not.toContain("<g");
+    const t = textTags(markup)[0];
+    expect(t.content).toBe("hello");
+    expect(t.attrs["text-anchor"]).toBe("start");
+    expect(t.attrs.x).toBe("5");
+  });
+
+  it("a {{ escape draws the unescaped brace (runs text), not the raw source text", () => {
+    const escaped = iconText({
+      text: "a {{HEARTS}",
+      runs: [{ kind: "text", text: "a {HEARTS}", x: 0 }],
+    });
+    expect(textTags(render([escaped]))[0].content).toBe("a {HEARTS}");
+  });
+});
+
+describe("CardFaceSvg: TextBox inline icon runs (◆44)", () => {
+  const box = (over: Partial<TextBoxShape> = {}): TextBoxShape => ({
+    kind: "textbox",
+    x: 2,
+    y: 3,
+    width: 10,
+    height: 6,
+    size: 1.5,
+    color: "navy",
+    align: "left",
+    pivot: { h: "left", v: "top" },
+    lineHeight: 1.3,
+    lines: [
+      { runs: [{ kind: "text", text: "first", x: 0 }], width: 4 },
+      {
+        runs: [
+          { kind: "text", text: "b ", x: 0 },
+          { kind: "icon", x: 1.2, icon: { kind: "dicier", code: "HEARTS" } },
+        ],
+        width: 2.7,
+      },
+    ],
+    clipped: false,
+    shrunk: false,
+    font: "geist",
+    rotate: 0,
+    ...over,
+  });
+
+  const render = (shape: TextBoxShape, images?: ResolvedImages): string =>
+    renderToStaticMarkup(
+      <CardFaceSvg xUnits={20} yUnits={28} face={[shape]} images={images} />,
+    );
+
+  const tspansOf = (markup: string): { attrs: Record<string, string>; content: string }[] =>
+    [...markup.matchAll(/<tspan\b([^>]*)>([^<]*)<\/tspan>/g)].map((m) => ({
+      attrs: parseAttrs(m[1]),
+      content: unescapeHtml(m[2]),
+    }));
+
+  it("lines render as absolute run tspans; line i's em top advances by lineHeight×size", () => {
+    const markup = render(box());
+    const spans = tspansOf(markup);
+    expect(spans.map((s) => s.content)).toEqual(["first", "b ", "HEARTS"]);
+    // align left → every line starts at the box's left edge (origin.x = 2).
+    expect(spans.map((s) => Number(s.attrs.x))).toEqual([2, 2, 3.2]);
+    const line1Top = 3 + 1 * 1.3 * 1.5;
+    expect(Number(spans[1].attrs.y)).toBeCloseTo(line1Top + TEXT_ASCENT * 1.5, 12);
+    expect(Number(spans[2].attrs.y)).toBeCloseTo(line1Top + ICON_ASCENT * 1.5, 12);
+    expect(spans[2].attrs["font-family"]).toBe("Dicier-Flat-Dark");
+  });
+
+  it("align middle/right offsets each line by ITS carried width — no re-measure", () => {
+    const middle = tspansOf(render(box({ align: "middle" })));
+    // Line 0 (width 4): start = 2 + (10 − 4)/2 = 5; line 1 (width 2.7): 5.65.
+    expect(middle.map((s) => Number(s.attrs.x))).toEqual([5, 5.65, 5.65 + 1.2]);
+    const right = tspansOf(render(box({ align: "right" })));
+    // Line 0: 2 + (10 − 4) = 8; line 1: 2 + 7.3 = 9.3.
+    expect(right.map((s) => Number(s.attrs.x))).toEqual([8, 9.3, 9.3 + 1.2]);
+    expect(ALIGN_FRACTION).toEqual({ left: 0, middle: 0.5, right: 1 });
+  });
+
+  it("an asset run in a wrapped line draws its <image> at the line's slot, inside the rotate group", () => {
+    const shape = box({
+      rotate: 90,
+      lines: [
+        {
+          runs: [{ kind: "icon", x: 0.5, icon: { kind: "asset", name: "skull" } }],
+          width: 2,
+        },
+      ],
+    });
+    const images: ResolvedImages = new Map([
+      ["asset:skull", { href: "data:x", naturalWidth: 1, naturalHeight: 1 }],
+    ]);
+    const markup = render(shape, images);
+    const g = /<g transform="rotate\(90 2 3\)">([\s\S]*?)<\/g>/.exec(markup);
+    expect(g).not.toBeNull();
+    const img = parseAttrs(/<image\b([^>]*)\/?>/.exec(g![1])![1]);
+    expect(img).toMatchObject({ x: "2.5", y: "3", width: "1.5", height: "1.5" });
+  });
+
+  it("icon-free boxes keep the legacy anchor markup (text-anchor, one tspan per line)", () => {
+    const markup = render(
+      box({
+        lines: [
+          { runs: [{ kind: "text", text: "a", x: 0 }], width: 1 },
+          { runs: [], width: 0 },
+        ],
+      }),
+    );
+    expect(parseAttrs(/<text\b([^>]*)>/.exec(markup)![1])["text-anchor"]).toBe("start");
+    expect(tspansOf(markup).map((s) => s.content)).toEqual(["a", ""]);
   });
 });

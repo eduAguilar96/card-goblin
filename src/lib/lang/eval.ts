@@ -57,8 +57,9 @@ import {
   DEFAULT_TEXTBOX_OVERFLOW,
 } from "./model";
 import { DICIER_CODES } from "./dicier-codes";
+import { mergeTextSegments, parseInlineMarkers, rawMarkerText, type MarkerSegment } from "./markers";
 import { encodeQr } from "./qr";
-import { layoutTextBox, metricsForFace } from "./wrap";
+import { layoutSingleLine, layoutTextBoxRuns, metricsForFace } from "./wrap";
 
 // ---------------------------------------------------------------------------
 // Values and errors
@@ -498,20 +499,29 @@ function evalElement(el: ElementNode, ctx: EvalContext): Shape {
       };
     case "Text": {
       const { x, pivot } = xAndPivot(el, ctx);
+      const textExpr = requireProp(el, "text");
+      // §3.3 (M3): Text stays single-line (◆24) — newline characters in
+      // the resolved text (escapes or cell data) render as SPACES; hard
+      // breaks belong to TextBox. Resolved here so the model, the hash,
+      // and every renderer agree on the visible text.
+      const text = toText(evalExpr(textExpr, ctx, null)).replace(/\n/g, " ");
+      const size = numberProp(el, "size", ctx, ctx.xUnits);
+      const font = fontOf(el, ctx);
+      // Inline icons (◆44, §7.5): markers parse AFTER interpolation — a
+      // marker from a sheet cell works identically to a literal — and the
+      // shape carries laid-out runs with absolute x-offsets. Single line.
+      const segments = markerSegments(textExpr, text, ctx);
       return {
         kind: "text",
         x,
         y: numberProp(el, "y", ctx, ctx.yUnits),
         // Documented decision: `size` resolves full/half on the X axis.
-        size: numberProp(el, "size", ctx, ctx.xUnits),
+        size,
         color: colorProp(el, ctx, "black"), // default black (§3.3)
-        // §3.3 (M3): Text stays single-line (◆24) — newline characters in
-        // the resolved text (escapes or cell data) render as SPACES; hard
-        // breaks belong to TextBox. Resolved here so the model, the hash,
-        // and every renderer agree on the visible text.
-        text: toText(evalExpr(requireProp(el, "text"), ctx, null)).replace(/\n/g, " "),
+        text,
+        runs: layoutSingleLine(segments, size, metricsForFace(font)).runs,
         pivot,
-        font: fontOf(el, ctx),
+        font,
         rotate: rotateOf(el, ctx),
       };
     }
@@ -529,8 +539,13 @@ function evalElement(el: ElementNode, ctx: EvalContext): Shape {
       const size = numberProp(el, "size", ctx, ctx.xUnits);
       const lineHeight = lineHeightOf(el);
       const font = fontOf(el, ctx);
-      const layout = layoutTextBox({
-        text: toText(evalExpr(requireProp(el, "text"), ctx, null)),
+      const textExpr = requireProp(el, "text");
+      const text = toText(evalExpr(textExpr, ctx, null));
+      // Inline icons (◆44, §7.5): the same post-interpolation markers as
+      // Text, fed through the wrap engine — a marker is one atomic token
+      // that wraps like a word in its 1-em slot.
+      const layout = layoutTextBoxRuns({
+        segments: markerSegments(textExpr, text, ctx),
         width,
         height,
         size,
@@ -565,8 +580,16 @@ function evalElement(el: ElementNode, ctx: EvalContext): Shape {
       // visible indicator). Literal codes were W004-checked at compile time,
       // so they are exempt here (no double-flagging); each code is reported
       // once per combination, however many Repeat iterations draw it.
-      if (!DICIER_CODES.has(code) && !ctx.iconIssues.has(code) && literalText(codeExpr) === null) {
-        ctx.iconIssues.set(code, {
+      // Keyed by site kind ("icon:"/"marker:") so a card computing the same
+      // unknown code through an Icon AND an inline marker gets each site's
+      // accurate message once — the two render differently (failed ligature
+      // vs raw marker text), so one message cannot honestly cover both.
+      if (
+        !DICIER_CODES.has(code) &&
+        !ctx.iconIssues.has(`icon:${code}`) &&
+        literalText(codeExpr) === null
+      ) {
+        ctx.iconIssues.set(`icon:${code}`, {
           code: "D005",
           message: `Icon code "${code}" is not in the known Dicier list — the glyph may not exist`,
         });
@@ -818,6 +841,45 @@ function qrLevelOf(el: ElementNode, ctx: EvalContext): QrLevel {
   const res = ctx.card.resolutions.get(expr);
   if (res?.kind !== "qrLevel") return poisoned();
   return res.level;
+}
+
+/**
+ * Marker segments of one resolved Text/TextBox `text:` (◆44, §7.5), with
+ * the D005 downgrade applied: a COMPUTED (non-literal-source) dicier marker
+ * whose code isn't in the curated list collects a D005 and renders as its
+ * RAW MARKER TEXT — a text run, the failure its own visible indicator
+ * (§3.8) — mirroring Icon's computed-code D005 stance exactly (literal
+ * sources were already W004-checked at compile time, so their markers stay
+ * icon runs: the list is non-exhaustive and the glyph may well exist).
+ * Asset markers are never data-errors — the renderer owns missing-asset
+ * states (§3.3), exactly like Image `src:`.
+ */
+function markerSegments(expr: Expr, resolved: string, ctx: EvalContext): MarkerSegment[] {
+  const segments = parseInlineMarkers(resolved);
+  if (literalText(expr) !== null) return segments;
+  let downgraded = false;
+  const out = segments.map((segment): MarkerSegment => {
+    if (
+      segment.kind !== "icon" ||
+      segment.icon.kind !== "dicier" ||
+      DICIER_CODES.has(segment.icon.code)
+    ) {
+      return segment;
+    }
+    const code = segment.icon.code;
+    if (!ctx.iconIssues.has(`marker:${code}`)) {
+      // Site-kind key — see the Icon D005 site's comment.
+      ctx.iconIssues.set(`marker:${code}`, {
+        code: "D005",
+        message: `Inline icon code "${code}" is not in the known Dicier list — the marker renders as its raw text`,
+      });
+    }
+    downgraded = true;
+    return { kind: "text", text: rawMarkerText(segment.icon) };
+  });
+  // Fuse the downgraded raw text with its neighbors so wrapping sees
+  // `x{BAD}y` as one word, never three break-separable tokens.
+  return downgraded ? mergeTextSegments(out) : out;
 }
 
 /** The literal value of a string with NO interpolation parts, else null. */

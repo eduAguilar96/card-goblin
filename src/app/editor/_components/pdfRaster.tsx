@@ -55,7 +55,7 @@
 
 import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
-import { parseAssetSrc } from "@/lib/lang";
+import { ASSET_SRC_SCHEME, parseAssetSrc, type Shape, type TextRun } from "@/lib/lang";
 import {
   CardFaceSvg,
   ICON_FONT_FAMILIES,
@@ -234,11 +234,32 @@ function geistFamilies(): string[] {
  * CSS covers exactly the styles used across this export's specs (plus Geist
  * for Text shapes). Pure and exported for unit tests.
  */
+/** Every run of a Text/TextBox shape (◆44), or nothing for other kinds —
+ * the one walker behind both collection extensions below (inline DICIER
+ * runs need the flat_dark face embedded; inline ASSET runs need their
+ * `asset:` src pre-resolved). */
+function* textRunsOf(shape: Shape): Generator<TextRun> {
+  if (shape.kind === "text") {
+    yield* shape.runs;
+  } else if (shape.kind === "textbox") {
+    for (const line of shape.lines) yield* line.runs;
+  }
+}
+
 export function iconFamiliesUsed(specs: ReadonlyMap<string, FaceRasterSpec>): string[] {
   const families = new Set<string>();
   for (const spec of specs.values()) {
     for (const shape of spec.face) {
       if (shape.kind === "icon") families.add(ICON_FONT_FAMILIES[shape.style]);
+      // ◆44: an inline `{marker}` draws in the flat_dark face — a deck whose
+      // ONLY Dicier use is such a marker must still embed that face, or the
+      // rasterized SVG would draw the raw code text in a fallback font.
+      for (const run of textRunsOf(shape)) {
+        if (run.kind === "icon" && run.icon.kind === "dicier") {
+          families.add(ICON_FONT_FAMILIES.flat_dark);
+          break;
+        }
+      }
     }
   }
   return [...families].sort();
@@ -364,6 +385,14 @@ export function imageUrlsUsed(specs: ReadonlyMap<string, FaceRasterSpec>): strin
   for (const spec of specs.values()) {
     for (const shape of spec.face) {
       if (shape.kind === "image") urls.add(shape.src);
+      // ◆44: inline `{asset:name}` icon runs need their bytes embedded
+      // exactly like an Image with that src — same `asset:` string, same
+      // resolution path, same pre-flight "could not be embedded" count.
+      for (const run of textRunsOf(shape)) {
+        if (run.kind === "icon" && run.icon.kind === "asset") {
+          urls.add(ASSET_SRC_SCHEME + run.icon.name);
+        }
+      }
     }
   }
   return [...urls].sort();

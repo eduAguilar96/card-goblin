@@ -41,8 +41,10 @@ import type {
   Shape,
   TextAnchor,
   TextBoxShape,
+  TextRun,
+  TextShape,
 } from "@/lib/lang";
-import { FONT_METRICS, parseAssetSrc } from "@/lib/lang";
+import { ASSET_SRC_SCHEME, FONT_METRICS, measureText, metricsForFace, parseAssetSrc } from "@/lib/lang";
 import { assetStore, type AssetChangeEvent } from "@/app/editor/_store/assetStore";
 
 // ---------------------------------------------------------------------------
@@ -227,6 +229,95 @@ export function rotationTransform(shape: {
 /** Error placeholders clamp the first diagnostic's message to this many
  * characters (single line, no wrapping — ◆24 applies to us too). */
 export const ERROR_MESSAGE_MAX = 40;
+
+// ---------------------------------------------------------------------------
+// Inline-icon runs (§3.3.2/§3.3.3, M4 — ◆44, §7.5)
+// ---------------------------------------------------------------------------
+
+/** True when any run is an inline icon — the gate between the legacy
+ * single-`<text>` markup (kept byte-identical for icon-free content) and
+ * the run-positioned markup below. */
+function runsHaveIcons(runs: readonly TextRun[]): boolean {
+  return runs.some((run) => run.kind === "icon");
+}
+
+/** The concatenated text of icon-free runs — for marker-free content this
+ * IS the shape's resolved text, so the legacy markup stays byte-identical;
+ * with a `{{` escape it is the unescaped form the user meant to draw. */
+function runsText(runs: readonly TextRun[]): string {
+  let out = "";
+  for (const run of runs) {
+    if (run.kind === "text") out += run.text;
+  }
+  return out;
+}
+
+/**
+ * Total advance of one line of runs in card units (◆44): the compiler's own
+ * arithmetic — text runs by the SAME measureText the layout used (margin
+ * included), icon slots exactly `size` — so the alignment shift below agrees
+ * with the compiler's x-offsets by construction. Pure and exported for the
+ * markup tests. (TextBox lines carry their width in the model; a single-line
+ * Text shape does not, so its width is recomputed here — same function, same
+ * result.)
+ */
+export function textRunsWidth(
+  runs: readonly TextRun[],
+  size: number,
+  metrics: { unitsPerEm: number; fallbackAdvance: number; advances: ReadonlyMap<number, number> },
+): number {
+  const last = runs[runs.length - 1];
+  if (!last) return 0;
+  return last.x + (last.kind === "icon" ? size : measureText(last.text, size, metrics));
+}
+
+/** TextBox `align:` → how far the free width shifts a line inside its box
+ * (◆44 run markup: absolute offsets rather than SVG text-anchor, since each
+ * run already carries its own x). Exported for the markup tests. */
+export const ALIGN_FRACTION: Record<TextAnchor, number> = { left: 0, middle: 0.5, right: 1 };
+
+/** One line of runs → tspans (text and Dicier runs; asset runs draw as
+ * `<image>` SIBLINGS — see renderRunAssetIcons). `startX` is the line's left
+ * edge in card units; `emTop` its em-box top. Text sits on the chosen
+ * font's baseline; a Dicier run sits on Dicier's OWN baseline (ICON_ASCENT —
+ * the same em-box realization the Icon element uses), so its glyph fills
+ * the §7.5 size×size slot. Dicier tspans inherit the surrounding `fill`
+ * (§3.3.2: icons draw at the text's color) in the flat_dark face — the
+ * ◆44 default; other faces are explicitly deferred (§8). */
+function renderRunTspans(
+  runs: readonly TextRun[],
+  keyPrefix: string,
+  startX: number,
+  emTop: number,
+  size: number,
+  font: FontFace,
+): ReactNode[] {
+  const baseline = emTop + ascentOf(font) * size;
+  const iconBaseline = emTop + ICON_ASCENT * size;
+  return runs.map((run, i) => {
+    if (run.kind === "text") {
+      return (
+        <tspan key={`${keyPrefix}${i}`} x={startX + run.x} y={baseline}>
+          {run.text}
+        </tspan>
+      );
+    }
+    if (run.icon.kind === "dicier") {
+      return (
+        <tspan
+          key={`${keyPrefix}${i}`}
+          x={startX + run.x}
+          y={iconBaseline}
+          fontFamily={ICON_FONT_FAMILIES.flat_dark}
+          style={ICON_STYLE}
+        >
+          {run.icon.code}
+        </tspan>
+      );
+    }
+    return null; // asset runs render as <image> siblings, not text
+  });
+}
 
 // ---------------------------------------------------------------------------
 // Images (§3.3, M2)
@@ -556,22 +647,21 @@ export function imagePlaceholderStroke(box: { width: number; height: number }): 
  * while the placeholder shows), and the pivoted box may shift once the true
  * ratio arrives — inherent to pivoting a load-time-sized box.
  */
-function renderImagePlaceholder(
-  shape: ImageShape,
-  index: number,
-  variant: "loading" | "failed",
+/** The placeholder's inner markup — shared by full Image shapes and the ◆44
+ * inline-icon slots (which reuse "the existing subtle placeholder box scaled
+ * to the slot" rather than fork a second style). No `<g>`/transform here:
+ * each caller owns its own wrapper. */
+function placeholderMarkup(
+  origin: { x: number; y: number },
   box: { width: number; height: number },
+  variant: "loading" | "failed",
+  title: string,
 ): ReactElement {
-  const origin = pivotedBoxOrigin(shape, box);
   const stroke = imagePlaceholderStroke(box);
   const failed = variant === "failed";
   return (
-    // ◆43: the rotation composes with the render-time pivot offset — the
-    // center is (x, y) itself, so it holds whatever box the art resolves to.
-    <g key={index} data-image-placeholder={variant} transform={rotationTransform(shape)}>
-      <title>
-        {failed ? `Image failed to load: ${shape.src}` : `Loading image: ${shape.src}`}
-      </title>
+    <>
+      <title>{title}</title>
       <rect
         x={origin.x}
         y={origin.y}
@@ -600,6 +690,28 @@ function renderImagePlaceholder(
             strokeWidth={stroke}
           />
         </>
+      )}
+    </>
+  );
+}
+
+function renderImagePlaceholder(
+  shape: ImageShape,
+  index: number,
+  variant: "loading" | "failed",
+  box: { width: number; height: number },
+): ReactElement {
+  const origin = pivotedBoxOrigin(shape, box);
+  const failed = variant === "failed";
+  return (
+    // ◆43: the rotation composes with the render-time pivot offset — the
+    // center is (x, y) itself, so it holds whatever box the art resolves to.
+    <g key={index} data-image-placeholder={variant} transform={rotationTransform(shape)}>
+      {placeholderMarkup(
+        origin,
+        box,
+        variant,
+        failed ? `Image failed to load: ${shape.src}` : `Loading image: ${shape.src}`,
       )}
     </g>
   );
@@ -649,6 +761,109 @@ function LiveImage({ shape, index }: { shape: ImageShape; index: number }): Reac
     status.state === "failed" ? "failed" : "loading",
     resolveImageBox(shape, null),
   );
+}
+
+// ---------------------------------------------------------------------------
+// Inline asset-icon slots (◆44, §7.5) — the SAME status machinery as Image
+// ---------------------------------------------------------------------------
+
+/** One ◆44 asset-icon slot: the size×size box sitting on its line's em box.
+ * `src` is the full `asset:name` string, so the slot rides the exact same
+ * status store / object-URL cache / epoch fences as an Image shape with that
+ * src — never a forked resolution path. */
+interface InlineIconSlot {
+  src: string;
+  x: number;
+  y: number;
+  size: number;
+}
+
+/** The art, letterboxed in the slot (§7.5: the compiler asserted a square
+ * advance, so non-square art `meet`s inside it — the `contain` semantics of
+ * IMAGE_PRESERVE_ASPECT, fixed here rather than configurable). */
+function renderInlineAssetImage(key: string, slot: InlineIconSlot, href: string): ReactElement {
+  return (
+    <image
+      key={key}
+      href={href}
+      x={slot.x}
+      y={slot.y}
+      width={slot.size}
+      height={slot.size}
+      preserveAspectRatio="xMidYMid meet"
+    />
+  );
+}
+
+/** Loading/failed slot: the existing subtle placeholder box, scaled to the
+ * slot (§7.5 — a missing asset is renderer state, never a data error). */
+function renderInlineIconPlaceholder(
+  key: string,
+  slot: InlineIconSlot,
+  variant: "loading" | "failed",
+): ReactElement {
+  return (
+    <g key={key} data-inline-icon-placeholder={variant}>
+      {placeholderMarkup(
+        { x: slot.x, y: slot.y },
+        { width: slot.size, height: slot.size },
+        variant,
+        variant === "failed"
+          ? `Image failed to load: ${slot.src}`
+          : `Loading image: ${slot.src}`,
+      )}
+    </g>
+  );
+}
+
+/** Live slot (no ResolvedImages supplied): placeholder on SSR/static output,
+ * real art swapped in once the shared asset resolution settles — LiveImage's
+ * exact contract, on the slot's geometry. */
+function LiveInlineAssetIcon({ slot }: { slot: InlineIconSlot }): ReactElement {
+  const status = useSyncExternalStore(
+    (onChange) => subscribeImageStatus(slot.src, onChange),
+    () => imageStatusOf(slot.src),
+    () => LOADING_STATUS,
+  );
+  if (status.state === "loaded") {
+    return renderInlineAssetImage("", slot, status.href);
+  }
+  return renderInlineIconPlaceholder("", slot, status.state === "failed" ? "failed" : "loading");
+}
+
+/**
+ * The `<image>` siblings for one line's asset-icon runs (◆44): SVG cannot
+ * nest an `<image>` inside `<text>`, so asset slots render NEXT TO the text
+ * element, inside the same group — the ◆43 rotation transform sits on that
+ * GROUP, so slots turn with their line. Static path (rasterizer/tests) uses
+ * the caller's pre-resolved sources; live path subscribes per src.
+ */
+function renderRunAssetIcons(
+  runs: readonly TextRun[],
+  keyPrefix: string,
+  startX: number,
+  emTop: number,
+  size: number,
+  images?: ResolvedImages,
+): ReactNode[] {
+  const out: ReactNode[] = [];
+  runs.forEach((run, i) => {
+    if (run.kind !== "icon" || run.icon.kind !== "asset") return;
+    const src = ASSET_SRC_SCHEME + run.icon.name;
+    const slot: InlineIconSlot = { src, x: startX + run.x, y: emTop, size };
+    const key = `${keyPrefix}${i}`;
+    if (images) {
+      const resolved = images.get(src);
+      out.push(
+        resolved
+          ? renderInlineAssetImage(key, slot, resolved.href)
+          : renderInlineIconPlaceholder(key, slot, "failed"),
+      );
+    } else {
+      out.push(<LiveInlineAssetIcon key={key} slot={slot} />);
+    }
+  });
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -798,27 +1013,9 @@ function renderShape(shape: Shape, index: number, images?: ResolvedImages): Reac
       );
     }
     case "text":
-      // §3.4: horizontal pivoting via SVG text-anchor, vertical via the
-      // em-box formula in pivotedBaselineY (top row ≡ the pre-M3 markup).
-      // §3.3 (◆41): family AND ascent follow the chosen font: — geist's
-      // ascent stays the tuned TEXT_ASCENT, the other eight use their own
-      // generated ascent (ascentOf's doc comment).
-      return (
-        <text
-          key={index}
-          x={shape.x}
-          y={pivotedBaselineY(shape, ascentOf(shape.font))}
-          fontSize={shape.size}
-          fill={shape.color}
-          textAnchor={SVG_PIVOT_H[shape.pivot.h]}
-          fontFamily={TEXT_FONT_FAMILIES[shape.font]}
-          transform={rotationTransform(shape)}
-        >
-          {shape.text}
-        </text>
-      );
+      return renderText(shape, index, images);
     case "textbox":
-      return renderTextBox(shape, index);
+      return renderTextBox(shape, index, images);
     case "qr":
       return renderQr(shape, index);
     case "icon":
@@ -845,6 +1042,68 @@ function renderShape(shape: Shape, index: number, images?: ResolvedImages): Reac
 }
 
 // ---------------------------------------------------------------------------
+// Text (§3.3.2)
+// ---------------------------------------------------------------------------
+
+/**
+ * One line of text (◆24). Icon-free shapes keep the EXACT pre-◆44 markup —
+ * one `<text>` with SVG text-anchor for the horizontal pivot — so every
+ * existing card's markup is byte-identical. A shape whose runs carry inline
+ * icons (◆44) switches to run-positioned markup: one `<tspan>` per run at
+ * its absolute compiler-computed offset (the whole line shifted by the
+ * pivot's horizontal fraction of its measured width — the same alignment
+ * the anchor realized), Dicier runs in the flat_dark face on Dicier's own
+ * baseline, and asset runs as `<image>` siblings in their 1-em slots — all
+ * inside ONE group that carries the ◆43 rotation, so icons turn with their
+ * text.
+ */
+function renderText(shape: TextShape, index: number, images?: ResolvedImages): ReactElement {
+  if (!runsHaveIcons(shape.runs)) {
+    // §3.4: horizontal pivoting via SVG text-anchor, vertical via the
+    // em-box formula in pivotedBaselineY (top row ≡ the pre-M3 markup).
+    // §3.3 (◆41): family AND ascent follow the chosen font: — geist's
+    // ascent stays the tuned TEXT_ASCENT, the other eight use their own
+    // generated ascent (ascentOf's doc comment). Content is the runs' text
+    // (≡ shape.text for marker-free strings; a `{{` escape draws as `{`).
+    return (
+      <text
+        key={index}
+        x={shape.x}
+        y={pivotedBaselineY(shape, ascentOf(shape.font))}
+        fontSize={shape.size}
+        fill={shape.color}
+        textAnchor={SVG_PIVOT_H[shape.pivot.h]}
+        fontFamily={TEXT_FONT_FAMILIES[shape.font]}
+        transform={rotationTransform(shape)}
+      >
+        {runsText(shape.runs)}
+      </text>
+    );
+  }
+  const width = textRunsWidth(shape.runs, shape.size, metricsForFace(shape.font));
+  const startX = shape.x - width * PIVOT_FRACTION_X[shape.pivot.h];
+  const emTop = shape.y - PIVOT_FRACTION_Y[shape.pivot.v] * shape.size;
+  return (
+    <g key={index} transform={rotationTransform(shape)}>
+      {/* xmlSpace: SVG collapses the space-adjacent sibling tspans an asset
+          icon leaves behind (its <image> lives OUTSIDE this <text>), which
+          would shift the following glyph off its compiler-computed offset —
+          preserve keeps every character the compiler measured (◆44, §7.5).
+          The icon-free legacy branch stays untouched (byte-identity). */}
+      <text
+        fontSize={shape.size}
+        fill={shape.color}
+        fontFamily={TEXT_FONT_FAMILIES[shape.font]}
+        xmlSpace="preserve"
+      >
+        {renderRunTspans(shape.runs, "", startX, emTop, shape.size, shape.font)}
+      </text>
+      {renderRunAssetIcons(shape.runs, "a", startX, emTop, shape.size, images)}
+    </g>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // TextBox (§3.3, M3)
 // ---------------------------------------------------------------------------
 
@@ -868,35 +1127,72 @@ export function textBoxLineX(box: { x: number; width: number }, align: TextAncho
  * Line i's baseline: box top + the §3.4 ascent realization (the chosen
  * font's ascent × final size, same realization as Text — ascentOf, ◆41) +
  * i × lineHeight × size of advance.
+ *
+ * Icon-free boxes keep the EXACT pre-◆44 markup (one tspan per line, SVG
+ * text-anchor realizing `align:`). A box whose lines carry inline icons
+ * (◆44) renders one `<tspan>` per RUN at its absolute compiler offset —
+ * each line shifted by `align:`'s fraction of the free width, from the
+ * line's CARRIED width, never a re-measure — with Dicier runs on Dicier's
+ * baseline and asset runs as `<image>` siblings in their slots, all inside
+ * one group carrying the ◆43 rotation.
  */
-function renderTextBox(shape: TextBoxShape, index: number): ReactElement {
+function renderTextBox(
+  shape: TextBoxShape,
+  index: number,
+  images?: ResolvedImages,
+): ReactElement {
   // Nine-point pivot (§3.4): the WHOLE box moves — x/y name its pivot
   // point, so the drawn origin backs off by (w·fx, h·fy) — while the
   // interior line layout (align within the box's width, the ascent
   // realization, the lineHeight advance) is unchanged, just computed from
   // the moved origin.
   const origin = pivotedBoxOrigin(shape, shape);
-  const x = textBoxLineX({ x: origin.x, width: shape.width }, shape.align);
   const ascent = ascentOf(shape.font);
+  if (!shape.lines.some((line) => runsHaveIcons(line.runs))) {
+    const x = textBoxLineX({ x: origin.x, width: shape.width }, shape.align);
+    return (
+      <text
+        key={index}
+        fontSize={shape.size}
+        fill={shape.color}
+        textAnchor={SVG_ALIGN[shape.align]}
+        fontFamily={TEXT_FONT_FAMILIES[shape.font]}
+        transform={rotationTransform(shape)}
+      >
+        {shape.lines.map((line, i) => (
+          <tspan
+            key={i}
+            x={x}
+            y={origin.y + ascent * shape.size + i * shape.lineHeight * shape.size}
+          >
+            {runsText(line.runs)}
+          </tspan>
+        ))}
+      </text>
+    );
+  }
+  const lineStart = (line: { width: number }): number =>
+    origin.x + (shape.width - line.width) * ALIGN_FRACTION[shape.align];
+  const lineTop = (i: number): number => origin.y + i * shape.lineHeight * shape.size;
   return (
-    <text
-      key={index}
-      fontSize={shape.size}
-      fill={shape.color}
-      textAnchor={SVG_ALIGN[shape.align]}
-      fontFamily={TEXT_FONT_FAMILIES[shape.font]}
-      transform={rotationTransform(shape)}
-    >
-      {shape.lines.map((line, i) => (
-        <tspan
-          key={i}
-          x={x}
-          y={origin.y + ascent * shape.size + i * shape.lineHeight * shape.size}
-        >
-          {line}
-        </tspan>
-      ))}
-    </text>
+    <g key={index} transform={rotationTransform(shape)}>
+      {/* xmlSpace: same whitespace-preservation contract as renderText's
+          run path above (◆44) — asset-icon slots leave space-adjacent
+          sibling tspans SVG would otherwise collapse. */}
+      <text
+        fontSize={shape.size}
+        fill={shape.color}
+        fontFamily={TEXT_FONT_FAMILIES[shape.font]}
+        xmlSpace="preserve"
+      >
+        {shape.lines.flatMap((line, i) =>
+          renderRunTspans(line.runs, `${i}-`, lineStart(line), lineTop(i), shape.size, shape.font),
+        )}
+      </text>
+      {shape.lines.flatMap((line, i) =>
+        renderRunAssetIcons(line.runs, `${i}-a`, lineStart(line), lineTop(i), shape.size, images),
+      )}
+    </g>
   );
 }
 

@@ -108,8 +108,52 @@ tighter `line_height:`, `overflow: shrink`, or shorter text.
 
 One box is one look: a single font, size, and color for the whole box.
 Interpolation (`text: "[name]: [rules]"`) substitutes before wrapping, so mixed
-cell data wraps as one paragraph. Bold runs and inline icons are a
+cell data wraps as one paragraph. Icons can sit inline in the text — see
+[Inline icons](#inline-icons) below; bold and italic runs are still a
 [roadmap](roadmap.md) topic.
+
+## Inline icons
+
+Both `Text` and `TextBox` can draw icons *inside* the text, with brace markers:
+
+```goblin
+Text: "Cost"
+  x: 1
+  y: 1
+  size: 1.2
+  text: "Pay {HEARTS} or discard {asset:skull}"
+```
+
+- `{HEARTS}` draws the [Dicier icon](icons.md) with that code — uppercase
+  letters, digits, underscores (and the one code with a space) between braces.
+- `{asset:skull}` draws an [uploaded asset](assets.md) by name, exactly the
+  names the Assets drawer holds.
+- `{{` is a literal `{`. A lone `}` is just a `}`. Anything else in braces —
+  lowercase, empty, unclosed — isn't a marker and stays ordinary text, no
+  warning.
+
+**Every icon occupies a square one-em slot**: as wide and tall as the text's
+`size`, sitting on the line. Dicier icons draw in the text's own `color`;
+asset art keeps its own colors and letterboxes into the slot if it isn't
+square. For now inline Dicier icons always use the default `flat_dark` face —
+the `style:` choice that [`Icon`](icons.md) has doesn't reach inline markers
+yet.
+
+Markers are read from the **resolved** text — after `[column]` interpolation —
+so a marker can come straight from a spreadsheet cell (`text: [effect]` where
+the cell says `Take {1_ON_D6} damage`), and data-driven icons work with no
+extra syntax.
+
+In a `TextBox`, a marker wraps like a word: it moves to the next line whole,
+never splitting its slot, and the spaces around it collapse at a line break
+exactly like word wrap.
+
+Mistakes stay gentle, the same way icon codes and asset names already work:
+an unknown Dicier code written literally in the code warns
+([W004](errors.md)), an unknown asset name warns (W005), and an unknown code
+arriving from cell data is noted at generation time (D005) while the marker
+renders as its raw text — the failure is its own indicator, and one bad
+marker never blanks a card.
 
 ## Fonts
 

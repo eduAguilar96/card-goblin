@@ -69,6 +69,7 @@ export type {
   IconStyle,
   ImageFit,
   ImageShape,
+  InlineIcon,
   LoopCaseBinding,
   Pivot,
   PivotH,
@@ -80,21 +81,35 @@ export type {
   RenderModel,
   Shape,
   TextAnchor,
+  TextBoxLine,
   TextBoxOverflow,
   TextBoxShape,
+  TextRun,
   TextShape,
 } from "./model";
+export { mergeTextSegments, parseInlineMarkers, rawMarkerText } from "./markers";
+export type { MarkerSegment } from "./markers";
 export {
   GEIST_METRICS,
   SHRINK_FLOOR,
   SHRINK_STEP,
   WIDTH_SAFETY_MARGIN,
+  layoutSingleLine,
   layoutTextBox,
+  layoutTextBoxRuns,
+  lineText,
   measureText,
   metricsForFace,
+  wrapRuns,
   wrapText,
 } from "./wrap";
-export type { FontMetrics, TextBoxLayout, TextBoxLayoutInput } from "./wrap";
+export type {
+  FontMetrics,
+  TextBoxLayout,
+  TextBoxLayoutInput,
+  TextBoxRunsLayout,
+  TextBoxRunsLayoutInput,
+} from "./wrap";
 export { FONT_METRICS } from "./font-metrics";
 export type { BundledFontFace, GeneratedFontMetrics } from "./font-metrics";
 

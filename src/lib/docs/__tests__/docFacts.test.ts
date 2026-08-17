@@ -501,6 +501,23 @@ describe("the font table matches FONT_FACES (◆41)", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Inline icons (◆44)
+// ---------------------------------------------------------------------------
+
+describe("the inline-icons section (◆44) states the code's fixed Dicier face", () => {
+  const text = pageText("text");
+
+  it("has the section, and names exactly DEFAULT_ICON_STYLE as the face markers draw with", () => {
+    const section = /## Inline icons([\s\S]*?)\n## /.exec(text);
+    expect(section, "the Inline icons section moved or was retitled").not.toBeNull();
+    // The wiki's "always the default face for now" claim is a copy of the
+    // renderer's hardcoded ICON_FONT_FAMILIES[DEFAULT_ICON_STYLE] choice —
+    // if inline markers ever gain a style choice, this prose must change.
+    expect(section![1]).toContain(`\`${DEFAULT_ICON_STYLE}\``);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Reserved words
 // ---------------------------------------------------------------------------
 

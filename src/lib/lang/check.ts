@@ -61,6 +61,7 @@ import {
 } from "./model";
 import { CSS_COLOR_NAMES } from "./css-colors";
 import { DICIER_CODES } from "./dicier-codes";
+import { parseInlineMarkers } from "./markers";
 
 // ---------------------------------------------------------------------------
 // Public result types
@@ -1077,9 +1078,42 @@ class Checker {
         // typed exactly like color: (§7.1a); default white.
         this.checkValue(value, EXP_COLOR, ctx, false);
         return;
-      case "text":
+      case "text": {
         this.checkValue(value, EXP_TEXT, ctx, false);
+        // Inline icons (◆44, §7.5): a LITERAL text: (no interpolation,
+        // literalStringValue's contract — interpolated/computed text is
+        // runtime territory, D005, same rationale as Icon codes) is scanned
+        // for markers. An unknown dicier code is W004 exactly like Icon
+        // `code:` (the curated list is non-exhaustive, ⚑10†); an asset
+        // marker whose name isn't in the supplied library is W005 exactly
+        // like an `asset:` Image src (skipped entirely when no library was
+        // supplied — see check()'s doc comment).
+        const raw = literalStringValue(value);
+        // Single-line Text renders newlines as spaces BEFORE marker parsing
+        // (§3.3.2) — scan the same string the evaluator will parse, or a
+        // literal like "{HEA\nRTS}" would silently become a marker the
+        // checker never saw (space IS in the code alphabet). TextBox keeps
+        // newlines as hard breaks, where a brace-spanning newline never
+        // forms a marker on either side — no normalization there.
+        const literal = raw !== null && el.element === "Text" ? raw.replace(/\n/g, " ") : raw;
+        if (literal !== null) {
+          for (const segment of parseInlineMarkers(literal)) {
+            if (segment.kind !== "icon") continue;
+            if (segment.icon.kind === "dicier") {
+              if (!DICIER_CODES.has(segment.icon.code)) {
+                this.warn(
+                  "W004",
+                  `Unknown icon code "${segment.icon.code}" — not in the curated Dicier list (which is non-exhaustive; the glyph may still exist)`,
+                  value.range,
+                );
+              }
+            } else if (this.assetNames && !this.assetNames.has(segment.icon.name)) {
+              this.warn("W005", `Unknown asset '${segment.icon.name}'`, value.range);
+            }
+          }
+        }
         return;
+      }
       case "src": {
         // Image only (ELEMENT_SPECS): a Text expression with the usual §3.5
         // coercions — URLs routinely come from a sheet column or an

@@ -8,13 +8,18 @@
  * end-to-end evaluator tests in generate.test.ts.
  */
 import { describe, expect, it } from "vitest";
+import type { MarkerSegment } from "../markers";
 import type { FontMetrics } from "../wrap";
 import {
   SHRINK_FLOOR,
   SHRINK_STEP,
   WIDTH_SAFETY_MARGIN,
+  layoutSingleLine,
   layoutTextBox,
+  layoutTextBoxRuns,
+  lineText,
   measureText,
+  wrapRuns,
   wrapText,
 } from "../wrap";
 
@@ -336,5 +341,138 @@ describe("layoutTextBox: degenerate inputs stay total (never-throws ⚑8)", () =
   it("whitespace-only text in a too-short box truncates quietly, never badges", () => {
     expect(box({ text: "", height: 0.5 })).toMatchObject({ clipped: false, shrunk: false });
     expect(box({ text: "   ", height: 0.5 }).clipped).toBe(false);
+  });
+});
+
+// -- inline-icon runs (◆44, §7.5) --------------------------------------------
+
+/** Segment sugar: T("aa") is text, I() is a dicier icon slot. */
+const T = (text: string): MarkerSegment => ({ kind: "text", text });
+const I = (code = "HEARTS"): MarkerSegment => ({
+  kind: "icon",
+  icon: { kind: "dicier", code },
+});
+
+describe("layoutSingleLine (Text, ◆44): runs with absolute offsets", () => {
+  it("an icon slot advances by EXACTLY size — no safety margin on the slot", () => {
+    const line = layoutSingleLine([T("a"), I(), T("b")], 2, FAKE);
+    const aWidth = measureText("a", 2, FAKE); // 2.04 — margin applies to TEXT
+    expect(line.runs).toEqual([
+      { kind: "text", text: "a", x: 0 },
+      { kind: "icon", x: aWidth, icon: { kind: "dicier", code: "HEARTS" } },
+      { kind: "text", text: "b", x: aWidth + 2 },
+    ]);
+    expect(line.width).toBe(aWidth + 2 + measureText("b", 2, FAKE));
+  });
+
+  it("a lone icon is one run at x 0, width = size", () => {
+    expect(layoutSingleLine([I()], 1.5, FAKE)).toEqual({
+      runs: [{ kind: "icon", x: 0, icon: { kind: "dicier", code: "HEARTS" } }],
+      width: 1.5,
+    });
+  });
+
+  it("empty input is zero runs, zero width", () => {
+    expect(layoutSingleLine([], 1, FAKE)).toEqual({ runs: [], width: 0 });
+  });
+});
+
+describe("wrapRuns (◆44): icons wrap like words, never mid-slot", () => {
+  it("an icon that doesn't fit wraps whole to the next line, collapsing the space", () => {
+    const lines = wrapRuns([T("aa "), I()], exactWidth("aa"), 1, FAKE);
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toEqual({
+      runs: [{ kind: "text", text: "aa", x: 0 }],
+      width: measureText("aa", 1, FAKE),
+    });
+    expect(lines[1]).toEqual({
+      runs: [{ kind: "icon", x: 0, icon: { kind: "dicier", code: "HEARTS" } }],
+      width: 1,
+    });
+  });
+
+  it("an icon WIDER than the box never breaks — it overflows on its own line", () => {
+    const lines = wrapRuns([I()], 0.5, 1, FAKE);
+    expect(lines).toEqual([
+      { runs: [{ kind: "icon", x: 0, icon: { kind: "dicier", code: "HEARTS" } }], width: 1 },
+    ]);
+  });
+
+  it("a box of only icons packs exact slots per line (advance = size, no margin)", () => {
+    // Three 1-em slots in a width-2 box: 1 + 1 = 2 fits EXACTLY (a text pair
+    // would not — the 2% margin would push it over), the third wraps.
+    const lines = wrapRuns([I("A"), I("B"), I("C")], 2, 1, FAKE);
+    expect(lines.map((l) => l.runs.map((r) => (r.kind === "icon" ? r.icon : null)))).toEqual([
+      [{ kind: "dicier", code: "A" }, { kind: "dicier", code: "B" }],
+      [{ kind: "dicier", code: "C" }],
+    ]);
+    expect(lines[0].runs.map((r) => r.x)).toEqual([0, 1]);
+    expect(lines[0].width).toBe(2);
+    expect(lines[1].width).toBe(1);
+  });
+
+  it("icons and hard breaks compose: the newline ends the line, the icon starts the next", () => {
+    const lines = wrapRuns([T("a\n"), I()], 20, 1, FAKE);
+    expect(lines).toHaveLength(2);
+    expect(lineText(lines[0])).toBe("a");
+    expect(lines[1].runs).toEqual([
+      { kind: "icon", x: 0, icon: { kind: "dicier", code: "HEARTS" } },
+    ]);
+  });
+
+  it("interior spaces around a FITTING icon are preserved verbatim in the runs", () => {
+    const lines = wrapRuns([T("a "), I(), T(" b")], 20, 1, FAKE);
+    expect(lines).toHaveLength(1);
+    expect(lines[0].runs).toEqual([
+      { kind: "text", text: "a ", x: 0 },
+      { kind: "icon", x: measureText("a ", 1, FAKE), icon: { kind: "dicier", code: "HEARTS" } },
+      { kind: "text", text: " b", x: measureText("a ", 1, FAKE) + 1 },
+    ]);
+  });
+
+  it("marker-free input through wrapRuns ≡ wrapText (one engine, one arithmetic)", () => {
+    const text = "aa bb  ccc\n  dd eeeeeeee";
+    const viaRuns = wrapRuns([T(text)], exactWidth("aaaa"), 1, FAKE).map(lineText);
+    expect(viaRuns).toEqual(wrapText(text, exactWidth("aaaa"), 1, FAKE));
+  });
+});
+
+describe("layoutTextBoxRuns: shrink recomputes run offsets at the FINAL size", () => {
+  it("the surviving lines carry offsets and widths at the shrunk size", () => {
+    // 3 hard lines never rewrap; height 7.2 needs size ≤ 1.92 → first step
+    // (0.95 → 1.9) fits, same ladder as the string-surface shrink test.
+    const r = layoutTextBoxRuns({
+      segments: [T("a\nb\nc"), I()],
+      width: 100,
+      height: 7.2,
+      size: 2,
+      lineHeight: 1.25,
+      overflow: "shrink",
+      metrics: FAKE,
+    });
+    expect(r.shrunk).toBe(true);
+    expect(r.size).toBe(1.9);
+    const last = r.lines[2];
+    // "c" then the icon: the icon's offset is c's advance AT 1.9, and its
+    // slot advance is exactly 1.9 — not the declared 2.
+    expect(last.runs).toEqual([
+      { kind: "text", text: "c", x: 0 },
+      { kind: "icon", x: measureText("c", 1.9, FAKE), icon: { kind: "dicier", code: "HEARTS" } },
+    ]);
+    expect(last.width).toBe(measureText("c", 1.9, FAKE) + 1.9);
+  });
+
+  it("an icon slot IS content: a box of one unfitting icon clips (never the quiet whitespace path)", () => {
+    const r = layoutTextBoxRuns({
+      segments: [I()],
+      width: 10,
+      height: 0.5,
+      size: 1,
+      lineHeight: 1.3,
+      overflow: "clip",
+      metrics: FAKE,
+    });
+    expect(r.clipped).toBe(true);
+    expect(r.lines).toEqual([]);
   });
 });

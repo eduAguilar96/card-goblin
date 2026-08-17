@@ -59,6 +59,11 @@ data, with error-correction levels and a scan-safe quiet zone — the idiom for
 giving every card in a deck its own code on the back. See
 [QR codes](qr-codes.md).
 
+**Inline icons.** `{HEARTS}` and `{asset:skull}` markers draw Dicier glyphs and
+uploaded art right inside `Text` and `TextBox` text — including markers that
+arrive from cell data — each in a one-em slot that wraps like a word. See
+[Inline icons](../goblin-script/04-text.md#inline-icons).
+
 ## Further out
 
 - **Accounts and sharing** — projects that live in the cloud and decks you can
@@ -66,8 +71,9 @@ giving every card in a deck its own code on the back. See
 - **Uploaded fonts** — `font:` currently picks from a small bundled set (see
   [Text & TextBox](text.md)); bringing your OWN font file, the way uploaded
   assets already work for images, is a separate, later piece.
-- **Rich text in boxes** — bold runs and inline icons inside a `TextBox`
-  (run-based layout, a deliberate later design round).
+- **Rich text in boxes** — inline icons shipped (see
+  [Inline icons](../goblin-script/04-text.md#inline-icons)); **bold and italic
+  runs** are the remaining piece, still a later design round.
 - **A browsable icon picker** — search and preview the [888 Dicier
   codes](../reference/icons.md) visually instead of typing them from memory.
 

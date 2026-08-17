@@ -85,6 +85,7 @@ the section that elaborates it:
 | ◆41 | Text/TextBox fonts (§3.3) | **Repo-bundled closed vocabulary**: `geist` (default, unchanged) + eight faces — Cormorant Garamond and Courier Prime, four weights/styles each — resolved like Icon `style:`, each with its own generated metrics table | A deliberate PRAGMATIC unblock, not a font system: the owner needed these two families now; per-project **uploaded** fonts are real future work, deferred because wrapping needs a metrics table per face and building that pipeline for arbitrary uploads is a bigger project than unblocking two known families |
 | ◆42 | Row/card position bindings (§3.6) | **`[row]` and `[card]` as built-in, derived bindings** resolving after sheet columns; the grid's row gutter becomes the editable index, and typing a position **moves the row and shifts the rest** (out-of-range clamps, garbage reverts) | Position IS row order, so storing a number would create a second source of truth that can disagree with it — deriving costs nothing and keeps the sheet payload, autosave slot, and project file unchanged. Two bindings because `loop:`/`count:` make one row into several cards: `[row]` labels the data, `[card]` serialises the deck. Resolving last means a sheet declaring its own `row`/`card` column shadows the built-in, so no existing project's COLUMN can be silently reinterpreted. (Narrow exception, not a column: a template that put an unresolvable `row`/`card` name where only Number/Text/Enum ever coerced — e.g. `color: [row]` — used to poison silently to Unknown with no sheet in scope; it now resolves and can genuinely E003, which is more correct, not less.) Editing the gutter rather than adding a column keeps ⚑3 (columns come from code) intact |
 | ◆43 | Rotation (§3.4) | **`rotate:` as an optional Number property on every drawable element** — degrees, clockwise, any expression (data-driven allowed), default 0 — rotating the element **around its `pivot:` point**, which is exactly the card-space point `x`/`y` name | The pivot is the element's own handle (◆36†), so it is the one rotation center that needs no new vocabulary — `pivot: center_center` + `rotate:` spins a shape in place, the default `top_left` swings it around its corner, and `Repeat` + `rotate: [i] * step` makes fans and dials from index math (⚑9). Paint-time only: wrap, generation, caps, and PDF layout are geometry-in-card-units and never see the transform (the rasterizer serializes the same SVG markup, so PDF inherits rotation for free). An ordinary Number property needs zero new grammar — the ◆33 argument — and a non-numeric value is the usual E003, non-finite the usual D008 |
+| ◆44 | Inline icons (§7.5) | **Brace markers in resolved text**: `{CODE}` (Dicier) and `{asset:name}` (uploaded art) inside any `text:`, parsed at EVAL time AFTER interpolation; lines become **runs** with compiler-computed x-offsets; every icon occupies a square **1-em slot** (`size` × `size`); `{{` escapes a literal `{` | Braces because ◆30's "`[brackets]` always mean data refs" stays absolute — no new bracket grammar, no lexer change. Post-resolution parsing because a sheet CELL containing a marker must work (data-driven icons come free, the product's whole point). Runs because the compiler is the layout authority (◆37) and it cannot know Dicier ligature advances or an SVG's aspect ratio — absolute run placement plus a fixed slot makes the compiler's width assumption TRUE BY CONSTRUCTION for both renderers, instead of approximately right in one. True aspect ratios and non-default Dicier faces are explicitly deferred (§8) |
 
 ---
 
@@ -207,6 +208,19 @@ families ship as static TTFs under `src/app/fonts/`, each face's advance widths 
 ascent generated into `font-metrics.ts` by `scripts/generate-font-metrics.mjs`.
 `TextBox` (§3.3.3) shares this same property and vocabulary.
 
+**Inline icons (M4, 2026-08-16 — ◆44, §7.5):** the resolved text may carry
+brace markers — `{HEARTS}` draws the Dicier glyph, `{asset:skull}` draws an
+uploaded asset (§7.4 scheme) — inline with the text. Markers are parsed
+AFTER interpolation, so a marker arriving from a sheet cell works
+identically to a literal. `{{` is a literal `{`; a lone `}` is literal; a
+`{...}` that parses as neither form renders as its raw text. Each icon
+occupies a square **1-em slot** (`size` wide × `size` tall, advancing
+exactly `size`): Dicier glyphs draw at the text's `color` in the default
+`flat_dark` face, asset art draws letterboxed in the slot with its own
+colors. Diagnostics reuse the icon/asset codes: unknown LITERAL Dicier
+marker → W004, unknown literal asset name → W005, computed unknown code →
+D005 at data time (renders as the raw marker text — its own indicator).
+
 #### 3.3.3 TextBox
 
 (M3, agreed 2026-08-10 — §7.2) Wrapped, multi-line text in a box; ◆24 stays intact
@@ -239,6 +253,10 @@ fully-fitting line and marks the box clipped; `shrink` retries at 5%-of-`size`
 steps down to a 60% floor, then clips at the floor — the shape carries the FINAL
 size. Clipped/shrunk boxes get a subtle per-card preview badge, never an error
 placeholder (⚑8).
+
+**Inline icons (◆44, §7.5):** `TextBox` honors the same `{...}` markers as
+`Text` (§3.3.2); a marker is one **unbreakable token** that wraps like a
+word, occupying its square 1-em slot within the line.
 
 #### 3.3.4 Icon
 
@@ -515,8 +533,8 @@ grid keeps last good schema — §4.2):
 | W001 | shadowed binding |
 | W002 | unused declaration |
 | W003 | explicit `y_units` makes units non-square (suppressed when the value exactly equals the square `auto` value) |
-| W004 | unknown icon code literal — may still be a valid glyph; the curated list is non-exhaustive † |
-| W005 | unknown asset — a literal `asset:` Image `src:` whose name isn't in the current Assets-drawer library (§7.4); never an error, since the asset may be about to be uploaded |
+| W004 | unknown icon code literal (Icon `code:` or an inline `{marker}`, ◆44) — may still be a valid glyph; the curated list is non-exhaustive † |
+| W005 | unknown asset — a literal `asset:` Image `src:` or inline `{asset:name}` marker (◆44) whose name isn't in the current Assets-drawer library (§7.4); never an error, since the asset may be about to be uploaded |
 
 *(E006 existed in the original revision as "unknown icon code (error)"; downgraded to
 W004 in Revision A because the code list is provably incomplete.)*
@@ -531,7 +549,7 @@ single source cell (◆†), so they mark the placeholder card / problems strip 
 | D002 | cell not numeric in a Number column |
 | D003 | empty Number/Enum cell referenced by a template (edited rows only, ◆29) |
 | D004 | repeat count negative or > 500 |
-| D005 | computed icon code not in the known list — the icon still renders (the failed ligature is its own visible indicator); diagnostic only, not a placeholder |
+| D005 | computed icon code not in the known list (Icon `code:` or an inline marker, ◆44) — the icon/marker still renders (the failed ligature or raw marker text is its own visible indicator); diagnostic only, not a placeholder |
 | D006 | `count:` non-integer, negative, or unevaluable → one placeholder per row×case combination † |
 | D007 | per-Card instance cap (2,000) exceeded — generation truncated † |
 | D008 | non-finite numeric result during evaluation (division by zero) → placeholder card |
@@ -1024,6 +1042,53 @@ to unblock prototyping.
   error — a v2 file downloaded with `assets: {}` reads as a backup but
   imports as `replaceAll([])`, deleting the library.
 
+### 7.5 Inline icons — agreed spec (2026-08-16)
+
+**Requirement (edu):** icons inline WITHIN text — both Dicier glyphs and
+new SVG art uploaded to the assets library — in `Text` and `TextBox`.
+This is the "rich text runs" roadmap item, deliberately scoped to icons
+only: bold/italic runs remain §8.
+
+- **Syntax:** `{CODE}` / `{asset:name}` in any `text:`; `{{` literal
+  brace; a lone `}` is literal. Parsed at eval time on the RESOLVED
+  string (after interpolation) — the only design under which cell-borne
+  markers work, and it needs no lexer or parser change at all (braces
+  are ordinary string characters to §3.1).
+- **Run model:** the evaluator splits each line into runs and computes
+  every run's x-offset in card units; `TextShape` gains `runs`,
+  `TextBoxShape.lines` becomes lines-of-runs (each line also carries its
+  measured width so the renderer can `align` without re-measuring). Both
+  renderers place runs absolutely — preview/PDF agreement by
+  construction, the ◆37 argument extended to mixed content.
+- **The 1-em slot:** icon advance = `size`, drawn in a `size`×`size` box
+  sitting on the line's em box. The pure compiler cannot measure Dicier
+  ligature advances (no GSUB table in the metrics pipeline) or asset
+  aspect ratios (assets are IndexedDB blobs, invisible to compile); a
+  FIXED slot is the one width the compiler can assert and both renderers
+  can honor exactly. Wide art letterboxes; true aspect is a future
+  additive (an `assetDimensions` compile input + a Dicier advance table,
+  §8).
+- **Wrapping:** a marker is one atomic token (never breaks mid-slot);
+  spaces around it collapse at break points exactly like word wrap
+  (§3.3.3 semantics otherwise unchanged). Hard breaks unchanged.
+- **Rendering:** text runs as `<tspan>` at absolute x; Dicier runs as a
+  `<tspan>` in the Dicier `flat_dark` face at font-size `size`,
+  inheriting the text `color`; asset runs as an `<image>` in the slot,
+  resolved through the SAME machinery as the Image element (preview: the
+  cardSvg status/object-URL layer incl. its epoch fences; PDF:
+  `resolveImageSources` must also collect text-run asset names so the
+  export pre-flight counts them).
+- **Single-line `Text`:** identical markers and slot; no wrapping.
+- **Diagnostics:** reuse W004 (unknown literal Dicier marker), W005
+  (unknown literal asset marker — the checker scans STRING LITERALS
+  only, as it already does for Icon `code:`), D005 (computed unknown
+  code at data time; the raw marker text renders — same "the failure is
+  its own indicator" stance). No new codes.
+- **Out of scope (assumptions, veto-able):** per-marker style/face or
+  color, bold/italic runs, true aspect ratios, vertical alignment
+  options. Autocomplete inside `{` only if it drops out of the existing
+  string-completion path cheaply; otherwise deferred.
+
 ## 8. Open questions (explicitly deferred, not blocking the slice)
 
 Items are removed from this list once they ship — §10 and the milestone specs in
@@ -1036,6 +1101,15 @@ instance, left this list for §7.2).
   repo-bundled nine-face set instead — real future work, deferred because it
   needs a generated metrics table per uploaded face, §7.1b's asset library
   shape but bigger).
+- Rich-text RUNS beyond icons — bold/italic spans inside `Text`/`TextBox`
+  (◆44 shipped the run MODEL and inline icons; styled text runs are the
+  remaining half of the original "rich text" item).
+- TRUE ASPECT RATIOS for inline icons (◆44 ships the square 1-em slot): an
+  `assetDimensions` compile input (decoded at upload, the `assetNames`
+  precedent) plus a Dicier ligature-advance table (GSUB extraction, §9's
+  open thread) would let markers measure true-to-width.
+- Per-marker Dicier FACES for inline icons (◆44 is `flat_dark` only —
+  a style selector inside the marker, or a per-element `icon_style:`).
 - Print specifics: bleed, safe zones, DPI for raster images.
 - Whether `sheet:` becomes optional for loop-only Cards (⚑13 relaxation — the
   zero-column-sheet idiom is the v1 answer).

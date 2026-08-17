@@ -36,6 +36,10 @@ works from a sheet column (`src: [art]`) or built with interpolation
 (`src: "asset:[art]"`), so different rows can point at different uploads exactly
 like different URLs.
 
+Uploads also work *inside text*: `{asset:dragon_art}` in any `Text` or `TextBox`
+`text:` draws the upload as an inline icon in a one-em slot — see
+[Inline icons](../goblin-script/04-text.md#inline-icons).
+
 ## The 2 MB cap
 
 **2 MB** per image — enough for card-sized art at print resolution, not a place

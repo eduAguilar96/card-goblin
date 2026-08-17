@@ -177,6 +177,46 @@ export type FontFace = (typeof FONT_FACES)[number];
 export const DEFAULT_FONT: FontFace = "geist";
 
 /**
+ * One inline icon reference parsed out of resolved text (§3.3, M4 — ◆44,
+ * §7.5): `{HEARTS}` → dicier, `{asset:skull}` → asset. Markers are parsed at
+ * EVAL time on the RESOLVED string (after interpolation), so a marker
+ * arriving from a sheet cell works identically to a literal — the grammar
+ * itself lives in markers.ts.
+ */
+export type InlineIcon =
+  | { kind: "dicier"; code: string }
+  | { kind: "asset"; name: string };
+
+/**
+ * One run of a laid-out text line (◆44): either a stretch of plain text or a
+ * single inline icon. `x` is the run's offset in CARD UNITS from the line's
+ * LEFT edge — the compiler is the layout authority (◆37 extended to mixed
+ * content), so both renderers place runs absolutely and never re-measure.
+ *
+ * THE 1-EM SLOT (§7.5): an icon run occupies a square `size` × `size` box
+ * sitting on the line's em box and advances by EXACTLY `size` — no safety
+ * margin on the slot (the margin belongs to measured text, not to a width
+ * that is true by construction). Wide asset art letterboxes inside the slot;
+ * Dicier glyphs draw at the text's color in the default `flat_dark` face.
+ */
+export type TextRun =
+  | { kind: "text"; text: string; x: number }
+  | { kind: "icon"; x: number; icon: InlineIcon };
+
+/**
+ * One resolved TextBox line (◆44): its runs plus the line's measured total
+ * width in card units, carried so the renderer can realize `align:`
+ * (middle/right offset the whole line) WITHOUT re-measuring — preview and
+ * PDF agree by construction, exactly the `lines` contract before runs.
+ */
+export interface TextBoxLine {
+  runs: readonly TextRun[];
+  /** Measured width of the whole line in card units (text advances include
+   * the wrap engine's safety margin; each icon contributes exactly `size`). */
+  width: number;
+}
+
+/**
  * Local-asset scheme for Image `src:` (§7.1b, M3): `"asset:dragon"` refers to
  * an upload in the Assets drawer's IndexedDB library by name, rather than a
  * URL. Zero language change — `src:` stays a plain Text expression, so the
@@ -350,7 +390,18 @@ export interface TextShape {
   /** Em height in card units. */
   size: number;
   color: string;
+  /** The RESOLVED text, markers included verbatim — kept for the source
+   * spelling and debugging (◆44: `runs` below is what renders). Hashing is
+   * honest because `runs` is serialized into the content hash alongside
+   * this — NOT because text determines runs (it doesn't: the same resolved
+   * text yields different runs across literal vs computed sources, sizes,
+   * and fonts). */
   text: string;
+  /** The line as laid-out runs (◆44, §7.5): marker-parsed from `text` at
+   * eval time, each run carrying its absolute x-offset from the line's left
+   * edge. Single line, always (◆24) — no wrapping. Renderers draw THESE,
+   * never re-parse `text`. */
+  runs: readonly TextRun[];
   /** Nine-point (§3.4): `h` renders via SVG text-anchor, `v` via em-box
    * math. Default top-left ≡ the legacy `left` alias. */
   pivot: Pivot;
@@ -444,9 +495,12 @@ export interface TextBoxShape {
   pivot: Pivot;
   /** Multiplier on `size` — baseline advance in units is lineHeight × size. */
   lineHeight: number;
-  /** The resolved, wrapped lines, top to bottom. May contain empty strings
-   * (blank lines from consecutive hard breaks). */
-  lines: readonly string[];
+  /** The resolved, wrapped lines, top to bottom — each a list of runs plus
+   * its measured width (◆44: was `readonly string[]` pre-M4). May contain
+   * empty lines (`runs: []`, blank lines from consecutive hard breaks). The
+   * renderer aligns each line from its carried `width` and never re-wraps
+   * OR re-measures. */
+  lines: readonly TextBoxLine[];
   /** True when lines were dropped to fit the box's height (§3.3 clip — also
    * set after `shrink` exhausted its floor). Feeds the preview badge. */
   clipped: boolean;

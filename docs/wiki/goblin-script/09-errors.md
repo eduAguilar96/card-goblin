@@ -18,7 +18,7 @@ kept as small as the mistake.
 | **A grey placeholder card** | One card's data couldn't be evaluated — a bad cell, a divide by zero, a runaway repeat. The error messages are printed on the card. |
 | **An amber dot on a card** | A [`TextBox`](text.md) on that card had its text clipped or shrunk to fit the box — not an error, just worth a look. |
 | **A dimmed spreadsheet row** | A brand-new, never-edited empty row. It's excluded from the deck until you type into it. |
-| **An icon showing raw text** like `HEARTZ` | An unknown [icon code](icons.md) — fix the spelling. |
+| **An icon showing raw text** like `HEARTZ` | An unknown [icon code](icons.md) — on an `Icon`, or an [inline marker](text.md#inline-icons) that rendered as its raw `{HEARTZ}` text. Fix the spelling. |
 
 ## Two kinds of problem
 
@@ -42,10 +42,11 @@ Some things are suspicious rather than wrong, and warn instead of erroring:
 - a `Repeat` variable shadowing a column name,
 - a declaration nothing uses,
 - an explicit `y_units` that makes units non-square,
-- an icon code that isn't in the known list — it may still be a real glyph, since the
-  published list isn't exhaustive,
-- an `asset:` reference to an upload that isn't in your library — you might be about
-  to add it.
+- an icon code that isn't in the known list — on an `Icon` or in an inline
+  `{marker}` in text — it may still be a real glyph, since the published list
+  isn't exhaustive,
+- an `asset:` reference to an upload that isn't in your library — in an `Image`
+  `src:` or an inline `{asset:name}` marker — you might be about to add it.
 
 ## Recovering
 

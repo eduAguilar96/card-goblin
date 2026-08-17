@@ -20,7 +20,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import type { FontFace, IconStyle, ImageShape, Shape } from "@/lib/lang";
+import type { FontFace, IconStyle, ImageShape, Shape, TextBoxShape, TextShape } from "@/lib/lang";
 import { CardFaceSvg, type ResolvedImage, type ResolvedImages } from "../cardSvg";
 import type { FaceRasterSpec } from "../pdfLayout";
 import {
@@ -75,6 +75,7 @@ const text: Shape = {
   size: 1,
   color: "black",
   text: "hi",
+  runs: [{ kind: "text", text: "hi", x: 0 }],
   pivot: { h: "left", v: "top" },
   font: "geist",
   rotate: 0,
@@ -91,7 +92,10 @@ const textbox: Shape = {
   align: "left",
   pivot: { h: "left", v: "top" },
   lineHeight: 1.3,
-  lines: ["wrapped", "lines"],
+  lines: [
+    { runs: [{ kind: "text", text: "wrapped", x: 0 }], width: 0 },
+    { runs: [{ kind: "text", text: "lines", x: 0 }], width: 0 },
+  ],
   clipped: false,
   shrunk: false,
   font: "geist",
@@ -465,5 +469,60 @@ describe("getFamilyCss caching (§6.1 — one failed fetch must not poison later
     expect(first).toContain("@font-face");
     expect(second).toBe(first);
     expect(calls).toBe(1);
+  });
+});
+
+// -- inline icon runs in the export pre-flight (◆44, §7.5) --------------------
+
+describe("inline icon runs reach the pre-flight collections (◆44)", () => {
+  const withRuns = (runs: TextShape["runs"]): Shape => ({
+    ...(text as TextShape),
+    runs,
+  });
+  const boxWithRuns = (runs: TextShape["runs"]): Shape => ({
+    ...(textbox as TextBoxShape),
+    lines: [{ runs, width: 0 }],
+  });
+  const dicierRun: TextShape["runs"] = [
+    { kind: "icon", x: 0, icon: { kind: "dicier", code: "HEARTS" } },
+  ];
+  const assetRun: TextShape["runs"] = [
+    { kind: "icon", x: 0, icon: { kind: "asset", name: "skull" } },
+  ];
+
+  it("a deck whose ONLY Dicier use is an inline marker still embeds the flat_dark face", () => {
+    expect(iconFamiliesUsed(new Map([["a:front", spec([withRuns(dicierRun)])]]))).toEqual([
+      "Dicier-Flat-Dark",
+    ]);
+    expect(iconFamiliesUsed(new Map([["a:front", spec([boxWithRuns(dicierRun)])]]))).toEqual([
+      "Dicier-Flat-Dark",
+    ]);
+  });
+
+  it("marker-free runs request nothing — the icon-free posture is unchanged", () => {
+    const plain = withRuns([{ kind: "text", text: "hi", x: 0 }]);
+    expect(iconFamiliesUsed(new Map([["a:front", spec([plain])]]))).toEqual([]);
+  });
+
+  it("text-run asset icons are collected as asset: srcs on Text AND TextBox", () => {
+    const specs = new Map([
+      ["a:front", spec([withRuns(assetRun), image("https://x/pic.png")])],
+      ["a:back", spec([boxWithRuns(assetRun)])],
+    ]);
+    expect(imageUrlsUsed(specs)).toEqual(["asset:skull", "https://x/pic.png"]);
+  });
+
+  it("inline asset srcs are EXCLUDED from the remote CORS pre-flight, like Image asset: srcs", () => {
+    const specs = new Map([
+      ["a:front", spec([withRuns(assetRun), image("https://x/pic.png")])],
+    ]);
+    expect(remoteImageUrlsUsed(specs)).toEqual(["https://x/pic.png"]);
+  });
+
+  it("a dicier marker alone adds no image srcs; dedupe holds across shapes", () => {
+    const specs = new Map([
+      ["a:front", spec([withRuns(dicierRun), withRuns(assetRun), image("asset:skull")])],
+    ]);
+    expect(imageUrlsUsed(specs)).toEqual(["asset:skull"]);
   });
 });

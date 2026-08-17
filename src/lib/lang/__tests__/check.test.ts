@@ -1729,6 +1729,17 @@ describe("W004 icon codes", () => {
     }
   });
 
+  it("a literal Text marker spanning a \\n still warns — the checker scans the newline-normalized string eval parses", () => {
+    // Single-line Text renders \n as a space BEFORE marker parsing
+    // (§3.3.2), and space IS in the code alphabet — so "{HEA\nRTS}"
+    // becomes the (unknown) marker {HEA RTS}. Without normalizing, the
+    // checker would see no marker at all and the failed ligature would
+    // render with no diagnostic anywhere.
+    const ds = diagsOf(withElement("Text:", ["x: 1", "y: 1", "size: 1", 'text: "{HEA\\nRTS}"']));
+    expect(ds.map((d) => d.code)).toEqual(["W004"]);
+    expect(ds[0].message).toContain('"HEA RTS"');
+  });
+
   it("computed/interpolated codes are not checked at compile time (runtime D005)", () => {
     expect(codesOf(icon('"X[cost]"'))).toEqual([]);
     expect(codesOf(icon("[name]"))).toEqual([]);
@@ -1794,6 +1805,61 @@ describe("W005 unknown asset", () => {
     expect(
       compileSource(source, new Set(["dragon"])).diagnostics.map((d) => d.code),
     ).not.toContain("W005");
+  });
+});
+
+// -- W004/W005 on inline markers in text: (◆44, §7.5) ------------------------
+
+describe("inline markers in literal text: (◆44)", () => {
+  const textEl = (expr: string): string =>
+    withElement("Text:", [...TEXT_BASE, `text: ${expr}`]);
+  const boxEl = (expr: string): string =>
+    withElement("TextBox:", ["x: 1", "y: 1", "width: 10", "height: 6", "size: 1", `text: ${expr}`]);
+
+  it("an unknown dicier marker in a literal Text text: warns W004, at the literal's range", () => {
+    const source = textEl('"pay {HEARTZ} now"');
+    const ds = diagsOf(source);
+    expect(ds.map((d) => d.code)).toEqual(["W004"]);
+    expect(ds[0].message).toContain('"HEARTZ"');
+    expect(ds[0].severity).toBe("warning");
+    const { range } = ds[0];
+    const line = source.split("\n")[range.startLine];
+    expect(line.slice(range.startCol, range.endCol)).toBe('"pay {HEARTZ} now"');
+  });
+
+  it("TextBox text: is scanned identically", () => {
+    expect(diagsOf(boxEl('"{HEARTZ}"')).map((d) => d.code)).toEqual(["W004"]);
+  });
+
+  it("known dicier markers pass — digit-leading and space-containing codes included", () => {
+    expect(codesOf(textEl('"{HEARTS} and {13_ON_D20} and {OUI ET}"'))).toEqual([]);
+  });
+
+  it("non-marker braces ({{, lowercase, empty, unclosed, lone }) never warn", () => {
+    expect(codesOf(textEl('"a {{HEARTZ} b {nope} {} {open"'))).toEqual([]);
+    expect(codesOf(textEl('"close} only"'))).toEqual([]);
+  });
+
+  it("an unknown asset marker warns W005 when a library is supplied", () => {
+    const ds = diagsOfWithAssets(textEl('"kill {asset:dragon}"'), new Set(["imp"]));
+    expect(ds.map((d) => d.code)).toEqual(["W005"]);
+    expect(ds[0].message).toBe("Unknown asset 'dragon'");
+  });
+
+  it("a known asset marker passes; no assetNames argument means no W005 at all", () => {
+    expect(diagsOfWithAssets(textEl('"{asset:dragon}"'), new Set(["dragon"]))).toEqual([]);
+    expect(codesOf(textEl('"{asset:totally_unknown}"'))).toEqual([]);
+  });
+
+  it("interpolated text: is NOT scanned — markers there are runtime territory (D005)", () => {
+    expect(codesOf(textEl('"[name] {HEARTZ}"'))).toEqual([]);
+    expect(
+      diagsOfWithAssets(textEl('"[name] {asset:nope}"'), new Set()).map((d) => d.code),
+    ).toEqual([]);
+  });
+
+  it("several unknown markers in one literal each warn", () => {
+    expect(codesOf(textEl('"{HEARTZ} {ZORPS}"'))).toEqual(["W004", "W004"]);
   });
 });
 

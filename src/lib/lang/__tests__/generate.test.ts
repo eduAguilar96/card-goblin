@@ -24,6 +24,7 @@ import {
   SIZE_PRESETS,
   compileProject,
   generateModel,
+  lineText,
   measureText,
   metricsForFace,
 } from "../index";
@@ -179,6 +180,8 @@ describe("demo fixture end to end (§3.9)", () => {
       size: 1.6,
       color: "black",
       text: "Dragon",
+      // ◆44: marker-free text is one Text run at x 0 — same visible string.
+      runs: [{ kind: "text", text: "Dragon", x: 0 }],
       pivot: { h: "center", v: "top" }, // the sugar centers horizontally (§3.4)
       font: "geist", // no font: in the demo → the §3.3 default (◆41)
       rotate: 0, // no rotate: in the demo → the §3.4 default (◆43)
@@ -606,8 +609,8 @@ describe("Text/TextBox font: flows to the shape (§3.3 M3, ◆41)", () => {
     const geistBox = wrapProject("geist").model.decks[0].cards[0].front[0] as TextBoxShape;
     const courierBox = wrapProject("courier").model.decks[0].cards[0].front[0] as TextBoxShape;
 
-    expect(geistBox.lines).toEqual(["mint mint", "mint"]);
-    expect(courierBox.lines).toEqual(["mint", "mint", "mint"]);
+    expect(geistBox.lines.map(lineText)).toEqual(["mint mint", "mint"]);
+    expect(courierBox.lines.map(lineText)).toEqual(["mint", "mint", "mint"]);
     expect(geistBox.lines.length).not.toBe(courierBox.lines.length);
     expect(geistBox.clipped).toBe(false);
     expect(courierBox.clipped).toBe(false);
@@ -615,10 +618,10 @@ describe("Text/TextBox font: flows to the shape (§3.3 M3, ◆41)", () => {
     // Cross-check with the wrap engine's OWN measurement (belt and suspenders
     // — the hand math above and measureText must agree on why each line fits).
     for (const line of geistBox.lines) {
-      expect(measureText(line, 1, metricsForFace("geist"))).toBeLessThanOrEqual(5);
+      expect(measureText(lineText(line), 1, metricsForFace("geist"))).toBeLessThanOrEqual(5);
     }
     for (const line of courierBox.lines) {
-      expect(measureText(line, 1, metricsForFace("courier"))).toBeLessThanOrEqual(5);
+      expect(measureText(lineText(line), 1, metricsForFace("courier"))).toBeLessThanOrEqual(5);
     }
     // And the DECISIVE cross-check: "mint mint" fits Geist's own table but
     // overflows Courier's — that asymmetry is the entire reason the two
@@ -1231,7 +1234,14 @@ describe("TextBox evaluates to a wrapped TextBoxShape (§3.3 M3)", () => {
       align: "left",
       pivot: { h: "left", v: "top" },
       lineHeight: 1.3,
-      lines: ["aaa aaa aaa"], // fits an 18-unit box on one line
+      // ◆44: one marker-free line — a single Text run carrying its measured
+      // width ("aaa aaa aaa" against the real Geist table, margin included).
+      lines: [
+        {
+          runs: [{ kind: "text", text: "aaa aaa aaa", x: 0 }],
+          width: measureText("aaa aaa aaa", 1, GEIST_METRICS),
+        },
+      ], // fits an 18-unit box on one line
       clipped: false,
       shrunk: false,
       font: "geist", // no font: → the §3.3 default (◆41)
@@ -1263,9 +1273,9 @@ describe("TextBox evaluates to a wrapped TextBoxShape (§3.3 M3)", () => {
     // collapsing at the breaks. Deterministic because the metrics table is
     // committed (metrics.test.ts pins regeneration).
     const shape = boxOf(boxProject(["width: 3", "height: 20", "size: 1"]));
-    expect(shape.lines).toEqual(["aaa", "aaa", "aaa"]);
+    expect(shape.lines.map(lineText)).toEqual(["aaa", "aaa", "aaa"]);
     for (const line of shape.lines) {
-      expect(measureText(line, shape.size, GEIST_METRICS)).toBeLessThanOrEqual(3);
+      expect(measureText(lineText(line), shape.size, GEIST_METRICS)).toBeLessThanOrEqual(3);
     }
     expect(shape.clipped).toBe(false);
   });
@@ -1274,23 +1284,23 @@ describe("TextBox evaluates to a wrapped TextBoxShape (§3.3 M3)", () => {
     const shape = boxOf(
       boxProject(WIDE, "unused", 'text: "one\\ntwo\\n\\nfour"'),
     );
-    expect(shape.lines).toEqual(["one", "two", "", "four"]);
+    expect(shape.lines.map(lineText)).toEqual(["one", "two", "", "four"]);
   });
 
   it("hard breaks arrive from CELL data — a newline in a cell is data, not escaping", () => {
     const shape = boxOf(boxProject(WIDE, "first\nsecond"));
-    expect(shape.lines).toEqual(["first", "second"]);
+    expect(shape.lines.map(lineText)).toEqual(["first", "second"]);
   });
 
   it("interpolation substitutes BEFORE wrapping — cell newlines survive inside a literal", () => {
     const shape = boxOf(boxProject(WIDE, "x\ny", 'text: "pre [t] post"'));
-    expect(shape.lines).toEqual(["pre x", "y post"]);
+    expect(shape.lines.map(lineText)).toEqual(["pre x", "y post"]);
   });
 
   it("clip: keeps the last fully fitting line, marks the box, keeps the size", () => {
     // 3 wrapped lines × 1.3 × 1 = 3.9; height 2 fits one line.
     const shape = boxOf(boxProject(["width: 3", "height: 2", "size: 1"]));
-    expect(shape.lines).toEqual(["aaa"]);
+    expect(shape.lines.map(lineText)).toEqual(["aaa"]);
     expect(shape.clipped).toBe(true);
     expect(shape.shrunk).toBe(false);
     expect(shape.size).toBe(1);
@@ -1304,7 +1314,7 @@ describe("TextBox evaluates to a wrapped TextBoxShape (§3.3 M3)", () => {
       boxProject(["width: 3", "height: 2", "size: 1", "overflow: shrink"]),
     );
     expect(shape.size).toBe(0.75);
-    expect(shape.lines).toEqual(["aaa aaa", "aaa"]);
+    expect(shape.lines.map(lineText)).toEqual(["aaa aaa", "aaa"]);
     expect(shape.shrunk).toBe(true);
     expect(shape.clipped).toBe(false);
   });
@@ -1316,7 +1326,7 @@ describe("TextBox evaluates to a wrapped TextBoxShape (§3.3 M3)", () => {
     expect(shape.size).toBe(0.6);
     expect(shape.shrunk).toBe(true);
     expect(shape.clipped).toBe(true);
-    expect(shape.lines).toEqual(["aaa aaa"]); // one 0.78-unit line fits height 1
+    expect(shape.lines.map(lineText)).toEqual(["aaa aaa"]); // one 0.78-unit line fits height 1
   });
 
   it("every content knob changes the contentHash: text, width, align, line_height, clipping", () => {
@@ -2367,5 +2377,177 @@ describe("built-in [row]/[card] bindings", () => {
       expect(cards[3].front).toBe(cards[4].front);
       expect(cards[4].front).toBe(cards[5].front);
     });
+  });
+});
+
+// -- inline icons (◆44, §7.5) ------------------------------------------------
+
+describe("inline icons in Text (◆44): markers parse AFTER interpolation into runs", () => {
+  const textShapeOf = (p: ProjectResult, card = 0): TextShape =>
+    p.model.decks[0].cards[card].front[0] as TextShape;
+
+  it("a literal marker becomes an icon run at its compiler-computed offset", () => {
+    const p = textProject('"A {HEARTS} B"', ["t: Text"], [{ t: "x" }]);
+    const shape = textShapeOf(p);
+    // `text` keeps the resolved string verbatim, markers included (hashing).
+    expect(shape.text).toBe("A {HEARTS} B");
+    const aWidth = measureText("A ", 1, GEIST_METRICS);
+    expect(shape.runs).toEqual([
+      { kind: "text", text: "A ", x: 0 },
+      { kind: "icon", x: aWidth, icon: { kind: "dicier", code: "HEARTS" } },
+      { kind: "text", text: " B", x: aWidth + 1 }, // the slot advances EXACTLY size
+    ]);
+  });
+
+  it("data-driven icons: a marker arriving from a CELL works identically to a literal", () => {
+    const p = textProject("[t]", ["t: Text"], [{ t: "{HEARTS}" }]);
+    expect(dataCodes(p)).toEqual([]);
+    expect(textShapeOf(p).runs).toEqual([
+      { kind: "icon", x: 0, icon: { kind: "dicier", code: "HEARTS" } },
+    ]);
+  });
+
+  it("an asset marker becomes an asset icon run — never a data error", () => {
+    const p = textProject('"kill {asset:skull}"', ["t: Text"], [{ t: "x" }]);
+    expect(dataCodes(p)).toEqual([]);
+    const runs = textShapeOf(p).runs;
+    expect(runs[1]).toEqual({
+      kind: "icon",
+      x: measureText("kill ", 1, GEIST_METRICS),
+      icon: { kind: "asset", name: "skull" },
+    });
+  });
+
+  it("computed UNKNOWN dicier code → D005, and the raw marker text renders as ONE text run", () => {
+    const p = textProject("[t]", ["t: Text"], [{ t: "x{HEARTZ}y" }, { t: "{HEARTS}" }]);
+    const d005 = p.dataDiagnostics.filter((d) => d.code === "D005");
+    expect(d005).toHaveLength(1);
+    expect(d005[0].message).toContain('"HEARTZ"');
+    expect(d005[0].cardRef).toEqual({ deck: "C", deckIndex: 0, cardIndex: 0 });
+    // The downgrade fuses with its neighbors — one word, not three tokens.
+    expect(textShapeOf(p, 0).runs).toEqual([
+      { kind: "text", text: "x{HEARTZ}y", x: 0 },
+    ]);
+    // The known-code row on the same deck still gets its icon run.
+    expect(textShapeOf(p, 1).runs[0].kind).toBe("icon");
+  });
+
+  it("a LITERAL unknown code stays an icon run (W004 territory — the glyph may exist; no D005)", () => {
+    const p = textProject('"{HEARTZ}"', ["t: Text"], [{ t: "x" }]);
+    expect(p.diagnostics.map((d) => d.code)).toContain("W004");
+    expect(dataCodes(p)).toEqual([]);
+    expect(textShapeOf(p).runs).toEqual([
+      { kind: "icon", x: 0, icon: { kind: "dicier", code: "HEARTZ" } },
+    ]);
+  });
+
+  it("{{ escapes: text keeps the source spelling, the runs draw a literal brace", () => {
+    const p = textProject('"a {{HEARTS}"', ["t: Text"], [{ t: "x" }]);
+    const shape = textShapeOf(p);
+    expect(shape.text).toBe("a {{HEARTS}");
+    expect(shape.runs).toEqual([{ kind: "text", text: "a {HEARTS}", x: 0 }]);
+  });
+
+  it("cell newlines become spaces BEFORE marker parsing (◆24) — the marker still parses", () => {
+    const p = textProject("[t]", ["t: Text"], [{ t: "a\n{HEARTS}" }]);
+    const shape = textShapeOf(p);
+    expect(shape.text).toBe("a {HEARTS}");
+    expect(shape.runs[1]).toEqual({
+      kind: "icon",
+      x: measureText("a ", 1, GEIST_METRICS),
+      icon: { kind: "dicier", code: "HEARTS" },
+    });
+  });
+
+  it("offsets are measured against the CHOSEN font's metrics (◆41 composes with ◆44)", () => {
+    const p = textProject('"A {HEARTS}"', ["t: Text"], [{ t: "x" }], {
+      cardExtra: [],
+    });
+    const courier = projectOf(
+      src(
+        ...sheetLines(["t: Text"]),
+        "Template: T",
+        "  Text:",
+        "    x: 0",
+        "    y: 0",
+        "    size: 1",
+        '    text: "A {HEARTS}"',
+        "    font: courier",
+        ...CARD_LINES,
+        "  Front: T",
+      ),
+      { Sh: [{ t: "x" }] },
+    );
+    const geistIcon = textShapeOf(p).runs[1];
+    const courierIcon = (courier.model.decks[0].cards[0].front[0] as TextShape).runs[1];
+    expect(geistIcon.x).toBe(measureText("A ", 1, GEIST_METRICS));
+    expect(courierIcon.x).toBe(measureText("A ", 1, metricsForFace("courier")));
+    expect(geistIcon.x).not.toBe(courierIcon.x);
+  });
+});
+
+describe("inline icons in TextBox (◆44): one atomic token that wraps like a word", () => {
+  const markerBox = (
+    cell: string,
+    { width = 3, height = 20, props = [] as string[] } = {},
+  ): TextBoxShape => {
+    const p = projectOf(
+      src(
+        ...sheetLines(["t: Text"]),
+        "Template: T",
+        "  TextBox:",
+        "    x: 0",
+        "    y: 0",
+        `    width: ${width}`,
+        `    height: ${height}`,
+        "    size: 1",
+        "    text: [t]",
+        ...props.map((l) => `    ${l}`),
+        ...CARD_LINES,
+        "  Front: T",
+      ),
+      { Sh: [{ t: cell }] },
+    );
+    expect(p.model.decks[0].cards[0].error).toBeUndefined();
+    return p.model.decks[0].cards[0].front[0] as TextBoxShape;
+  };
+
+  it("a marker from a cell wraps to its own line when it doesn't fit — never mid-slot", () => {
+    // Geist "aaa " ≈ 2.0 units; + the 1-unit slot ≈ 3.0 > 2.5 — the slot
+    // moves down whole (collapsing the space), and the next word wraps too.
+    const shape = markerBox("aaa {HEARTS} aaa", { width: 2.5 });
+    expect(shape.lines.map(lineText)).toEqual(["aaa", "", "aaa"]);
+    expect(shape.lines[1].runs).toEqual([
+      { kind: "icon", x: 0, icon: { kind: "dicier", code: "HEARTS" } },
+    ]);
+    expect(shape.lines[1].width).toBe(1); // the slot IS the line: exactly size
+  });
+
+  it("each line carries its measured width for the renderer's align (never re-measured)", () => {
+    const shape = markerBox("aa {HEARTS}");
+    // "aa" + space + slot fit width 3: one line, width = text advance + size.
+    expect(shape.lines).toHaveLength(1);
+    const [line] = shape.lines;
+    expect(line.runs.map((r) => r.kind)).toEqual(["text", "icon"]);
+    expect(line.width).toBe(measureText("aa ", 1, GEIST_METRICS) + 1);
+  });
+
+  it("shrink recomputes offsets at the FINAL size end to end", () => {
+    // height 2.5 rejects the size-1 wrap; shrink retries until it fits.
+    const shape = markerBox("aaa {HEARTS} aaa aaa aaa", {
+      height: 2.5,
+      props: ["overflow: shrink"],
+    });
+    expect(shape.shrunk).toBe(true);
+    const iconRuns = shape.lines.flatMap((l) => l.runs.filter((r) => r.kind === "icon"));
+    expect(iconRuns.length).toBeGreaterThan(0);
+    // Every icon slot advances by the FINAL size: its line's width equals
+    // the previous run's extent + shape.size, never the declared 1.
+    for (const line of shape.lines) {
+      const last = line.runs[line.runs.length - 1];
+      if (last?.kind === "icon") {
+        expect(line.width).toBe(last.x + shape.size);
+      }
+    }
   });
 });
