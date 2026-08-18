@@ -39,6 +39,16 @@ though it clears your uploads — see [Project files](project-files.md)).
 then loads the demo deck. It asks before doing it, because there is only one project
 slot and one asset library: the demo *replaces* your work.
 
+## How this relates to cloud sync
+
+Everything above is local to this browser — the whole point of autosave. If whoever
+runs this copy of CardGoblin has turned on [cloud sync](cloud-sync.md), signing in
+mirrors the SAME project (and your uploaded assets) to a server, so another browser
+signed in with the same password can pick it up too. Cloud sync doesn't change
+anything about autosave itself: this browser keeps saving locally exactly as
+described here, whether or not you're signed in — the cloud copy is a mirror kept in
+sync roughly every 10 seconds, not a replacement for the local one.
+
 ## The limits
 
 - **One project, one browser.** A single save slot, tied to this browser profile.

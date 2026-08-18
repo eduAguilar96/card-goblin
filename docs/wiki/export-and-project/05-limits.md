@@ -37,6 +37,17 @@ to read them now than to discover them three hours into a deck.
   browsers — but the autosave slot is singular, so two open editor tabs overwrite
   each other (the last one to change wins).
 
+## Cloud sync
+
+- **One password, not accounts.** [Cloud sync](cloud-sync.md), if the site has it
+  turned on, has a single shared password — no per-person identity, no permissions.
+- **One project in the cloud too.** Same "one slot" shape as local autosave — cloud
+  sync doesn't add a project list.
+- **Guarded last-write-wins, not merging.** Two devices editing at once are protected
+  from silently clobbering each other (see [Cloud sync](cloud-sync.md)), but their
+  edits are never combined — one side's changes since the last sync are the ones that
+  don't make it into the version you keep.
+
 ## Size caps
 
 - **500 drawn shapes per card** from `Repeat`.

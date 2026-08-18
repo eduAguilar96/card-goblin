@@ -31,6 +31,13 @@
  * post-hydration effect (panelLayout) — never at import time — so the static
  * prerender and the hydration pass both show the demo, and the restore lands
  * just after mount (§6.2: the accepted demo-frame flash).
+ *
+ * `isRecord`/`parseSheetsPayload`/`sheetsToPersisted` now LIVE in
+ * sheetsPayload.ts (re-exported here unchanged) — pulled out so
+ * src/lib/cloud/projectPayload.ts (server-only, §7.6) can reuse the exact
+ * same sheet-shape validation without importing this module's heavier
+ * transitive graph (editorStore.ts's eager singleton). See that file's
+ * module comment for the full reasoning.
  */
 
 import {
@@ -41,6 +48,13 @@ import {
   type SheetsState,
 } from "@/app/editor/_store/editorStore";
 import { assetStore } from "@/app/editor/_store/assetStore";
+import {
+  isRecord,
+  parseSheetsPayload,
+  sheetsToPersisted,
+} from "@/app/editor/_store/sheetsPayload";
+
+export { isRecord, parseSheetsPayload, sheetsToPersisted };
 
 /** Save debounce (§6.2) — separate from COMPILE_DEBOUNCE_MS by design. */
 export const PERSIST_DEBOUNCE_MS = 1000;
@@ -69,62 +83,9 @@ export interface ProjectStorage {
 // Pure serialize / validate
 // ---------------------------------------------------------------------------
 
-/** The `sheets` shape both the v1 autosave/project-file payload AND the
- * §7.1b v2 project-file payload carry verbatim — extracted so
- * `serializeProject` and projectFile.tsx's v2 exporter build it identically.
- * Explicit field picks: whatever else SheetState grows later must opt in
- * here (and bump a version if a reload can't ignore it). */
-export function sheetsToPersisted(
-  sheets: SheetsState,
-): Record<string, { rows: Record<string, string>[]; editedRows: boolean[] }> {
-  const persistedSheets: Record<string, { rows: Record<string, string>[]; editedRows: boolean[] }> =
-    {};
-  for (const [name, sheet] of Object.entries(sheets)) {
-    persistedSheets[name] = { rows: sheet.rows, editedRows: sheet.editedRows };
-  }
-  return persistedSheets;
-}
-
 /** The §6.2 payload: exactly what a reload cannot recompute. */
 export function serializeProject(code: string, sheets: SheetsState): string {
   return JSON.stringify({ version: PERSIST_VERSION, code, sheets: sheetsToPersisted(sheets) });
-}
-
-export const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
-
-/**
- * Shape-validate a payload's `sheets` object (the SAME strictness
- * `parsePersisted` has always applied) → a store-ready `SheetsState`, or null
- * if anything is off. Shared with projectFile.tsx's v2 format — the sheet
- * shape itself never changed when the project-file envelope grew `assets`
- * (§7.1b); only the outer version/keys did.
- *
- * Strict about what matters, lenient where the seed contract already is:
- * `rows` must be string-valued records (orphaned `__orphan__*` keys are
- * ordinary string entries and round-trip untouched); `editedRows` need only
- * be an array — createEditorStore/replaceProject normalize misalignment and
- * non-`true` entries per the EditorSeed contract.
- */
-export function parseSheetsPayload(raw: Record<string, unknown>): SheetsState | null {
-  // Null prototype: a hand-crafted payload with a "__proto__" sheet name must
-  // not hit the prototype setter (it would silently drop the sheet on restore).
-  const sheets: SheetsState = Object.create(null) as SheetsState;
-  for (const [name, sheet] of Object.entries(raw)) {
-    if (!isRecord(sheet) || !Array.isArray(sheet.rows) || !Array.isArray(sheet.editedRows)) {
-      return null;
-    }
-    const rows: Record<string, string>[] = [];
-    for (const row of sheet.rows) {
-      if (!isRecord(row)) return null;
-      for (const value of Object.values(row)) {
-        if (typeof value !== "string") return null;
-      }
-      rows.push({ ...(row as Record<string, string>) });
-    }
-    sheets[name] = { rows, editedRows: sheet.editedRows.map((flag) => flag === true) };
-  }
-  return sheets;
 }
 
 /**

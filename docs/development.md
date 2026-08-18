@@ -41,7 +41,11 @@ src/lib/lang/            the compiler (pure, no React)
 src/app/editor/
   _store/editorStore.ts  Zustand store: debounced compile, keep-last-good, rename migration
   _store/persistence.ts  localStorage autosave: debounced save, quarantined restore, reset
+  _store/sheetsPayload.ts the sheets-shape parse/validate shared by autosave, project
+                         files, AND cloud sync (dependency-free — see its module note)
   _store/assetStore.ts   IndexedDB local-asset library: CRUD, 2 MB cap, disabled posture (§7.4)
+  _store/cloudSync.ts    §7.6 client controller: injected transport, pull/push/
+                         conflict state machine, browser-only singleton
   _components/           Monaco window (windowCode), SVG preview (windowPreview,
                          cardSvg, deckSection, previewSingle, previewVirtual),
                          bespoke grid
@@ -49,8 +53,16 @@ src/app/editor/
                          PDF export (pdfExportModal, pdfLayout, pdfPagePreview,
                          pdfRaster, pdfAssemble), project file export/import
                          (projectFile), the Assets drawer (assetsDrawer, §7.4),
-                         shared prev/next control (pager)
+                         the cloud sync status control + sign-in dialog
+                         (cloudSyncControl, §7.6), shared prev/next control (pager)
   _lib/goblinLanguage.ts Monaco language registration (Monarch)
+src/lib/cloud/            §7.6 server-only cloud sync internals (see docs/deployment.md)
+  r2.ts                  storage port: R2 impl (aws4fetch) + in-memory fake
+  session.ts             pure crypto: scrypt password hash, HMAC session cookie
+  auth.ts                HTTP glue: env → requireSession guard, cookie attributes
+  projectPayload.ts       project.json envelope validation (reuses sheetsPayload.ts)
+src/app/api/cloud/        the routes: login, logout, project (GET/PUT), assets/presign,
+                         assets/[name] (GET/DELETE) — each a thin layer over lib/cloud
 src/lib/content/         frontmatter parsing shared by the wiki and the blog
 src/lib/docs/            the wiki content layer (pure + one fs module)
   nav.ts                 sections, slug/order conventions, link resolution
@@ -164,6 +176,17 @@ Headless browser screenshot (no driver installed; one-shot only):
 "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --headless=new \
   --window-size=1600,1000 --screenshot=/tmp/editor.png http://localhost:3000/editor
 ```
+
+## Deployment
+
+The app builds and runs with zero configuration — signed-out, fully local editing is
+the default and needs nothing set up. The one optional piece is **cloud sync**
+(§7.6): turning it on needs six env vars, an R2 bucket, and its CORS policy — see
+[`docs/deployment.md`](deployment.md) for the full runbook, and
+[`src/lib/cloud/`](../src/lib/cloud) for the code (`r2.ts` the storage port,
+`session.ts` the auth crypto, `auth.ts`/`projectPayload.ts` the HTTP glue) plus
+`src/app/api/cloud/` for the routes and `src/app/editor/_store/cloudSync.ts` for the
+client controller.
 
 ## Making changes
 

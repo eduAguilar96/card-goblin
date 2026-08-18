@@ -64,10 +64,20 @@ uploaded art right inside `Text` and `TextBox` text — including markers that
 arrive from cell data — each in a one-em slot that wraps like a word. See
 [Inline icons](../goblin-script/04-text.md#inline-icons).
 
+**Cloud sync.** An optional, site-operator-configured "Sign in" that mirrors your
+project — code, sheet rows, and uploaded images — to a server, so any other
+computer signed in with the same password picks up where you left off. One
+password, one project, guarded last-write-wins (never a silent overwrite). See
+[Cloud sync](cloud-sync.md).
+
 ## Further out
 
-- **Accounts and sharing** — projects that live in the cloud and decks you can
-  share by link, past today's [file-based story](project-files.md).
+- **Sharing by link** — a read-only view of a deck anyone can open, no password,
+  separate from cloud sync's one-login mirror.
+- **Multiple cloud projects** — [cloud sync](cloud-sync.md) mirrors today's single
+  local save slot; keeping several projects in the cloud, the way
+  [project files](project-files.md) already let you keep several locally, is a
+  later piece.
 - **Uploaded fonts** — `font:` currently picks from a small bundled set (see
   [Text & TextBox](text.md)); bringing your OWN font file, the way uploaded
   assets already work for images, is a separate, later piece.

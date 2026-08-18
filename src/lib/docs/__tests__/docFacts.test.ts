@@ -55,6 +55,8 @@ import {
 import { RASTER_DPI } from "@/app/editor/_components/pdfRaster";
 import { PERSIST_DEBOUNCE_MS } from "@/app/editor/_store/persistence";
 import { ASSET_MAX_BYTES } from "@/app/editor/_store/assetStore";
+import { PUSH_DEBOUNCE_MS } from "@/app/editor/_store/cloudSync";
+import { SESSION_DURATION_MS } from "@/lib/cloud/session";
 import { loadDocPages } from "@/lib/docs/pages";
 
 const pages = loadDocPages();
@@ -184,6 +186,16 @@ const NUMERIC_CLAIMS: {
     label: "Autosave debounce (stated in seconds)",
     patterns: [/about \*\*(\d[\d,]*) second\*\* after your last change/g],
     expected: PERSIST_DEBOUNCE_MS / 1000,
+  },
+  {
+    label: "Cloud sync push debounce (stated in seconds, §7.6)",
+    patterns: [/about \*\*(\d[\d,]*) seconds\*\* after your last change/g],
+    expected: PUSH_DEBOUNCE_MS / 1000,
+  },
+  {
+    label: "Cloud sync session length (stated in days, §7.6)",
+    patterns: [/session lasts \*\*(\d[\d,]*) days\*\*/g],
+    expected: SESSION_DURATION_MS / (24 * 60 * 60 * 1000),
   },
   {
     label: "PDF raster DPI",

@@ -1,0 +1,258 @@
+/**
+ * Cloud sync's status-bar control (DESIGN.md §7.6) — static markup only,
+ * same posture as pdfExportModal.test.tsx: the dialog's a11y ATTRIBUTES are
+ * pinned here (role, aria-modal, labelled title, focusable, error/working
+ * states); actual focus/Escape/Tab behavior has no driver in this project
+ * and is on the manual browser checklist (module comment in
+ * cloudSyncControl.tsx).
+ */
+import { afterEach, describe, expect, it } from "vitest";
+import { renderToStaticMarkup } from "react-dom/server";
+import CloudSyncControl, {
+  CloudSyncControlContent,
+  SignInDialog,
+  cloudStatusLabel,
+  formatRelativeTime,
+  type CloudSyncControlContentProps,
+} from "@/app/editor/_components/cloudSyncControl";
+import { cloudSync, resetCloudSyncForTests, type CloudSyncSnapshot } from "@/app/editor/_store/cloudSync";
+
+const stripTags = (markup: string): string => markup.replace(/<[^>]+>/g, "");
+
+const SIGNED_OUT: CloudSyncSnapshot = {
+  status: "signed-out",
+  lastSyncedAt: null,
+  pullProgress: null,
+  errorMessage: null,
+  behindRevision: null,
+};
+
+function snapshot(patch: Partial<CloudSyncSnapshot>): CloudSyncSnapshot {
+  return { ...SIGNED_OUT, ...patch };
+}
+
+function render(props: Partial<CloudSyncControlContentProps> = {}): string {
+  return renderToStaticMarkup(
+    <CloudSyncControlContent
+      snapshot={props.snapshot ?? SIGNED_OUT}
+      now={props.now ?? 1_000_000}
+      onSignIn={props.onSignIn ?? (async () => ({ ok: true }))}
+      onSignOut={props.onSignOut ?? (() => {})}
+      onReload={props.onReload ?? (() => {})}
+      onOverwrite={props.onOverwrite ?? (() => {})}
+      initialDialogOpen={props.initialDialogOpen}
+    />,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Pure display helpers
+// ---------------------------------------------------------------------------
+
+describe("formatRelativeTime", () => {
+  it("reads as 'just now' for anything under 5 s", () => {
+    expect(formatRelativeTime(1000, 1000)).toBe("just now");
+    expect(formatRelativeTime(1000, 4999)).toBe("just now");
+  });
+
+  it("seconds, then minutes, then hours, then days", () => {
+    expect(formatRelativeTime(0, 30_000)).toBe("30s ago");
+    expect(formatRelativeTime(0, 90_000)).toBe("2m ago");
+    expect(formatRelativeTime(0, 2 * 60 * 60 * 1000)).toBe("2h ago");
+    expect(formatRelativeTime(0, 3 * 24 * 60 * 60 * 1000)).toBe("3d ago");
+  });
+
+  it("never goes negative for a clock that ticks backward", () => {
+    expect(formatRelativeTime(5000, 1000)).toBe("just now");
+  });
+});
+
+describe("cloudStatusLabel", () => {
+  it("covers every status with the brief's four signed-in words plus the transitional ones", () => {
+    expect(cloudStatusLabel(snapshot({ status: "signed-out" }), 0)).toBe("Signed out");
+    expect(cloudStatusLabel(snapshot({ status: "signing-in" }), 0)).toBe("Signing in…");
+    expect(cloudStatusLabel(snapshot({ status: "pulling" }), 0)).toBe("Syncing…");
+    expect(cloudStatusLabel(snapshot({ status: "pushing" }), 0)).toBe("Syncing…");
+    expect(cloudStatusLabel(snapshot({ status: "idle", lastSyncedAt: null }), 0)).toBe("Synced");
+    expect(cloudStatusLabel(snapshot({ status: "idle", lastSyncedAt: 0 }), 30_000)).toBe("Synced 30s ago");
+    expect(cloudStatusLabel(snapshot({ status: "offline" }), 0)).toBe("Offline");
+    expect(cloudStatusLabel(snapshot({ status: "behind" }), 0)).toBe("This browser is behind");
+  });
+
+  it("reports coarse pull progress while pulling assets (brief D: '3 of 8 images')", () => {
+    const label = cloudStatusLabel(
+      snapshot({ status: "pulling", pullProgress: { done: 3, total: 8 } }),
+      0,
+    );
+    expect(label).toBe("Syncing images (3 of 8)…");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Signed-out: "Sign in" button + dialog
+// ---------------------------------------------------------------------------
+
+describe("CloudSyncControlContent — signed out", () => {
+  it("rests as a single quiet 'Sign in' button, no dialog", () => {
+    const markup = render();
+    expect(stripTags(markup)).toBe("Sign in");
+    expect(markup).not.toContain("role=\"dialog\"");
+  });
+
+  it("initialDialogOpen (test seam) renders the sign-in dialog statically", () => {
+    const markup = render({ initialDialogOpen: true });
+    expect(markup).toContain('role="dialog"');
+    expect(stripTags(markup)).toContain("Sign in to cloud sync");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Signed-in: dot + label + Sign out, Reload/Overwrite only when behind
+// ---------------------------------------------------------------------------
+
+describe("CloudSyncControlContent — signed in", () => {
+  it("idle: shows the last-synced label and Sign out, no Reload/Overwrite", () => {
+    const markup = render({ snapshot: snapshot({ status: "idle", lastSyncedAt: 970_000 }), now: 1_000_000 });
+    const text = stripTags(markup);
+    expect(text).toContain("Synced 30s ago");
+    expect(text).toContain("Sign out");
+    expect(text).not.toContain("Reload");
+    expect(text).not.toContain("Overwrite");
+    expect(text).not.toContain("Sign in");
+  });
+
+  it("offline: quiet 'Offline' label, error message surfaced via title", () => {
+    const markup = render({
+      snapshot: snapshot({ status: "offline", errorMessage: "Can't reach the network." }),
+    });
+    expect(stripTags(markup)).toContain("Offline");
+    expect(markup).toContain('title="Can&#x27;t reach the network."');
+  });
+
+  it("behind: names the state and offers Reload AND Overwrite", () => {
+    const markup = render({ snapshot: snapshot({ status: "behind", behindRevision: 7 }) });
+    const text = stripTags(markup);
+    expect(text).toContain("This browser is behind");
+    expect(text).toContain("Reload");
+    expect(text).toContain("Overwrite");
+    expect(text).toContain("Sign out"); // still available even mid-conflict
+  });
+
+  it("pulling with progress: the coarse N-of-M wording appears in the bar", () => {
+    const markup = render({
+      snapshot: snapshot({ status: "pulling", pullProgress: { done: 2, total: 5 } }),
+    });
+    expect(stripTags(markup)).toContain("Syncing images (2 of 5)…");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// SignInDialog
+// ---------------------------------------------------------------------------
+
+describe("SignInDialog", () => {
+  const renderDialog = (props: Partial<Parameters<typeof SignInDialog>[0]> = {}): string =>
+    renderToStaticMarkup(
+      <SignInDialog
+        onClose={props.onClose ?? (() => {})}
+        onSubmit={props.onSubmit ?? (async () => ({ ok: true }))}
+        initialPassword={props.initialPassword}
+        initialError={props.initialError}
+        initialWorking={props.initialWorking}
+      />,
+    );
+
+  it("is an accessible dialog: role, aria-modal, labelled title, focusable", () => {
+    const markup = renderDialog();
+    expect(markup).toContain('role="dialog"');
+    expect(markup).toContain('aria-modal="true"');
+    expect(markup).toContain('aria-labelledby="cloud-signin-title"');
+    expect(markup).toContain('id="cloud-signin-title"');
+    expect(markup).toContain('tabindex="-1"');
+  });
+
+  it("resting state: a password field and an enabled Sign in button once typed, disabled when empty", () => {
+    const empty = renderDialog({ initialPassword: "" });
+    const emptyButton = /<button type="submit"[^>]*>Sign in<\/button>/.exec(empty)?.[0];
+    expect(emptyButton).toContain('disabled=""');
+
+    const filled = renderDialog({ initialPassword: "hunter2" });
+    const filledButton = /<button type="submit"[^>]*>Sign in<\/button>/.exec(filled)?.[0];
+    expect(filledButton).not.toContain('disabled=""');
+  });
+
+  it("initialError (test seam) shows a role=alert message tied to the field via aria-describedby", () => {
+    const markup = renderDialog({ initialError: "Incorrect password." });
+    expect(markup).toContain('role="alert"');
+    expect(stripTags(markup)).toContain("Incorrect password.");
+    expect(markup).toContain('aria-invalid="true"');
+    expect(markup).toContain('aria-describedby="cloud-signin-error"');
+    expect(markup).toContain('id="cloud-signin-error"');
+  });
+
+  it("no error: aria-invalid is explicitly false, no describedby, no alert", () => {
+    const markup = renderDialog();
+    expect(markup).toContain('aria-invalid="false"');
+    expect(markup).not.toContain("aria-describedby");
+    expect(markup).not.toContain('role="alert"');
+  });
+
+  it("initialWorking (test seam): both buttons disabled, a role=status 'Signing in…' notice, input disabled", () => {
+    const markup = renderDialog({ initialWorking: true, initialPassword: "hunter2" });
+    expect(markup).toContain('role="status"');
+    expect(stripTags(markup)).toContain("Signing in…");
+    const cancelButton = /<button type="button"[^>]*>Cancel<\/button>/.exec(markup)?.[0];
+    expect(cancelButton).toContain('disabled=""');
+    const submitButton = /<button type="submit"[^>]*>Signing in…<\/button>/.exec(markup)?.[0];
+    expect(submitButton).toContain('disabled=""');
+    expect(markup).toContain('<input ');
+    const inputTag = /<input[^>]*>/.exec(markup)?.[0];
+    expect(inputTag).toContain("disabled=\"\"");
+  });
+
+  it("the password field is type=password with autocomplete for a credential manager", () => {
+    const markup = renderDialog();
+    expect(markup).toContain('type="password"');
+    // Attribute-name casing is renderer-dependent (react-dom/server has
+    // historically varied here) and irrelevant to a browser's HTML parser,
+    // which matches attribute names case-insensitively — so this checks the
+    // MEANINGFUL thing (the value is set) without pinning a casing quirk.
+    expect(markup).toMatch(/autocomplete="current-password"/i);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// CloudSyncControl — the actual store-connected component (not just its
+// store-free Content), pinning that the whole wiring renders without
+// crashing and reads the `cloudSync` singleton correctly at every stage.
+// ---------------------------------------------------------------------------
+
+describe("CloudSyncControl (connected)", () => {
+  afterEach(() => resetCloudSyncForTests());
+
+  it("before any sign-in, renders exactly the signed-out button (getServerSnapshot path)", () => {
+    // No `initCloudSync()` call here (needs `window`, unavailable in this
+    // test env) — this IS the real "prerender / before mount" case:
+    // useSyncExternalStore's getServerSnapshot must read the SAME safe
+    // default the client would, which is what makes this render clean
+    // during Next's static prerender of /editor (CLAUDE.md's build note).
+    const markup = renderToStaticMarkup(<CloudSyncControl />);
+    expect(stripTags(markup)).toBe("Sign in");
+  });
+
+  it("reflects the singleton's CURRENT snapshot at render time (not a stale default)", async () => {
+    // Drive the real singleton into a signed-in-ish state the way
+    // resetCloudSyncForTests + signIn can from a headless test (inert
+    // transport — signIn still fails, but passes through "signing-in" en
+    // route, proving the connected component reads live state, not a
+    // hardcoded constant).
+    resetCloudSyncForTests();
+    const pending = cloudSync.signIn("anything");
+    // Mid-flight snapshot: status is "signing-in" the instant signIn() is
+    // called, synchronously, before any await yields.
+    expect(cloudSync.getSnapshot().status).toBe("signing-in");
+    const markup = renderToStaticMarkup(<CloudSyncControl />);
+    expect(stripTags(markup)).toContain("Signing in…");
+    await pending;
+  });
+});

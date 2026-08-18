@@ -9,10 +9,12 @@
     "lint": "next lint",
     "test": "vitest run",
     "generate:dicier": "node scripts/generate-dicier-codes.mjs",
-    "generate:font-metrics": "node scripts/generate-font-metrics.mjs"
+    "generate:font-metrics": "node scripts/generate-font-metrics.mjs",
+    "hash-password": "node scripts/hash-password.mjs"
   },
   "dependencies": {
     "@monaco-editor/react": "^4.6.0",
+    "aws4fetch": "^1.0.20",
     "next": "^15.5.22",
     "pdf-lib": "^1.17.1",
     "qrcode-generator": "^2.0.4",

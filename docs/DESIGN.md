@@ -1147,6 +1147,21 @@ behaves exactly as it does today.
   never a lost edit and never a blocked editor. Sign-out clears the session
   cookie and leaves local data intact.
 
+- **Known gap (M3 implementation, independent security review M6, not yet
+  fixed): a CORRUPTED stored `project.json` bricks sync with no in-app
+  escape.** If the object at `projects/default/project.json` ever fails its
+  own read-back validation (hand-edited in the bucket, a future bug, bit
+  rot) every GET and PUT starts answering "unreadable," and — unlike a
+  revision conflict — there is no *Reload*/*Overwrite* affordance for
+  "the stored copy itself is broken," because that would mean letting
+  *Overwrite* succeed against a base state the server can't even parse,
+  which is a small extension to the revision guard's semantics that
+  deserves its own design pass rather than a rushed fix. The only present
+  recovery is an operator deleting or replacing the object directly in R2.
+  Local editing is unaffected either way (the failure posture above still
+  holds) — this is a "cloud sync itself stays stuck" gap, not a data-loss
+  one.
+
 ## 8. Open questions (explicitly deferred, not blocking the slice)
 
 Items are removed from this list once they ship — §10 and the milestone specs in

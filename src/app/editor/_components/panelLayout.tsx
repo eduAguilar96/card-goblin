@@ -8,6 +8,7 @@ import WindowPreview from "@/app/editor/_components/windowPreview";
 import WindowSpreadsheet from "@/app/editor/_components/windowSpreadsheet";
 import { initEditorPersistence } from "@/app/editor/_store/persistence";
 import { initAssetStore } from "@/app/editor/_store/assetStore";
+import { initCloudSync } from "@/app/editor/_store/cloudSync";
 
 export default function PanelLayout() {
   // Autosave restore + subscription, POST-hydration (§6.2): the prerender and
@@ -19,6 +20,10 @@ export default function PanelLayout() {
     // without `window` for the same reason, and idempotent for the same
     // StrictMode double-mount.
     initAssetStore();
+    // §7.6: cloud sync attaches LAST, after both restores above — its store/
+    // asset subscriptions must only see changes from here on, not the local
+    // restore itself (cloudSync.ts's initCloudSync doc comment).
+    initCloudSync();
   }, []);
 
   return (

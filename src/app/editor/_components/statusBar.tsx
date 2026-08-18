@@ -25,10 +25,11 @@
  *
  * The right side is the project-lifecycle surface: the §6.2 autosave notes (a
  * quiet "autosave off" when storage is unusable this session) and reset, plus
- * the §7.1 project-file pair (Export / Import, projectFile.tsx). Destructive
- * actions (reset, import) sit behind inline two-step confirms (no browser
- * confirm() — they must live in the same dark chrome and be statically
- * renderable for tests).
+ * the §7.1 project-file pair (Export / Import, projectFile.tsx) and the §7.6
+ * cloud sync control (cloudSyncControl.tsx — "Sign in", or a status dot +
+ * Sign out once signed in). Destructive actions (reset, import) sit behind
+ * inline two-step confirms (no browser confirm() — they must live in the
+ * same dark chrome and be statically renderable for tests).
  *
  * Split (same pattern as the other windows): `StatusBar` is the thin store
  * subscription; `StatusBarContent` (exported for tests) takes the store
@@ -43,6 +44,7 @@ import {
   importEditorProject,
   ProjectFileButtons,
 } from "@/app/editor/_components/projectFile";
+import CloudSyncControl from "@/app/editor/_components/cloudSyncControl";
 import { resetEditorToDemo } from "@/app/editor/_store/persistence";
 import type { StoredAsset } from "@/app/editor/_store/assetStore";
 import {
@@ -146,6 +148,7 @@ export function StatusBarContent({
         )}
         <AssetsDrawerButton />
         <ProjectFileButtons onExport={onExportProject} onImport={onImportProject} />
+        <CloudSyncControl />
         <ResetToDemoButton onReset={onReset} />
       </span>
     </div>
