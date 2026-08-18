@@ -86,6 +86,7 @@ the section that elaborates it:
 | ◆42 | Row/card position bindings (§3.6) | **`[row]` and `[card]` as built-in, derived bindings** resolving after sheet columns; the grid's row gutter becomes the editable index, and typing a position **moves the row and shifts the rest** (out-of-range clamps, garbage reverts) | Position IS row order, so storing a number would create a second source of truth that can disagree with it — deriving costs nothing and keeps the sheet payload, autosave slot, and project file unchanged. Two bindings because `loop:`/`count:` make one row into several cards: `[row]` labels the data, `[card]` serialises the deck. Resolving last means a sheet declaring its own `row`/`card` column shadows the built-in, so no existing project's COLUMN can be silently reinterpreted. (Narrow exception, not a column: a template that put an unresolvable `row`/`card` name where only Number/Text/Enum ever coerced — e.g. `color: [row]` — used to poison silently to Unknown with no sheet in scope; it now resolves and can genuinely E003, which is more correct, not less.) Editing the gutter rather than adding a column keeps ⚑3 (columns come from code) intact |
 | ◆43 | Rotation (§3.4) | **`rotate:` as an optional Number property on every drawable element** — degrees, clockwise, any expression (data-driven allowed), default 0 — rotating the element **around its `pivot:` point**, which is exactly the card-space point `x`/`y` name | The pivot is the element's own handle (◆36†), so it is the one rotation center that needs no new vocabulary — `pivot: center_center` + `rotate:` spins a shape in place, the default `top_left` swings it around its corner, and `Repeat` + `rotate: [i] * step` makes fans and dials from index math (⚑9). Paint-time only: wrap, generation, caps, and PDF layout are geometry-in-card-units and never see the transform (the rasterizer serializes the same SVG markup, so PDF inherits rotation for free). An ordinary Number property needs zero new grammar — the ◆33 argument — and a non-numeric value is the usual E003, non-finite the usual D008 |
 | ◆44 | Inline icons (§7.5) | **Brace markers in resolved text**: `{CODE}` (Dicier) and `{asset:name}` (uploaded art) inside any `text:`, parsed at EVAL time AFTER interpolation; lines become **runs** with compiler-computed x-offsets; every icon occupies a square **1-em slot** (`size` × `size`); `{{` escapes a literal `{` | Braces because ◆30's "`[brackets]` always mean data refs" stays absolute — no new bracket grammar, no lexer change. Post-resolution parsing because a sheet CELL containing a marker must work (data-driven icons come free, the product's whole point). Runs because the compiler is the layout authority (◆37) and it cannot know Dicier ligature advances or an SVG's aspect ratio — absolute run placement plus a fixed slot makes the compiler's width assumption TRUE BY CONSTRUCTION for both renderers, instead of approximately right in one. True aspect ratios and non-default Dicier faces are explicitly deferred (§8) |
+| ◆45 | Cross-device sync (§7.6) | **Object storage + one password, no database and no accounts**: Cloudflare R2 holds a per-project folder (small JSON + one object per asset), a single admin password mints an HMAC-signed cookie, asset bytes move browser↔R2 via short-lived presigned URLs, and a `revision` guard rejects stale writes | The project already serialises to one small JSON payload with discrete asset files (§7.1/§7.4), so a database would add a schema to maintain for data that is fundamentally two blobs. R2 over Vercel Blob for 10 GB and zero egress; over Supabase because free projects pause after 7 idle days, which is exactly wrong for bursty personal use. Presigning is not an optimisation but a requirement — Vercel caps request bodies at ~4.5 MB, below one asset. Local-first is preserved: the cloud mirrors localStorage/IndexedDB, so signed-out and offline sessions are unchanged |
 
 ---
 
@@ -1088,6 +1089,63 @@ only: bold/italic runs remain §8.
   color, bold/italic runs, true aspect ratios, vertical alignment
   options. Autocomplete inside `{` only if it drops out of the existing
   string-completion path cheaply; otherwise deferred.
+
+### 7.6 Cross-device sync — agreed spec (2026-08-17)
+
+**Requirement (edu):** sign in on any computer and find the project — code,
+sheet data, and images. Explicitly NOT an accounts product: one admin login,
+optimised for cost. Everyone else keeps the local-only editor unchanged.
+
+**The shape.** No database. The project is already one small JSON payload
+(§7.1's project file: code + sheets + editedRows — kilobytes) and assets are
+already discrete files, so this is **object storage + a password**. The cloud
+is a MIRROR of the existing local stores (localStorage + IndexedDB), never a
+replacement: editing stays local-first, so an offline or signed-out session
+behaves exactly as it does today.
+
+- **Storage: Cloudflare R2**, private bucket, chosen over Vercel Blob (10 GB
+  vs ~256 MB–1 GB and zero egress) and over Supabase (whose free projects
+  pause after 7 idle days — disqualifying for bursty personal use). Layout,
+  shaped so a project LIST is a later addition rather than a migration:
+
+  ```
+  projects/default/project.json      { revision, code, sheets, assets[] }
+  projects/default/assets/<name>     raw bytes, original mime
+  ```
+
+- **Auth: one password, no user table.** `ADMIN_PASSWORD_HASH` +
+  `SESSION_SECRET` as server-only env vars; a login route compares with a
+  timing-safe check and sets an HMAC-signed `httpOnly; Secure; SameSite=Lax`
+  session cookie (30 days). Serverless has no shared memory, so brute-force
+  defence is a long random password plus a fixed artificial delay on failure,
+  NOT an in-process rate limiter that resets every cold start.
+
+- **The 4.5 MB wall.** Vercel caps serverless request bodies, so asset bytes
+  must never traverse a route handler. Every asset transfer uses a
+  **short-lived presigned R2 URL** minted by an authenticated route; the
+  browser then PUTs/GETs R2 directly. Bytes skip the function entirely, which
+  is also what keeps this inside the free tier.
+
+- **Staleness guard (the one real multi-device hazard).** `project.json`
+  carries a `revision` integer. A write sends the revision it was based on;
+  the server rejects a stale write with 409 + the current revision, and the
+  editor offers *Reload* or *Overwrite* rather than silently clobbering the
+  other machine's work. Where R2's conditional PUT (`If-Match` on the ETag) is
+  available it backs this at the storage layer, closing the read-then-write
+  race properly.
+
+- **Sync cadence and cost.** Cloud pushes are debounced far longer than the
+  1 s local autosave (~10 s idle, flushed on `pagehide`) — R2's free tier
+  allows 1 M writes/month, and a per-keystroke push would be the only way to
+  threaten that. Assets upload on add and delete on remove; a pull fetches
+  the manifest, then downloads only assets whose content hash is missing
+  locally, writing them into IndexedDB so every existing render path works
+  untouched.
+
+- **Failure posture (⚑8's spirit).** Any cloud failure — offline, expired
+  session, R2 error — degrades to local-only editing with a quiet indicator,
+  never a lost edit and never a blocked editor. Sign-out clears the session
+  cookie and leaves local data intact.
 
 ## 8. Open questions (explicitly deferred, not blocking the slice)
 
