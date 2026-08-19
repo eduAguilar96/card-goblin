@@ -20,6 +20,7 @@ import {
   verifyPassword,
   verifySessionCookieValue,
   verifyUsername,
+  classifyStoredHashProblem,
 } from "../session";
 
 /**
@@ -377,6 +378,7 @@ describe("inspectStoredHash", () => {
       algorithm: null,
       separator: null,
       looksDotenvMangled: false,
+      problem: null,
     });
   });
 
@@ -392,6 +394,7 @@ describe("inspectStoredHash", () => {
       algorithm: "scrypt",
       separator: ".",
       looksDotenvMangled: false,
+      problem: null,
     });
   });
 
@@ -403,6 +406,7 @@ describe("inspectStoredHash", () => {
       algorithm: "scrypt",
       separator: "$",
       looksDotenvMangled: false,
+      problem: null,
     });
   });
 
@@ -414,6 +418,7 @@ describe("inspectStoredHash", () => {
       algorithm: null,
       separator: null,
       looksDotenvMangled: true,
+      problem: "dotenv-mangled",
     });
   });
 
@@ -424,6 +429,7 @@ describe("inspectStoredHash", () => {
       algorithm: null,
       separator: null,
       looksDotenvMangled: false,
+      problem: expect.any(String),
     });
     // Same algorithm tag, but a `$`/`.`-delimited shape that fails on
     // parameters, not on the "no separators at all" shape looksDotenvMangled
@@ -471,5 +477,29 @@ describe("verification is not a naive string compare (structural pin)", () => {
     expect(source).not.toMatch(/derived\s*===/);
     expect(source).not.toMatch(/providedSig\s*===/);
     expect(source).not.toMatch(/expectedSig\s*===/);
+  });
+});
+
+describe("classifyStoredHashProblem — naming the copy-paste mistake (prod incident, 2026-08-18)", () => {
+  // The diagnose endpoint reported `parses: false, looksDotenvMangled: false`
+  // in production and FOUR different mistakes produce exactly that, so the
+  // operator still had to guess. Each of these is a real way a value gets
+  // corrupted between the generator and a dashboard.
+  it("names each mistake distinctly", async () => {
+    const good = (await hashPassword("a password long enough")).replaceAll(".", "$");
+    expect(classifyStoredHashProblem(`ADMIN_PASSWORD_HASH=${good}`)).toBe("includes-key-prefix");
+    expect(classifyStoredHashProblem(good.replaceAll("$", "\\$"))).toBe("backslash-escaped");
+    expect(classifyStoredHashProblem(`"${good}"`)).toBe("wrapped-in-quotes");
+    expect(classifyStoredHashProblem(`'${good}'`)).toBe("wrapped-in-quotes");
+    expect(classifyStoredHashProblem("scrypt31072DB04C5G5r81KlmRt5brOA")).toBe("dotenv-mangled");
+    expect(classifyStoredHashProblem("bcrypt.1.2.3.aa.bb")).toBe("unknown-algorithm");
+    expect(classifyStoredHashProblem("scrypt.131072.8.1.aa")).toBe("wrong-segment-count");
+    expect(classifyStoredHashProblem("scrypt.3.8.1.aa.bb")).toBe("bad-parameters");
+  });
+
+  it("a healthy hash of either form reports no problem at all", async () => {
+    const dot = await hashPassword("a password long enough");
+    expect(inspectStoredHash(dot).problem).toBeNull();
+    expect(inspectStoredHash(dot.replaceAll(".", "$")).problem).toBeNull();
   });
 });

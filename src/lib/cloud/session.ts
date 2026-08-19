@@ -320,6 +320,10 @@ export interface StoredHashDiagnostics {
    * when `parses` is false (a well-formed hash of either separator can
    * never match this shape — see that function's own comment). */
   looksDotenvMangled: boolean;
+  /** WHY it doesn't parse, structurally — null when it does. Names the
+   * copy-paste mistakes that all produce an identical "parses: false"
+   * signature, so an operator gets an answer instead of four suspects. */
+  problem: StoredHashProblem | null;
 }
 
 /**
@@ -339,6 +343,40 @@ function looksDotenvMangledShape(value: string): boolean {
 }
 
 /**
+ * WHY a present hash doesn't parse — the field that turns "parses: false"
+ * into an actionable answer. Added after a real production incident: the
+ * diagnose endpoint correctly reported an unparseable hash, but four
+ * different copy-paste mistakes produce that identical signature, so the
+ * operator still had to guess. Every branch below names a mistake someone
+ * actually makes when moving a value into a dashboard or a .env file.
+ *
+ * Deliberately structural only — it describes the SHAPE of the value, never
+ * its content, so it stays safe on the unauthenticated diagnose route.
+ */
+export type StoredHashProblem =
+  | "dotenv-mangled"
+  | "includes-key-prefix"
+  | "backslash-escaped"
+  | "wrapped-in-quotes"
+  | "unknown-algorithm"
+  | "wrong-segment-count"
+  | "bad-parameters"
+  | "unrecognized";
+
+export function classifyStoredHashProblem(trimmed: string): StoredHashProblem {
+  if (looksDotenvMangledShape(trimmed)) return "dotenv-mangled";
+  if (/^ADMIN_PASSWORD_HASH\s*=/.test(trimmed)) return "includes-key-prefix";
+  if (trimmed.includes("\\")) return "backslash-escaped";
+  if (/^["'].*["']$/.test(trimmed)) return "wrapped-in-quotes";
+
+  const separator = trimmed.includes("$") ? "$" : ".";
+  const parts = trimmed.split(separator);
+  if (parts[0] !== "scrypt") return "unknown-algorithm";
+  if (parts.length !== 6) return "wrong-segment-count";
+  return "bad-parameters";
+}
+
+/**
  * Non-secret diagnostics for `ADMIN_PASSWORD_HASH` — what `GET
  * /api/cloud/diagnose` reports (auth.ts wires the route; this module owns
  * the verdict since it's the only place that understands the format).
@@ -351,7 +389,7 @@ function looksDotenvMangledShape(value: string): boolean {
 export function inspectStoredHash(stored: string | undefined): StoredHashDiagnostics {
   const trimmed = stored?.trim();
   if (!trimmed) {
-    return { present: false, parses: false, algorithm: null, separator: null, looksDotenvMangled: false };
+    return { present: false, parses: false, algorithm: null, separator: null, looksDotenvMangled: false, problem: null };
   }
   const parsed = parseStoredHash(trimmed);
   return {
@@ -360,6 +398,7 @@ export function inspectStoredHash(stored: string | undefined): StoredHashDiagnos
     algorithm: parsed !== null ? "scrypt" : null,
     separator: parsed !== null ? parsed.separator : null,
     looksDotenvMangled: parsed === null && looksDotenvMangledShape(trimmed),
+    problem: parsed === null ? classifyStoredHashProblem(trimmed) : null,
   };
 }
 

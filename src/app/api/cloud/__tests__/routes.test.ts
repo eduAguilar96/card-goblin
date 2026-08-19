@@ -454,7 +454,7 @@ describe("GET /api/cloud/diagnose", () => {
     const res = await diagnoseGet();
     expect(await json(res)).toEqual({
       configured: { r2: true, session: true, admin: true },
-      adminHash: { present: true, parses: true, algorithm: "scrypt", looksDotenvMangled: false },
+      adminHash: { present: true, parses: true, algorithm: "scrypt", looksDotenvMangled: false, problem: null },
       sessionSecret: { present: true, meetsMinimumLength: true },
       r2: { accountId: true, accessKeyId: true, secretAccessKey: true, bucket: true },
     });
@@ -465,7 +465,7 @@ describe("GET /api/cloud/diagnose", () => {
     const res = await diagnoseGet();
     expect(await json(res)).toEqual({
       configured: { r2: false, session: false, admin: false },
-      adminHash: { present: false, parses: false, algorithm: null, looksDotenvMangled: false },
+      adminHash: { present: false, parses: false, algorithm: null, looksDotenvMangled: false, problem: null },
       sessionSecret: { present: false, meetsMinimumLength: false },
       r2: { accountId: false, accessKeyId: false, secretAccessKey: false, bucket: false },
     });
@@ -480,6 +480,7 @@ describe("GET /api/cloud/diagnose", () => {
       parses: false,
       algorithm: null,
       looksDotenvMangled: true,
+      problem: "dotenv-mangled",
     });
     expect(body.configured.admin).toBe(false);
   });
@@ -493,6 +494,7 @@ describe("GET /api/cloud/diagnose", () => {
       parses: true,
       algorithm: "scrypt",
       looksDotenvMangled: false,
+      problem: null,
     });
   });
 

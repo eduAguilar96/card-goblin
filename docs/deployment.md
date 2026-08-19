@@ -213,6 +213,20 @@ cause is almost always a wrong username or password rather than a server
 misconfiguration — the sign-in dialog's own error message distinguishes that case
 from "ask whoever runs this deployment to check `/api/cloud/diagnose`" already.
 
+### If `adminHash.parses` is false
+
+The `problem` field names the mistake rather than leaving you to guess — all
+of these produce an otherwise identical "doesn't parse" signature:
+
+| `problem` | What happened | Fix |
+|---|---|---|
+| `includes-key-prefix` | The value starts with `ADMIN_PASSWORD_HASH=` | Paste only the part after the `=` |
+| `backslash-escaped` | The value contains `\$` | Vercel needs the raw value — backslashes are only ever needed in a `.env` file, and not at all with the current dot format |
+| `wrapped-in-quotes` | The value is quoted | Dashboards take the value literally; drop the quotes |
+| `dotenv-mangled` | A `$`-format hash was eaten by dotenv expansion in `.env.local` | Regenerate with `npm run hash-password` (the dot format needs no escaping) |
+| `unknown-algorithm` / `wrong-segment-count` / `bad-parameters` | The value is truncated or edited | Regenerate |
+
+
 ## Verifying it worked
 
 With all six required variables set and deployed, `/editor` should show a **Sign

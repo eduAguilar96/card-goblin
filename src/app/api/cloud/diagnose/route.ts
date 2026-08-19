@@ -76,6 +76,10 @@ export async function GET(): Promise<NextResponse> {
     parses: adminHashFull.parses,
     algorithm: adminHashFull.algorithm,
     looksDotenvMangled: adminHashFull.looksDotenvMangled,
+    // Structural only (never content), so it stays safe unauthenticated —
+    // it names WHICH copy-paste mistake shaped the value, which an operator
+    // needs and an attacker learns nothing from.
+    problem: adminHashFull.problem,
   };
 
   const r2 = inspectR2ConfigFromEnv();
