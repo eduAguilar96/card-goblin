@@ -281,7 +281,7 @@ function createFakeTransport(): CloudTransport & {
         return {
           ok: false,
           conflict: false,
-          status: typeof failure === "object" ? failure.status : failure,
+          ...(typeof failure === "object" ? failure : { status: failure }),
         };
       }
       if (baseRevision !== server.revision) {
@@ -1385,6 +1385,21 @@ describe("failure posture — degrade to local-only, never block editing", () =>
     expect(controller.getSnapshot().status).toBe("offline");
     expect(store.getState().code).toBe("still editable");
   });
+
+  it("a project PUT rejection preserves the route's safe R2 diagnostic", async () => {
+    vi.useFakeTimers();
+    const { store, controller, transport } = harness();
+    await controller.signIn(GOOD_USERNAME, "correct-password");
+    transport.nextFailure.putProject = {
+      status: 502,
+      message: "Cloud storage error (R2 PUT 411 MissingContentLength).",
+    };
+    store.getState().setCode("trigger the diagnostic push");
+    await vi.advanceTimersByTimeAsync(PUSH_DEBOUNCE_MS);
+    expect(controller.getSnapshot().errorMessage).toBe(
+      "Cloud storage error (R2 PUT 411 MissingContentLength).",
+    );
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -1649,6 +1664,27 @@ describe("the REAL transport's request shape (review: dropping username passed t
       await expect(
         createRealCloudTransport().presignAssetPut("legacy_art", "image/x-icon", 10),
       ).resolves.toEqual({ ok: false, status: 400, message: "Invalid mime type." });
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+
+  it("project PUT retains a safe JSON storage error for the status control", async () => {
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify({ error: "Cloud storage error (R2 PUT 411 MissingContentLength)." }), {
+        status: 502,
+        headers: { "content-type": "application/json" },
+      })) as typeof fetch;
+    try {
+      await expect(
+        createRealCloudTransport().putProject(0, { code: "", sheets: {}, assets: [] }),
+      ).resolves.toEqual({
+        ok: false,
+        conflict: false,
+        status: 502,
+        message: "Cloud storage error (R2 PUT 411 MissingContentLength).",
+      });
     } finally {
       globalThis.fetch = realFetch;
     }

@@ -17,6 +17,7 @@ import { POST as presignPost } from "@/app/api/cloud/assets/presign/route";
 import { GET as assetGet, DELETE as assetDelete } from "@/app/api/cloud/assets/[name]/route";
 import { GET as diagnoseGet } from "@/app/api/cloud/diagnose/route";
 import {
+  CloudStorageError,
   createInMemoryCloudStorage,
   resetCloudStorageForTests,
   setCloudStorageForTests,
@@ -719,6 +720,30 @@ describe("PUT /api/cloud/project — the revision guard", () => {
     );
     expect(res.status).toBe(200);
     expect(await json(res)).toEqual({ revision: 1 });
+  });
+
+  it("an R2 rejection returns only its safe operation/status/code diagnostic", async () => {
+    const real = createInMemoryCloudStorage();
+    const failing: CloudStorage = {
+      ...real,
+      async putObject() {
+        throw new CloudStorageError("contains projects/default/project.json and private provider detail", {
+          operation: "PUT",
+          status: 411,
+          code: "MissingContentLength",
+        });
+      },
+    };
+    setCloudStorageForTests(failing);
+    const res = await projectPut(
+      req("/api/cloud/project", {
+        method: "PUT",
+        signedIn: true,
+        body: { baseRevision: 0, project: { code: "v1", sheets: {}, assets: [] } },
+      }),
+    );
+    expect(res.status).toBe(502);
+    expect(await json(res)).toEqual({ error: "Cloud storage error (R2 PUT 411 MissingContentLength)." });
   });
 
   it("baseRevision matches the CURRENT (non-zero) revision: writes again, increments", async () => {

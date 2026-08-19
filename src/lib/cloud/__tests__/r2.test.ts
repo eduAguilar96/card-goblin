@@ -5,13 +5,15 @@
  * revision guard depends on), and the minimal ListObjectsV2 XML parser —
  * all headless, no real R2/network involved.
  */
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   CLOUD_UNCONFIGURED_MESSAGE,
   CloudConditionalWriteError,
   CloudNotConfiguredError,
+  CloudStorageError,
   createInMemoryCloudStorage,
   createR2Storage,
+  describeCloudStorageFailure,
   getCloudStorage,
   loadR2ConfigFromEnv,
   parseListObjectsXml,
@@ -21,6 +23,7 @@ import {
 
 afterEach(() => {
   resetCloudStorageForTests();
+  vi.unstubAllGlobals();
 });
 
 // ---------------------------------------------------------------------------
@@ -258,6 +261,76 @@ describe("createR2Storage — presigned URL signing (L4)", () => {
     expect(putUrl.hostname).toBe("acct.r2.cloudflarestorage.com");
     expect(putUrl.pathname).toBe("/bucket/projects/default/assets/dragon");
     expect(putUrl.searchParams.get("X-Amz-Credential")).toContain("AKIAFAKE");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// createR2Storage's REAL request/error shape. The fetch is stubbed only at
+// the final network boundary; aws4fetch still builds and signs the Request.
+// ---------------------------------------------------------------------------
+
+describe("createR2Storage — server-side request shape and diagnostics", () => {
+  const config = { accountId: "acct", accessKeyId: "AKIAFAKE", secretAccessKey: "fakesecret", bucket: "bucket" };
+
+  it("PUT sends an explicit exact Content-Length instead of relying on the runtime to infer it", async () => {
+    let seen: Request | null = null;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        seen = input instanceof Request ? input : new Request(input);
+        return new Response(null, { status: 200, headers: { etag: "written" } });
+      }),
+    );
+    const bytes = new Uint8Array([1, 2, 3, 4, 5]);
+    await createR2Storage(config).putObject("projects/default/project.json", bytes, "application/json", "");
+    expect(seen).not.toBeNull();
+    expect(seen!.headers.get("content-length")).toBe(String(bytes.byteLength));
+    expect(seen!.headers.get("if-none-match")).toBe("*");
+  });
+
+  it("retains R2's status and bounded XML error code, but the public message omits provider detail", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(
+          "<Error><Code>MissingContentLength</Code><Message>provider detail</Message><RequestId>private-id</RequestId></Error>",
+          { status: 411 },
+        ),
+      ),
+    );
+    const promise = createR2Storage(config).putObject(
+      "projects/default/project.json",
+      new Uint8Array([1]),
+      "application/json",
+      "",
+    );
+    await expect(promise).rejects.toMatchObject({
+      name: "CloudStorageError",
+      operation: "PUT",
+      status: 411,
+      code: "MissingContentLength",
+    });
+    try {
+      await promise;
+    } catch (error) {
+      expect(describeCloudStorageFailure(error)).toBe(
+        "Cloud storage error (R2 PUT 411 MissingContentLength).",
+      );
+      expect(describeCloudStorageFailure(error)).not.toContain("private-id");
+      expect(error).toBeInstanceOf(CloudStorageError);
+    }
+  });
+
+  it("does not mistake R2's NoSuchBucket 404 for an absent project object", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("<Error><Code>NoSuchBucket</Code></Error>", { status: 404 })),
+    );
+    await expect(createR2Storage(config).getObject("projects/default/project.json")).rejects.toMatchObject({
+      operation: "GET",
+      status: 404,
+      code: "NoSuchBucket",
+    });
   });
 });
 

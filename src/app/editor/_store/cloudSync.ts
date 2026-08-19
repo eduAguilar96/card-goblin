@@ -138,7 +138,7 @@ export type GetProjectResult =
 export type PutProjectResult =
   | { ok: true; revision: number }
   | { ok: false; conflict: true; revision: number }
-  | { ok: false; conflict: false; status: number | "network" };
+  | { ok: false; conflict: false; status: number | "network"; message?: string };
 
 export type PresignResult = { ok: true; url: string } | CloudFailure;
 
@@ -214,7 +214,9 @@ export function createRealCloudTransport(): CloudTransport {
       try {
         const res = await fetch("/api/cloud/project", { method: "GET" });
         if (res.status === 404) return { ok: true, found: false };
-        if (!res.ok) return { ok: false, status: res.status };
+        if (!res.ok) {
+          return { ok: false, status: res.status, message: await responseErrorMessage(res) };
+        }
         const data = await toJson<{ revision: number; project: CloudProject }>(res);
         return { ok: true, found: true, revision: data.revision, project: data.project };
       } catch {
@@ -236,7 +238,14 @@ export function createRealCloudTransport(): CloudTransport {
           const data = await toJson<{ revision: number }>(res);
           return { ok: false, conflict: true, revision: data.revision };
         }
-        if (!res.ok) return { ok: false, conflict: false, status: res.status };
+        if (!res.ok) {
+          return {
+            ok: false,
+            conflict: false,
+            status: res.status,
+            message: await responseErrorMessage(res),
+          };
+        }
         const data = await toJson<{ revision: number }>(res);
         return { ok: true, revision: data.revision };
       } catch {
@@ -264,7 +273,9 @@ export function createRealCloudTransport(): CloudTransport {
     async presignAssetGet(name) {
       try {
         const res = await fetch(`/api/cloud/assets/${encodeURIComponent(name)}`, { method: "GET" });
-        if (!res.ok) return { ok: false, status: res.status };
+        if (!res.ok) {
+          return { ok: false, status: res.status, message: await responseErrorMessage(res) };
+        }
         const data = await toJson<{ url: string }>(res);
         return { ok: true, url: data.url };
       } catch {
@@ -275,7 +286,9 @@ export function createRealCloudTransport(): CloudTransport {
     async deleteAsset(name) {
       try {
         const res = await fetch(`/api/cloud/assets/${encodeURIComponent(name)}`, { method: "DELETE" });
-        return res.ok ? { ok: true } : { ok: false, status: res.status };
+        return res.ok
+          ? { ok: true }
+          : { ok: false, status: res.status, message: await responseErrorMessage(res) };
       } catch {
         return { ok: false, status: "network" };
       }
@@ -787,7 +800,7 @@ export function createCloudSyncController(deps: CloudSyncDeps): CloudSyncControl
     } else if (result.conflict) {
       setSnapshot({ status: "behind", behindRevision: result.revision, errorMessage: null });
     } else {
-      setSnapshot({ status: "offline", errorMessage: describeFailure(result.status) });
+      setSnapshot({ status: "offline", errorMessage: result.message ?? describeFailure(result.status) });
     }
 
     if (pushAgainAfterInFlight) {
@@ -989,7 +1002,7 @@ export function createCloudSyncController(deps: CloudSyncDeps): CloudSyncControl
     const result = await transport.getProject();
     if (disposed) return;
     if (!result.ok) {
-      setSnapshot({ status: "offline", errorMessage: describeFailure(result.status) });
+      setSnapshot({ status: "offline", errorMessage: result.message ?? describeFailure(result.status) });
       return;
     }
     if (!result.found) {
@@ -1051,7 +1064,7 @@ export function createCloudSyncController(deps: CloudSyncDeps): CloudSyncControl
           hint.set(false);
           setSnapshot({ status: "signed-out", errorMessage: null });
         } else {
-          setSnapshot({ status: "offline", errorMessage: describeFailure(result.status) });
+          setSnapshot({ status: "offline", errorMessage: result.message ?? describeFailure(result.status) });
         }
         return;
       }
@@ -1150,7 +1163,9 @@ export function createCloudSyncController(deps: CloudSyncDeps): CloudSyncControl
   async function deleteAssetRemote(name: string): Promise<void> {
     if (!canMutateRemoteAssets(snapshot.status)) return;
     const result = await transport.deleteAsset(name);
-    if (!result.ok) setSnapshot({ status: "offline", errorMessage: describeFailure(result.status) });
+    if (!result.ok) {
+      setSnapshot({ status: "offline", errorMessage: result.message ?? describeFailure(result.status) });
+    }
   }
 
   // Deferred a microtask (NOT called synchronously here) — a real bug found

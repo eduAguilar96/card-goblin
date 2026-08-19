@@ -1269,6 +1269,19 @@ behaves exactly as it does today.
   affected asset, so the next incompatible format is diagnosable from the UI
   rather than only from DevTools.
 
+- **Server-to-R2 writes declare their byte length, and storage failures stay
+  diagnosable** († 2026-08-19 — production bug). Direct browser asset uploads
+  already sign an exact `Content-Length`, but the server-side `project.json`
+  PUT relied on the fetch runtime to synthesize that required S3 header. That
+  happened locally but is not a contract the Vercel runtime owes us. The R2
+  adapter now sends `Content-Length` from the exact `Uint8Array.byteLength` it
+  writes. It also parses only R2's safe XML error code/status (never request
+  IDs, credentials, response bodies, or object contents) and carries that
+  through authenticated cloud routes and the status control. A future R2
+  rejection therefore reads like `R2 PUT 400 MissingContentLength`, while
+  unexpected/network failures remain safely classified without leaking
+  secrets, instead of every cause becoming `Cloud storage error.`
+
 - **Failure posture (⚑8's spirit).** Any cloud failure — offline, expired
   session, R2 error — degrades to local-only editing with a quiet indicator,
   never a lost edit and never a blocked editor. Sign-out clears the session

@@ -71,7 +71,10 @@ button:
 - **Syncing…** — a push or pull is in progress.
 - **Offline** — the last attempt failed (no network, the server is unreachable, your
   session expired). Editing is completely unaffected; CardGoblin quietly keeps
-  working locally and retries on your next change.
+  working locally and retries on your next change. When R2 itself rejects a
+  storage request, the detail names the operation plus its safe status/error code
+  (without exposing credentials or project contents), so deployment problems are
+  actionable instead of all reading as the same generic storage error.
 - **This browser is behind** — see below.
 - **Your editor has work that isn't in the cloud** — see below.
 

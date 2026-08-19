@@ -17,6 +17,7 @@ import { requireSession } from "@/lib/cloud/auth";
 import {
   CLOUD_UNCONFIGURED_MESSAGE,
   CloudConditionalWriteError,
+  describeCloudStorageFailure,
   getCloudStorage,
   type CloudStorage,
 } from "@/lib/cloud/r2";
@@ -30,7 +31,8 @@ import {
 import { isRecord } from "@/app/editor/_store/sheetsPayload";
 
 const UNCONFIGURED = () => NextResponse.json({ error: CLOUD_UNCONFIGURED_MESSAGE }, { status: 503 });
-const STORAGE_ERROR = () => NextResponse.json({ error: "Cloud storage error." }, { status: 502 });
+const STORAGE_ERROR = (error: unknown) =>
+  NextResponse.json({ error: describeCloudStorageFailure(error) }, { status: 502 });
 
 type CurrentProject =
   | { kind: "absent" }
@@ -59,8 +61,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   let current: CurrentProject;
   try {
     current = await readCurrent(storage);
-  } catch {
-    return STORAGE_ERROR();
+  } catch (error) {
+    return STORAGE_ERROR(error);
   }
 
   if (current.kind === "absent") {
@@ -107,8 +109,8 @@ export async function PUT(request: NextRequest): Promise<NextResponse> {
   let current: CurrentProject;
   try {
     current = await readCurrent(storage);
-  } catch {
-    return STORAGE_ERROR();
+  } catch (error) {
+    return STORAGE_ERROR(error);
   }
   if (current.kind === "unreadable") {
     return NextResponse.json({ error: "Stored project is unreadable." }, { status: 500 });
@@ -142,7 +144,7 @@ export async function PUT(request: NextRequest): Promise<NextResponse> {
       }
       return NextResponse.json({ error: "revision-conflict", revision: latestRevision }, { status: 409 });
     }
-    return STORAGE_ERROR();
+    return STORAGE_ERROR(err);
   }
 
   return NextResponse.json({ revision: newRevision });

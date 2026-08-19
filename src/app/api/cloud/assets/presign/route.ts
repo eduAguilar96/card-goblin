@@ -19,7 +19,7 @@
  */
 import { NextResponse, type NextRequest } from "next/server";
 import { requireSession } from "@/lib/cloud/auth";
-import { CLOUD_UNCONFIGURED_MESSAGE, getCloudStorage } from "@/lib/cloud/r2";
+import { CLOUD_UNCONFIGURED_MESSAGE, describeCloudStorageFailure, getCloudStorage } from "@/lib/cloud/r2";
 import { assetKey, PRESIGN_PUT_TTL_SECONDS } from "@/lib/cloud/keys";
 import { isSupportedCloudImageMime, isValidCloudAssetName } from "@/lib/cloud/projectPayload";
 import { ASSET_MAX_BYTES } from "@/app/editor/_store/assetStore";
@@ -56,8 +56,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   let url: string;
   try {
     url = await storage.presignPut(assetKey(name), mime, size, PRESIGN_PUT_TTL_SECONDS);
-  } catch {
-    return NextResponse.json({ error: "Cloud storage error." }, { status: 502 });
+  } catch (error) {
+    return NextResponse.json({ error: describeCloudStorageFailure(error) }, { status: 502 });
   }
   return NextResponse.json({ url, expiresIn: PRESIGN_PUT_TTL_SECONDS });
 }

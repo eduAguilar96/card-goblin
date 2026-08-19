@@ -39,10 +39,35 @@ export interface ListedObject {
 }
 
 export class CloudStorageError extends Error {
-  constructor(message: string) {
+  readonly operation: "GET" | "PUT" | "DELETE" | "LIST";
+  readonly status: number | null;
+  readonly code: string | null;
+
+  constructor(
+    message: string,
+    details: {
+      operation: "GET" | "PUT" | "DELETE" | "LIST";
+      status?: number | null;
+      code?: string | null;
+    },
+  ) {
     super(message);
     this.name = "CloudStorageError";
+    this.operation = details.operation;
+    this.status = details.status ?? null;
+    this.code = details.code ?? null;
   }
+}
+
+/** Safe for an authenticated API response: operation + numeric status +
+ * R2's short machine code only. Never includes object keys, response bodies,
+ * request IDs, credentials, or exception text. */
+export function describeCloudStorageFailure(error: unknown): string {
+  if (!(error instanceof CloudStorageError)) return "Cloud storage request failed.";
+  const details = ["R2", error.operation];
+  if (error.status !== null) details.push(String(error.status));
+  if (error.code !== null) details.push(error.code);
+  return `Cloud storage error (${details.join(" ")}).`;
 }
 
 /** The shared "cloud not configured" wording (brief A) — ONE string, so
@@ -189,6 +214,41 @@ function bucketUrl(config: R2Config): string {
   return `https://${config.accountId}.r2.cloudflarestorage.com/${config.bucket}`;
 }
 
+type R2Operation = CloudStorageError["operation"];
+
+async function r2Fetch(operation: R2Operation, key: string, request: () => Promise<Response>): Promise<Response> {
+  try {
+    return await request();
+  } catch {
+    throw new CloudStorageError(`R2 ${operation} ${key} request failed`, {
+      operation,
+      code: "RequestFailed",
+    });
+  }
+}
+
+/** R2's S3 errors are XML. Keep only the bounded machine-readable `<Code>`
+ * token; the rest can contain request IDs and provider detail that has no
+ * place in an API response. */
+async function r2ErrorCode(res: Response): Promise<string | null> {
+  try {
+    const text = await res.text();
+    const code = /<Code>([A-Za-z0-9_-]{1,80})<\/Code>/.exec(text)?.[1];
+    return code ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function storageResponseError(operation: R2Operation, key: string, res: Response): Promise<CloudStorageError> {
+  const code = await r2ErrorCode(res);
+  return new CloudStorageError(`R2 ${operation} ${key} failed: ${res.status}${code ? ` ${code}` : ""}`, {
+    operation,
+    status: res.status,
+    code,
+  });
+}
+
 /**
  * Minimal ListObjectsV2 XML → the fields this port needs. NOT a general XML
  * parser — R2/S3's list response is a flat, well-known shape (repeated
@@ -244,9 +304,20 @@ export function createR2Storage(config: R2Config): CloudStorage {
 
   return {
     async getObject(key) {
-      const res = await client.fetch(objectUrl(config, key), { method: "GET" });
-      if (res.status === 404) return null;
-      if (!res.ok) throw new CloudStorageError(`R2 GET ${key} failed: ${res.status}`);
+      const res = await r2Fetch("GET", key, () => client.fetch(objectUrl(config, key), { method: "GET" }));
+      if (res.status === 404) {
+        const code = await r2ErrorCode(res);
+        // R2 normally answers an absent object with NoSuchKey. A blank 404
+        // is tolerated for compatibility, but NoSuchBucket must not masquerade
+        // as "this project has never synced" and trigger a doomed first PUT.
+        if (code === null || code === "NoSuchKey") return null;
+        throw new CloudStorageError(`R2 GET ${key} failed: 404 ${code}`, {
+          operation: "GET",
+          status: 404,
+          code,
+        });
+      }
+      if (!res.ok) throw await storageResponseError("GET", key, res);
       const bytes = new Uint8Array(await res.arrayBuffer());
       return {
         bytes,
@@ -256,24 +327,31 @@ export function createR2Storage(config: R2Config): CloudStorage {
     },
 
     async putObject(key, bytes, mime, ifMatch) {
-      const headers: Record<string, string> = { "content-type": mime };
+      const headers: Record<string, string> = {
+        "content-type": mime,
+        // R2's S3 PutObject requires Content-Length. Do not rely on a
+        // particular serverless fetch runtime to infer it from Uint8Array.
+        "content-length": String(bytes.byteLength),
+      };
       if (ifMatch === "") headers["if-none-match"] = "*";
       else if (ifMatch !== undefined) headers["if-match"] = ifMatch;
-      const res = await client.fetch(objectUrl(config, key), {
-        method: "PUT",
-        headers,
-        body: bytes as BodyInit,
-      });
+      const res = await r2Fetch("PUT", key, () =>
+        client.fetch(objectUrl(config, key), {
+          method: "PUT",
+          headers,
+          body: bytes as BodyInit,
+        }),
+      );
       if (res.status === 412 || res.status === 409) throw new CloudConditionalWriteError();
-      if (!res.ok) throw new CloudStorageError(`R2 PUT ${key} failed: ${res.status}`);
+      if (!res.ok) throw await storageResponseError("PUT", key, res);
       return { etag: res.headers.get("etag") ?? "" };
     },
 
     async deleteObject(key) {
-      const res = await client.fetch(objectUrl(config, key), { method: "DELETE" });
+      const res = await r2Fetch("DELETE", key, () => client.fetch(objectUrl(config, key), { method: "DELETE" }));
       // Idempotent (interface doc): a 404 here still counts as "deleted".
       if (!res.ok && res.status !== 404) {
-        throw new CloudStorageError(`R2 DELETE ${key} failed: ${res.status}`);
+        throw await storageResponseError("DELETE", key, res);
       }
     },
 
@@ -311,8 +389,8 @@ export function createR2Storage(config: R2Config): CloudStorage {
       const url = new URL(bucketUrl(config));
       url.searchParams.set("list-type", "2");
       url.searchParams.set("prefix", prefix);
-      const res = await client.fetch(url.toString(), { method: "GET" });
-      if (!res.ok) throw new CloudStorageError(`R2 LIST ${prefix} failed: ${res.status}`);
+      const res = await r2Fetch("LIST", prefix, () => client.fetch(url.toString(), { method: "GET" }));
+      if (!res.ok) throw await storageResponseError("LIST", prefix, res);
       return parseListObjectsXml(await res.text());
     },
   };
