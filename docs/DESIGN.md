@@ -1158,7 +1158,100 @@ behaves exactly as it does today.
   threaten that. Assets upload on add and delete on remove; a pull fetches
   the manifest, then downloads only assets whose content hash is missing
   locally, writing them into IndexedDB so every existing render path works
-  untouched.
+  untouched. Sign-in performs ONE exception to that debounce: when the cloud
+  has nothing stored yet, it pushes immediately — code, sheets, and every
+  local asset — rather than waiting for the next edit (dated addendum below).
+
+- **First sign-in against an empty cloud actually pushes, and never claims
+  "Synced" before it does** († 2026-08-18 — production bug, found by listing
+  the owner's real R2 bucket after sign-in and getting zero objects back).
+  The original not-found branch recorded revision 0 and showed "Synced"
+  without ever writing to R2 — indistinguishable, in the UI, from a real
+  sync, so two machines each kept their own local project and the owner
+  correctly concluded sync was broken. Fixed on three fronts:
+  - A not-found GET (first sign-in, or a returning visit's mount-restore
+    check against a still-empty bucket) immediately PUSHES the current local
+    project as the cloud's starting copy, through the same conditional-CREATE
+    path (`baseRevision` 0 → `If-None-Match: *`) a 409 there already
+    protects — another device winning the race surfaces the ordinary
+    Reload/Overwrite prompt, not a clobber. Local assets ride along too: the
+    manifest alone moves no bytes (asset transfer is normally event-driven,
+    the bullet above), so this walks every local asset through the same
+    upload path a live add already uses.
+  - `lastSyncedAt` (and the status dot going green) is set ONLY at the exact
+    moment a push or a project-bearing pull actually succeeds — never for a
+    bare not-found GET on its own. The status control also says what just
+    happened ("Loaded your cloud project" / "No cloud project yet —
+    uploading this one") so the sign-in dialog closing silently no longer
+    reads as "nothing happened."
+  - A found project that's genuinely DIFFERENT from local — where local also
+    isn't just the untouched demo seed — is now a COLLISION, not an
+    unconditional `replaceProject`: signing in on a machine with a
+    half-finished deck no longer silently overwrites it with whatever the
+    cloud happens to hold. The prompt reuses the existing Reload/Overwrite
+    SHAPE (two inline status-bar buttons, no new dialog) with its own copy
+    ("Keep cloud copy" / "Keep this device's work") — the latter is the same
+    adopt-and-push the empty-cloud case uses, just based at the revision this
+    device saw instead of 0.
+
+- **A manifest must never claim an asset that isn't actually on R2**
+  († 2026-08-19 — independent review, HIGH, same class of bug as the addendum
+  above: a green "Synced" over a cloud that doesn't hold what the manifest
+  says it does). The first fix's adopt correctly ABORTED its push when an
+  asset upload failed, but nothing recorded that the asset stayed
+  un-uploaded — the next ORDINARY edit pushed the same manifest anyway and
+  went green. Three more paths reached the identical state: "Keep this
+  device's work" cleared its pending choice even when the underlying push
+  never happened; a clean pull never uploads a LOCAL-ONLY asset the server
+  doesn't have, so it just sits unaccounted for until "the next manifest"
+  names it; and the asset store's own async IndexedDB restore schedules a
+  push without uploading anything. Fixed with one mechanism rather than four
+  patches: the client now tracks, per asset name, the hash it has actually
+  CONFIRMED is on R2 (a successful upload, or a just-fetched server
+  manifest — cleared the instant local content changes). Every push checks
+  every manifest entry against that record FIRST, uploads whatever isn't
+  confirmed, and holds the whole push at "offline" — never sending the
+  manifest — if that upload fails. "Keep this device's work" now only
+  clears its pending choice on an actual success, not unconditionally.
+- **An unresolved sign-in collision suppresses live asset mutations, not
+  just pushes** († 2026-08-19 — independent review, MEDIUM). A conflict
+  prompt already blocks a stale-revision PUSH (bullet above), but an asset
+  DELETE fired while the prompt is still showing was reaching R2 anyway —
+  destroying the cloud copy before the user had chosen to keep it, so
+  picking "Keep cloud copy" afterward could name bytes that were already
+  gone. Asset add/delete/rename now checks a narrower gate than push does:
+  every status except signed-out AND conflict (not "every status except
+  signed-out," which pushing alone still is) — editing itself is still
+  never blocked (⚑8's spirit), only the REMOTE write that would undercut a
+  choice nobody's made yet.
+- **A partial image pull no longer claims a clean, green sync**
+  († 2026-08-19 — independent review, MEDIUM). Downloading the images a
+  pull's manifest lists used to swallow a per-asset failure (a presign
+  failure, a 404'd GET, a rejected local write) entirely — the caller had
+  nothing to check and unconditionally reported "Loaded your cloud project"
+  with a fresh `lastSyncedAt`. Code and sheets loading is still unconditional
+  (that part IS true), but a nonzero failure count now holds status at
+  "offline" with a message naming how many images didn't come down, rather
+  than claiming completeness FIX 2 specifically promises not to fake.
+- **Collision detection is code+sheets only — deliberately, not fixed**
+  († 2026-08-19 — independent review, MEDIUM, "your call"). Two devices
+  whose code and sheets match but who each hold a DIFFERENT image under the
+  same name are not flagged as a collision; an ordinary sync's existing
+  hash-mismatch re-download just silently replaces the local image, same as
+  it always could outside any conflict. Extending the comparison would mean
+  hashing every local asset before every sign-in decision even in the
+  common, no-problem case, for a narrower risk than the code/sheets
+  divergence this prompt exists to catch — deferred, disclosed in the wiki's
+  Honest Limits rather than silently left inconsistent with it.
+- **The mount-restore adopt now waits for the local asset list to actually
+  be current** († 2026-08-19 — independent review, LOW). `initAssetStore`'s
+  own IndexedDB restore is itself async and usually — but not provably —
+  finishes before the mount-restore path's network GET does (the GET
+  involves a real round trip; the restore is often just a local read) —
+  close enough to page load that nothing enforced the ordering. The adopt
+  path now explicitly awaits the asset store's own refresh first (a no-op
+  once the real restore has already landed), so it can never read the
+  empty placeholder list that exists before IndexedDB answers.
 
 - **Failure posture (⚑8's spirit).** Any cloud failure — offline, expired
   session, R2 error — degrades to local-only editing with a quiet indicator,

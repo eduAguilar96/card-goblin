@@ -30,6 +30,8 @@ const SIGNED_OUT: CloudSyncSnapshot = {
   pullProgress: null,
   errorMessage: null,
   behindRevision: null,
+  conflictProject: null,
+  notice: null,
 };
 
 function snapshot(patch: Partial<CloudSyncSnapshot>): CloudSyncSnapshot {
@@ -82,6 +84,9 @@ describe("cloudStatusLabel", () => {
     expect(cloudStatusLabel(snapshot({ status: "idle", lastSyncedAt: 0 }), 30_000)).toBe("Synced 30s ago");
     expect(cloudStatusLabel(snapshot({ status: "offline" }), 0)).toBe("Offline");
     expect(cloudStatusLabel(snapshot({ status: "behind" }), 0)).toBe("This browser is behind");
+    expect(cloudStatusLabel(snapshot({ status: "conflict" }), 0)).toBe(
+      "Your editor has work that isn't in the cloud",
+    );
   });
 
   it("reports coarse pull progress while pulling assets (brief D: '3 of 8 images')", () => {
@@ -90,6 +95,27 @@ describe("cloudStatusLabel", () => {
       0,
     );
     expect(label).toBe("Syncing images (3 of 8)…");
+  });
+
+  // ---------------------------------------------------------------------
+  // FIX 3: a fresh sign-in notice replaces the ordinary idle label.
+  // ---------------------------------------------------------------------
+
+  it("a notice REPLACES the ordinary idle label", () => {
+    const label = cloudStatusLabel(
+      snapshot({ status: "idle", lastSyncedAt: 1000, notice: "Loaded your cloud project" }),
+      1000,
+    );
+    expect(label).toBe("Loaded your cloud project");
+  });
+
+  it("a notice is ignored outside status idle (defensive — cloudSync.ts never sets one there)", () => {
+    const label = cloudStatusLabel(snapshot({ status: "offline", notice: "Loaded your cloud project" }), 0);
+    expect(label).toBe("Offline");
+  });
+
+  it("no notice: the ordinary idle label is unaffected", () => {
+    expect(cloudStatusLabel(snapshot({ status: "idle", lastSyncedAt: null, notice: null }), 0)).toBe("Synced");
   });
 });
 
@@ -141,6 +167,43 @@ describe("CloudSyncControlContent — signed in", () => {
     expect(text).toContain("Reload");
     expect(text).toContain("Overwrite");
     expect(text).toContain("Sign out"); // still available even mid-conflict
+  });
+
+  // ---------------------------------------------------------------------
+  // FIX 4: the sign-in collision prompt — same structure as "behind"
+  // (dot + label + two buttons + Sign out), different copy.
+  // ---------------------------------------------------------------------
+
+  it("conflict: names the state and offers 'Keep cloud copy' / 'Keep this device's work', not Reload/Overwrite", () => {
+    const markup = render({
+      snapshot: snapshot({
+        status: "conflict",
+        conflictProject: { revision: 3, project: { code: "", sheets: {}, assets: [] } },
+      }),
+    });
+    const text = stripTags(markup);
+    // react-dom/server HTML-escapes apostrophes in text content (SignInDialog's
+    // tests below hit the same thing) — compare against the escaped form.
+    expect(text).toContain("Your editor has work that isn&#x27;t in the cloud");
+    expect(text).toContain("Keep cloud copy");
+    expect(text).toContain("Keep this device&#x27;s work");
+    expect(text).toContain("Sign out");
+    expect(text).not.toContain("Reload");
+    expect(text).not.toContain("Overwrite");
+  });
+
+  it("idle with a fresh notice shows it instead of 'Synced…' (FIX 3, visible without devtools)", () => {
+    const markup = render({
+      snapshot: snapshot({
+        status: "idle",
+        lastSyncedAt: 970_000,
+        notice: "No cloud project yet — uploading this one",
+      }),
+      now: 1_000_000,
+    });
+    const text = stripTags(markup);
+    expect(text).toContain("No cloud project yet — uploading this one");
+    expect(text).not.toContain("Synced");
   });
 
   it("pulling with progress: the coarse N-of-M wording appears in the bar", () => {

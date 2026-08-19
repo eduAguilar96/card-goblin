@@ -34,6 +34,24 @@
  * field is edited (a stale error sitting under a freshly-retyped password
  * reads as "still wrong" even before the new attempt resolves), and Sign in
  * is disabled — with a pending label — for the whole round trip.
+ *
+ * FIX 3 (§7.6 dated addendum, owner nit: "the dialog just closes silently"):
+ * the dialog itself still just closes on success — the confirmation lives in
+ * the status control instead, which is ALREADY the thing that stays visible
+ * afterward. `cloudStatusLabel` shows `snapshot.notice` verbatim in place of
+ * the ordinary "Synced…" label whenever cloudSync.ts has just set one (idle
+ * + non-null notice, cleared at the start of the next pull/push — see that
+ * module's doc comment), so "Loaded your cloud project" / "No cloud project
+ * yet — uploading this one" is readable without opening devtools, no timer
+ * needed here.
+ *
+ * FIX 4 (§7.6 dated addendum): `status === "conflict"` is the sign-in
+ * collision prompt — local carries real work that isn't in the cloud copy
+ * `pull()` found. Deliberately reuses the SAME structure the 409 "behind"
+ * prompt already has (dot + label + two amber buttons, factored into
+ * `ChoiceButtons` below) rather than a second bespoke UI, wired to the same
+ * `onReload`/`onOverwrite` callbacks — cloudSync.ts decides which of the two
+ * states is showing and what each button does from `status` internally.
  */
 
 import {
@@ -69,8 +87,14 @@ export function formatRelativeTime(thenMs: number, nowMs: number): string {
 /** The visible label for every signed-in status (brief E: "last-synced/
  * 'syncing'/'offline'/'behind'" — `signing-in`/`pulling`/`pushing` all read
  * as "Syncing…" to the user; which network call is in flight is an
- * implementation detail). */
+ * implementation detail).
+ *
+ * FIX 3: `notice` PREEMPTS the ordinary idle label — cloudSync.ts only ever
+ * sets it in the same patch that sets `status: "idle"` (or gates on status
+ * already being idle), so this check doesn't need its own expiry timer: the
+ * very next pull/push clears `notice` before it could set a stale one. */
 export function cloudStatusLabel(snapshot: CloudSyncSnapshot, nowMs: number): string {
+  if (snapshot.status === "idle" && snapshot.notice !== null) return snapshot.notice;
   switch (snapshot.status) {
     case "signed-out":
       return "Signed out";
@@ -90,6 +114,8 @@ export function cloudStatusLabel(snapshot: CloudSyncSnapshot, nowMs: number): st
       return "Offline";
     case "behind":
       return "This browser is behind";
+    case "conflict":
+      return "Your editor has work that isn't in the cloud";
   }
 }
 
@@ -101,6 +127,7 @@ const DOT_COLOR: Record<CloudSyncStatus, string> = {
   idle: "bg-emerald-500",
   offline: "bg-gray-500",
   behind: "bg-red-500",
+  conflict: "bg-red-500",
 };
 
 function StatusDot({ status }: { status: CloudSyncStatus }): ReactElement {
@@ -291,6 +318,44 @@ export function SignInDialog({
 // Status-bar control
 // ---------------------------------------------------------------------------
 
+const CHOICE_BUTTON =
+  "rounded border border-amber-800 px-1.5 text-amber-300 hover:border-amber-500 hover:text-amber-200";
+
+/**
+ * The two-button "resolve this" affordance — factored out because the 409
+ * "behind" prompt and the sign-in "conflict" prompt (FIX 4) are the exact
+ * same SHAPE (a "take theirs" choice and a "keep mine, overwrite" choice),
+ * differing only in copy. Both wire to the same `onReload`/`onOverwrite`
+ * callbacks; cloudSync.ts decides what each one actually does from
+ * `status` internally (its `reload`/`overwrite` doc comments).
+ */
+function ChoiceButtons({
+  onLeft,
+  onRight,
+  leftLabel,
+  rightLabel,
+  leftTitle,
+  rightTitle,
+}: {
+  onLeft(): void;
+  onRight(): void;
+  leftLabel: string;
+  rightLabel: string;
+  leftTitle: string;
+  rightTitle: string;
+}): ReactElement {
+  return (
+    <>
+      <button type="button" onClick={onLeft} title={leftTitle} className={CHOICE_BUTTON}>
+        {leftLabel}
+      </button>
+      <button type="button" onClick={onRight} title={rightTitle} className={CHOICE_BUTTON}>
+        {rightLabel}
+      </button>
+    </>
+  );
+}
+
 export interface CloudSyncControlContentProps {
   snapshot: CloudSyncSnapshot;
   /** Injected so the relative-time label is deterministic in tests and so
@@ -339,7 +404,7 @@ export function CloudSyncControlContent({
   }
 
   const labelColor =
-    snapshot.status === "behind"
+    snapshot.status === "behind" || snapshot.status === "conflict"
       ? "text-amber-400"
       : snapshot.status === "offline"
         ? "text-gray-500"
@@ -352,24 +417,24 @@ export function CloudSyncControlContent({
         {cloudStatusLabel(snapshot, now)}
       </span>
       {snapshot.status === "behind" && (
-        <>
-          <button
-            type="button"
-            onClick={onReload}
-            title="Discard this browser's unsynced changes and load the server's copy"
-            className="rounded border border-amber-800 px-1.5 text-amber-300 hover:border-amber-500 hover:text-amber-200"
-          >
-            Reload
-          </button>
-          <button
-            type="button"
-            onClick={onOverwrite}
-            title="Keep this browser's copy and overwrite the server with it"
-            className="rounded border border-amber-800 px-1.5 text-amber-300 hover:border-amber-500 hover:text-amber-200"
-          >
-            Overwrite
-          </button>
-        </>
+        <ChoiceButtons
+          onLeft={onReload}
+          onRight={onOverwrite}
+          leftLabel="Reload"
+          rightLabel="Overwrite"
+          leftTitle="Discard this browser's unsynced changes and load the server's copy"
+          rightTitle="Keep this browser's copy and overwrite the server with it"
+        />
+      )}
+      {snapshot.status === "conflict" && (
+        <ChoiceButtons
+          onLeft={onReload}
+          onRight={onOverwrite}
+          leftLabel="Keep cloud copy"
+          rightLabel="Keep this device's work"
+          leftTitle="Discard this device's local work and load the cloud project"
+          rightTitle="Keep this device's work and upload it, replacing the cloud project"
+        />
       )}
       <button type="button" onClick={onSignOut} className={QUIET_BUTTON}>
         Sign out

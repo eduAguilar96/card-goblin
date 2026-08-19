@@ -19,12 +19,26 @@ you.
 
 ## Signing in
 
-Click **Sign in** and enter the username and password. On success, CardGoblin
-fetches whatever project is saved in the cloud and loads it — replacing what was in
-this browser — then downloads any images that came with it that this browser
-doesn't already have, showing progress ("3 of 8 images…") while it does. If nothing
-has ever been pushed to the cloud yet, your current local project simply becomes
-the starting point.
+Click **Sign in** and enter the username and password. What happens next depends on
+what's already in the cloud:
+
+- **A project is already there, and this browser doesn't have unsaved work of its
+  own** (it's still the untouched demo, or it already matches the cloud copy) —
+  CardGoblin loads the cloud project, replacing what was in this browser, then
+  downloads any images that came with it this browser doesn't already have, showing
+  progress ("3 of 8 images…") while it does. The status bar briefly confirms
+  **Loaded your cloud project**.
+- **Nothing has ever been pushed to the cloud yet** — this browser's current
+  project becomes the starting point, and CardGoblin uploads it — code, sheet
+  rows, and every image — right away, rather than waiting for the next edit like
+  an ordinary sync would. The status bar briefly confirms **No cloud project yet —
+  uploading this one**.
+- **A project is already there, AND this browser has its own unsaved work that's
+  genuinely different from it** — nothing is replaced until you choose; see
+  **Your editor has work that isn't in the cloud**, below.
+
+Either way, the dialog itself just closes — the confirmation lives in the status
+bar next to it, so it's visible without opening developer tools.
 
 If sign-in fails, the dialog now says why: a wrong username or password, the server
 not being set up for cloud sync at all, a network problem reaching it, or an
@@ -47,11 +61,16 @@ Once signed in, the status bar shows a dot and a short label instead of the Sign
 button:
 
 - **Synced 2m ago** (or similar) — everything is pushed; the time is how long ago.
+  Right after signing in, this briefly reads **Loaded your cloud project** or
+  **No cloud project yet — uploading this one** instead, so you know which of the
+  two just happened (see [Signing in](#signing-in) above) — it settles into the
+  ordinary "Synced…" wording on your next change.
 - **Syncing…** — a push or pull is in progress.
 - **Offline** — the last attempt failed (no network, the server is unreachable, your
   session expired). Editing is completely unaffected; CardGoblin quietly keeps
   working locally and retries on your next change.
 - **This browser is behind** — see below.
+- **Your editor has work that isn't in the cloud** — see below.
 
 **Sign out** is always available next to the indicator. It clears the session on this
 browser only; your project stays exactly as it was in the cloud.
@@ -69,6 +88,22 @@ were open at once. Instead the status bar offers two choices:
 
 Either way, nothing is silently thrown away: the choice is always yours.
 
+## "Your editor has work that isn't in the cloud"
+
+This is the sign-in version of the same problem: signing in found a project in the
+cloud, but this browser ALSO has its own project that isn't just the demo and isn't
+already what the cloud holds — two real, different projects. Rather than guessing
+which one you want, CardGoblin pauses and asks, right in the status bar:
+
+- **Keep cloud copy** — discard this browser's local work and load the cloud
+  project (downloading its images the same way an ordinary sign-in would).
+- **Keep this device's work** — keep what's in this browser and upload it — code,
+  sheet rows, and every image — replacing what was in the cloud.
+
+Same shape as "This browser is behind" above (nothing replaced until you choose),
+because it's the same underlying question — it just comes up at sign-in instead of
+mid-session, so the buttons are named for what you're actually choosing between.
+
 ## Honest limits
 
 - **One project, same as local.** Cloud sync mirrors the single save slot
@@ -77,11 +112,19 @@ Either way, nothing is silently thrown away: the choice is always yours.
   way, cloud or not.
 - **Last-write-wins, guarded — not merging.** The revision check stops a SILENT
   overwrite (see above), but CardGoblin never merges two people's simultaneous edits
-  line by line. If you resolve a "this browser is behind" prompt, one side's edits
-  since the last sync are gone from the cloud copy (though never gone from the
-  browser that made them, unless you choose Reload there too).
+  line by line. If you resolve a "this browser is behind" or "your editor has work
+  that isn't in the cloud" prompt, one side's edits are gone from the copy you
+  didn't pick (though never gone from the browser that made them, unless you choose
+  to discard them there too).
 - **Images sync separately from code and sheets**, as described above — a moment
   where one has synced and the other hasn't is normal, not a bug.
+- **"Your editor has work that isn't in the cloud" only looks at code and sheet
+  rows, not images.** If two devices' code and sheets happen to match but they
+  have a DIFFERENT image saved under the same name, signing in won't prompt for
+  that — an ordinary sync just re-downloads whichever version the cloud has,
+  the same hash-mismatch check that keeps images current in general, silently
+  replacing the local one. Narrower and rarer than the code/sheets case this
+  prompt exists for, and not currently covered.
 - **Removing an image doesn't always clean up the cloud copy.** An ordinary delete
   in the Assets drawer does — that upload is removed from the cloud right away. But
   **Reset to demo** and importing a [project file](project-files.md) replace your

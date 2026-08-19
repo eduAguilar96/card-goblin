@@ -55,7 +55,8 @@ import {
 import { RASTER_DPI } from "@/app/editor/_components/pdfRaster";
 import { PERSIST_DEBOUNCE_MS } from "@/app/editor/_store/persistence";
 import { ASSET_MAX_BYTES } from "@/app/editor/_store/assetStore";
-import { PUSH_DEBOUNCE_MS } from "@/app/editor/_store/cloudSync";
+import { PUSH_DEBOUNCE_MS, type CloudSyncSnapshot } from "@/app/editor/_store/cloudSync";
+import { cloudStatusLabel } from "@/app/editor/_components/cloudSyncControl";
 import { SESSION_DURATION_MS } from "@/lib/cloud/session";
 import { loadDocPages } from "@/lib/docs/pages";
 
@@ -247,6 +248,48 @@ describe("numeric claims match their constants", () => {
       }
     });
   }
+});
+
+// ---------------------------------------------------------------------------
+// Cloud sync: the sign-in collision prompt's copy (§7.6 FIX 4). Guard added
+// after an independent review caught the wiki saying "Your DEVICE has work
+// that isn't in the cloud" (three places, including the section heading)
+// while the code actually renders "Your EDITOR has work..." — exactly the
+// silent-paraphrase drift this whole file exists to catch, just for a
+// literal STRING rather than a number.
+// ---------------------------------------------------------------------------
+
+describe("the collision-prompt wiki text matches cloudStatusLabel's 'conflict' copy", () => {
+  const CONFLICT_SNAPSHOT: CloudSyncSnapshot = {
+    status: "conflict",
+    lastSyncedAt: null,
+    pullProgress: null,
+    errorMessage: null,
+    behindRevision: null,
+    conflictProject: null,
+    notice: null,
+  };
+  const label = cloudStatusLabel(CONFLICT_SNAPSHOT, 0);
+  const text = pageText("cloud-sync");
+
+  it("has a section heading naming the EXACT label, quoted", () => {
+    expect(text, `no heading for "${label}" — it moved, was reworded, or drifted`).toContain(
+      `## "${label}"`,
+    );
+  });
+
+  it("every BOLD mention of the collision prompt uses the exact label, not a paraphrase", () => {
+    // Distinctive tail ("isn't in the cloud") rather than the whole label,
+    // so this fails LOUDLY (wrong text captured) instead of vacuously
+    // (zero matches) if the wording drifts further.
+    const bolded = [...text.matchAll(/\*\*([^*]*isn't in the cloud)\*\*/g)].map((m) => m[1]);
+    expect(bolded.length, "no bold mention of the collision prompt found — the phrasing changed").toBeGreaterThan(
+      0,
+    );
+    for (const mention of bolded) {
+      expect(mention, `wiki bolds "${mention}", code renders "${label}"`).toBe(label);
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------
