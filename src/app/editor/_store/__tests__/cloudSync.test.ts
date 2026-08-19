@@ -17,6 +17,7 @@ import {
   cloudSync,
   createCloudSyncController,
   resetCloudSyncForTests,
+  signInFailureMessage,
   PUSH_DEBOUNCE_MS,
   type CloudFailure,
   type CloudSyncController,
@@ -26,11 +27,70 @@ import {
   type PresignResult,
   type PutProjectResult,
   type SignedInHint,
+  createRealCloudTransport,
 } from "../cloudSync";
 
 afterEach(() => {
   vi.useRealTimers();
 });
+
+// ---------------------------------------------------------------------------
+// signInFailureMessage — direct pin (independent security review, HIGH):
+// 401 must be checked EXPLICITLY, never "whatever falls through" — the bug
+// that shipped was exactly a 404 (a route that isn't deployed) silently
+// reading as "Incorrect username or password."
+// ---------------------------------------------------------------------------
+
+describe("signInFailureMessage", () => {
+  it("401: the credentials copy — and ONLY 401 gets it", () => {
+    expect(signInFailureMessage(401)).toBe("Incorrect username or password.");
+  });
+
+  it("503: names /api/cloud/diagnose and the deployment guide", () => {
+    const message = signInFailureMessage(503);
+    expect(message).toContain("/api/cloud/diagnose");
+    expect(message).toContain("docs/deployment.md");
+  });
+
+  it('"network": offline copy', () => {
+    expect(signInFailureMessage("network")).toContain("network");
+  });
+
+  it("500/502: the generic server-error copy, NOT the credentials copy", () => {
+    expect(signInFailureMessage(500)).not.toContain("Incorrect");
+    expect(signInFailureMessage(502)).not.toContain("Incorrect");
+  });
+
+  it(
+    "404 (THE bug this fix closes): NOT the credentials copy — the exact outage this " +
+      "whole task exists to diagnose must never be reported as a wrong password",
+    () => {
+      const message = signInFailureMessage(404);
+      expect(message).not.toContain("Incorrect username or password");
+      expect(message).toContain("404");
+      expect(message).toContain("/api/cloud/diagnose");
+    },
+  );
+
+  it("every other unrecognized status (400, 403, 200) also avoids the credentials copy, naming its own code", () => {
+    for (const status of [400, 403, 200]) {
+      const message = signInFailureMessage(status);
+      expect(message, `status ${status}`).not.toContain("Incorrect username or password");
+      expect(message, `status ${status}`).toContain(String(status));
+    }
+  });
+
+  it("no two of the six cases above collapse to the same copy (they're each their own test above; this just pins the count)", () => {
+    const messages = [401, 503, "network", 500, 404, 400].map((s) => signInFailureMessage(s as number | "network"));
+    expect(new Set(messages).size).toBe(6);
+  });
+});
+
+/** The username every `harness()`-built fake transport accepts (TASK 4) —
+ * most tests below only care that sign-in SUCCEEDS, not which username won,
+ * so a single shared constant keeps the ~30 `controller.signIn(...)` call
+ * sites below from each inventing their own. */
+const GOOD_USERNAME = "the-operator";
 
 /** Drain the ENTIRE current microtask queue, including chains that
  * reschedule further microtasks (a single `await Promise.resolve()` only
@@ -74,6 +134,7 @@ interface FakeServerAsset {
 function createFakeTransport(): CloudTransport & {
   calls: Record<string, number>;
   server: { revision: number; project: CloudProject | null; assets: Map<string, FakeServerAsset> };
+  loginUsername: string | null;
   loginPassword: string | null;
   nextFailure: Partial<Record<keyof CloudTransport, number | "network">>;
 } {
@@ -87,6 +148,7 @@ function createFakeTransport(): CloudTransport & {
     assets: new Map(),
   };
   const nextFailure: Partial<Record<keyof CloudTransport, number | "network">> = {};
+  let loginUsername: string | null = GOOD_USERNAME;
   let loginPassword: string | null = "correct-password";
 
   const fail = <T extends CloudFailure>(name: keyof CloudTransport): T | null => {
@@ -100,6 +162,12 @@ function createFakeTransport(): CloudTransport & {
     calls,
     server,
     nextFailure,
+    get loginUsername() {
+      return loginUsername;
+    },
+    set loginUsername(v) {
+      loginUsername = v;
+    },
     get loginPassword() {
       return loginPassword;
     },
@@ -107,11 +175,16 @@ function createFakeTransport(): CloudTransport & {
       loginPassword = v;
     },
 
-    async login(password) {
+    // TASK 4: both fields checked, mirroring the real login route folding
+    // wrong-username/wrong-password/both-wrong into the same 401 — this fake
+    // doesn't need to reproduce the timing/message indistinguishability
+    // itself (that's routes.test.ts's job against the REAL route), just
+    // enough behavior for cloudSync.ts's OWN plumbing to be exercised.
+    async login(username, password) {
       bump("login");
       const failure = fail("login");
       if (failure) return failure;
-      return password === loginPassword ? { ok: true } : { ok: false, status: 401 };
+      return username === loginUsername && password === loginPassword ? { ok: true } : { ok: false, status: 401 };
     },
 
     async logout() {
@@ -235,31 +308,43 @@ describe("signed-out (the default)", () => {
 describe("sign-in", () => {
   it("wrong password: stays signed-out, returns a generic message, sets no hint", async () => {
     const { controller, hint } = harness();
-    const result = await controller.signIn("nope");
-    expect(result).toEqual({ ok: false, message: "Incorrect password." });
+    const result = await controller.signIn(GOOD_USERNAME, "nope");
+    expect(result).toEqual({ ok: false, message: "Incorrect username or password." });
     expect(controller.getSnapshot().status).toBe("signed-out");
     expect(hint.get()).toBe(false);
   });
 
-  it("unconfigured (503): a distinct message, still signed-out", async () => {
+  it("wrong username (TASK 4): the SAME generic message as a wrong password — cloudSync.ts doesn't invent its own distinction", async () => {
+    const { controller, hint } = harness();
+    const result = await controller.signIn("not-the-operator", "correct-password");
+    expect(result).toEqual({ ok: false, message: "Incorrect username or password." });
+    expect(controller.getSnapshot().status).toBe("signed-out");
+    expect(hint.get()).toBe(false);
+  });
+
+  it("unconfigured (503): a distinct message naming /api/cloud/diagnose and the deployment guide, still signed-out", async () => {
     const { controller, transport } = harness();
     transport.nextFailure.login = 503;
-    const result = await controller.signIn("correct-password");
-    expect(result).toEqual({ ok: false, message: "Cloud sync isn't set up on this server." });
+    const result = await controller.signIn(GOOD_USERNAME, "correct-password");
+    expect(result).toEqual({
+      ok: false,
+      message:
+        "Cloud sync isn't set up on this server. Check /api/cloud/diagnose for details, or see the deployment guide (docs/deployment.md).",
+    });
     expect(controller.getSnapshot().status).toBe("signed-out");
   });
 
   it("network failure while signing in degrades to a signed-out message, no throw", async () => {
     const { controller, transport } = harness();
     transport.nextFailure.login = "network";
-    const result = await controller.signIn("correct-password");
-    expect(result).toEqual({ ok: false, message: "Can't reach the network." });
+    const result = await controller.signIn(GOOD_USERNAME, "correct-password");
+    expect(result).toEqual({ ok: false, message: "Can't reach the network. Check your connection and try again." });
   });
 
   it("success with nothing on the server yet: idle, revision 0, no replaceProject clobber", async () => {
     const { store, controller, hint } = harness();
     const before = store.getState().code;
-    const result = await controller.signIn("correct-password");
+    const result = await controller.signIn(GOOD_USERNAME, "correct-password");
     expect(result).toEqual({ ok: true });
     expect(hint.get()).toBe(true);
     expect(controller.getSnapshot().status).toBe("idle");
@@ -275,7 +360,7 @@ describe("sign-in", () => {
       sheets: { S: { rows: [{ a: "from-cloud" }], editedRows: [true] } },
       assets: [],
     };
-    const result = await controller.signIn("correct-password");
+    const result = await controller.signIn(GOOD_USERNAME, "correct-password");
     expect(result).toEqual({ ok: true });
     expect(store.getState().code).toBe("Sheet: S\n  column a: Text\n");
     expect(store.getState().sheets.S.rows[0].a).toBe("from-cloud");
@@ -287,7 +372,7 @@ describe("sign-in", () => {
     const { controller, transport } = harness();
     transport.server.revision = 3;
     transport.server.project = { code: "Sheet: S\n  column a: Text\n", sheets: {}, assets: [] };
-    await controller.signIn("correct-password");
+    await controller.signIn(GOOD_USERNAME, "correct-password");
     const putCallsBefore = transport.calls.putProject ?? 0;
     await vi.advanceTimersByTimeAsync(PUSH_DEBOUNCE_MS * 2);
     expect(transport.calls.putProject ?? 0).toBe(putCallsBefore);
@@ -316,7 +401,7 @@ describe("sign-in", () => {
       ],
     };
 
-    await controller.signIn("correct-password");
+    await controller.signIn(GOOD_USERNAME, "correct-password");
 
     // Only "dragon" was actually downloaded — "imp" already matched.
     expect(transport.calls.presignAssetGet).toBe(1);
@@ -341,7 +426,7 @@ describe("sign-in", () => {
         { name: "dragon", mime: "image/png", size: newBytes.byteLength, hash: await sha256HexForTest(newBytes) },
       ],
     };
-    await controller.signIn("correct-password");
+    await controller.signIn(GOOD_USERNAME, "correct-password");
     expect(transport.calls.downloadFromPresignedUrl).toBe(1);
     const pulled = await assetStore.getBytes("dragon");
     expect(pulled?.bytes).toEqual(newBytes);
@@ -360,7 +445,7 @@ describe("sign-in", () => {
       entries.push({ name, mime: "image/png", size: 1, hash: await sha256HexForTest(bytes) });
     }
     transport.server.project = { code: "", sheets: {}, assets: entries };
-    await controller.signIn("correct-password");
+    await controller.signIn(GOOD_USERNAME, "correct-password");
     const progressed = seen.filter((p): p is { done: number; total: number } => p !== null);
     expect(progressed.map((p) => `${p.done}/${p.total}`)).toEqual(["0/3", "1/3", "2/3", "3/3"]);
   });
@@ -374,7 +459,7 @@ describe("push debounce", () => {
   it("an edit pushes ~10 s after the last change, not sooner", async () => {
     vi.useFakeTimers();
     const { store, controller, transport } = harness();
-    await controller.signIn("correct-password");
+    await controller.signIn(GOOD_USERNAME, "correct-password");
     const before = transport.calls.putProject ?? 0;
 
     store.getState().setCode(store.getState().code + "\n# a\n");
@@ -388,7 +473,7 @@ describe("push debounce", () => {
   it("a burst of edits collapses to ONE push (trailing debounce)", async () => {
     vi.useFakeTimers();
     const { store, controller, transport } = harness();
-    await controller.signIn("correct-password");
+    await controller.signIn(GOOD_USERNAME, "correct-password");
     const before = transport.calls.putProject ?? 0;
 
     store.getState().setCell("Monsters", 0, "health", "1");
@@ -405,7 +490,7 @@ describe("push debounce", () => {
   it("flush() runs a pending push immediately (pagehide)", async () => {
     vi.useFakeTimers();
     const { store, controller, transport } = harness();
-    await controller.signIn("correct-password");
+    await controller.signIn(GOOD_USERNAME, "correct-password");
     const before = transport.calls.putProject ?? 0;
 
     store.getState().setCode(store.getState().code + "\n# flushed\n");
@@ -416,7 +501,7 @@ describe("push debounce", () => {
 
   it("flush() is a no-op when nothing is pending", async () => {
     const { controller, transport } = harness();
-    await controller.signIn("correct-password");
+    await controller.signIn(GOOD_USERNAME, "correct-password");
     const before = transport.calls.putProject ?? 0;
     controller.flush();
     await Promise.resolve();
@@ -432,7 +517,7 @@ describe("409 conflict", () => {
   it("a stale push does NOT overwrite — surfaces 'behind' with the server's revision", async () => {
     vi.useFakeTimers();
     const { store, controller, transport } = harness();
-    await controller.signIn("correct-password");
+    await controller.signIn(GOOD_USERNAME, "correct-password");
     // Someone else (another device) pushes in between.
     transport.server.revision = 41;
     transport.server.project = { code: "someone else's code", sheets: {}, assets: [] };
@@ -451,7 +536,7 @@ describe("409 conflict", () => {
   it("Reload: pulls the server's copy and replaces local", async () => {
     vi.useFakeTimers();
     const { store, controller, transport } = harness();
-    await controller.signIn("correct-password");
+    await controller.signIn(GOOD_USERNAME, "correct-password");
     transport.server.revision = 41;
     transport.server.project = { code: "Sheet: S\n  column a: Text\n", sheets: {}, assets: [] };
     store.getState().setCode("my local edit");
@@ -466,7 +551,7 @@ describe("409 conflict", () => {
   it("Overwrite: re-pushes local content using the server's revision as the new base", async () => {
     vi.useFakeTimers();
     const { store, controller, transport } = harness();
-    await controller.signIn("correct-password");
+    await controller.signIn(GOOD_USERNAME, "correct-password");
     transport.server.revision = 41;
     transport.server.project = { code: "someone else's code", sheets: {}, assets: [] };
     store.getState().setCode("my local edit — should win");
@@ -488,7 +573,7 @@ describe("409 conflict", () => {
 describe("asset sync", () => {
   it("adding an asset uploads it immediately (not on the 10 s debounce)", async () => {
     const { assetStore, controller, transport } = harness();
-    await controller.signIn("correct-password");
+    await controller.signIn(GOOD_USERNAME, "correct-password");
     await assetStore.upload("dragon", "image/png", new Uint8Array([1, 2, 3]));
     await flushAsync();
     expect(transport.calls.presignAssetPut).toBe(1);
@@ -499,7 +584,7 @@ describe("asset sync", () => {
   it("deleting an asset removes it remotely immediately", async () => {
     const { assetStore, controller, transport } = harness();
     await assetStore.upload("dragon", "image/png", new Uint8Array([1]));
-    await controller.signIn("correct-password");
+    await controller.signIn(GOOD_USERNAME, "correct-password");
     await assetStore.remove("dragon");
     await flushAsync();
     expect(transport.calls.deleteAsset).toBe(1);
@@ -509,7 +594,7 @@ describe("asset sync", () => {
   it("an asset change also schedules the debounced manifest-carrying push", async () => {
     vi.useFakeTimers();
     const { assetStore, controller, transport } = harness();
-    await controller.signIn("correct-password");
+    await controller.signIn(GOOD_USERNAME, "correct-password");
     await assetStore.upload("dragon", "image/png", new Uint8Array([1, 2, 3]));
     const before = transport.calls.putProject ?? 0;
     await vi.advanceTimersByTimeAsync(PUSH_DEBOUNCE_MS);
@@ -546,7 +631,7 @@ describe("failure posture — degrade to local-only, never block editing", () =>
     it(`push failure (${status}) → status "offline", local store still fully editable`, async () => {
       vi.useFakeTimers();
       const { store, controller, transport } = harness();
-      await controller.signIn("correct-password");
+      await controller.signIn(GOOD_USERNAME, "correct-password");
       transport.nextFailure.putProject = status;
       store.getState().setCode("edit that fails to sync");
       await vi.advanceTimersByTimeAsync(PUSH_DEBOUNCE_MS);
@@ -564,7 +649,7 @@ describe("failure posture — degrade to local-only, never block editing", () =>
     const { store, controller, transport } = harness();
     const before = store.getState().code;
     transport.nextFailure.getProject = 500;
-    const result = await controller.signIn("correct-password");
+    const result = await controller.signIn(GOOD_USERNAME, "correct-password");
     expect(result).toEqual({ ok: true }); // login itself succeeded
     expect(controller.getSnapshot().status).toBe("offline");
     expect(store.getState().code).toBe(before);
@@ -572,7 +657,7 @@ describe("failure posture — degrade to local-only, never block editing", () =>
 
   it("an asset upload failure (presign) degrades to offline, doesn't throw", async () => {
     const { assetStore, controller, transport } = harness();
-    await controller.signIn("correct-password");
+    await controller.signIn(GOOD_USERNAME, "correct-password");
     transport.nextFailure.presignAssetPut = 500;
     await expect(assetStore.upload("dragon", "image/png", new Uint8Array([1]))).resolves.toBeDefined();
     await flushAsync();
@@ -581,7 +666,7 @@ describe("failure posture — degrade to local-only, never block editing", () =>
 
   it("an asset upload failure (PUT itself) degrades to offline, doesn't throw", async () => {
     const { assetStore, controller, transport } = harness();
-    await controller.signIn("correct-password");
+    await controller.signIn(GOOD_USERNAME, "correct-password");
     transport.nextFailure.uploadToPresignedUrl = "network";
     await assetStore.upload("dragon", "image/png", new Uint8Array([1]));
     await flushAsync();
@@ -591,7 +676,7 @@ describe("failure posture — degrade to local-only, never block editing", () =>
   it("unconfigured (503) during a push still leaves the editor usable and signed in", async () => {
     vi.useFakeTimers();
     const { store, controller, transport } = harness();
-    await controller.signIn("correct-password");
+    await controller.signIn(GOOD_USERNAME, "correct-password");
     transport.nextFailure.putProject = 503;
     store.getState().setCode("still editable");
     await vi.advanceTimersByTimeAsync(PUSH_DEBOUNCE_MS);
@@ -608,7 +693,7 @@ describe("sign out", () => {
   it("clears the hint, returns to signed-out, and further edits don't push", async () => {
     vi.useFakeTimers();
     const { store, controller, transport, hint } = harness();
-    await controller.signIn("correct-password");
+    await controller.signIn(GOOD_USERNAME, "correct-password");
     controller.signOut();
     expect(controller.getSnapshot().status).toBe("signed-out");
     expect(hint.get()).toBe(false);
@@ -626,7 +711,7 @@ describe("sign out", () => {
     async () => {
       vi.useFakeTimers();
       const { store, controller, transport } = harness();
-      await controller.signIn("correct-password");
+      await controller.signIn(GOOD_USERNAME, "correct-password");
       store.getState().setCode("should still reach the cloud");
       const before = transport.calls.putProject ?? 0;
       controller.signOut();
@@ -639,7 +724,7 @@ describe("sign out", () => {
   it("does NOT push again later — the flush already consumed the pending debounce", async () => {
     vi.useFakeTimers();
     const { store, controller, transport } = harness();
-    await controller.signIn("correct-password");
+    await controller.signIn(GOOD_USERNAME, "correct-password");
     store.getState().setCode("flushed once");
     controller.signOut();
     await vi.advanceTimersByTimeAsync(0);
@@ -651,7 +736,7 @@ describe("sign out", () => {
   it("the flushed push's eventual result never clobbers the (by then) signed-out status", async () => {
     vi.useFakeTimers();
     const { store, controller, transport } = harness();
-    await controller.signIn("correct-password");
+    await controller.signIn(GOOD_USERNAME, "correct-password");
     store.getState().setCode("in flight during sign out");
     controller.signOut();
     // Synchronously, immediately — not "pushing" from the flush() it kicked off.
@@ -726,7 +811,7 @@ describe("dispose", () => {
   it("unsubscribes from both stores — no further pushes, even after edits", async () => {
     vi.useFakeTimers();
     const { store, controller, transport } = harness();
-    await controller.signIn("correct-password");
+    await controller.signIn(GOOD_USERNAME, "correct-password");
     controller.dispose();
     const before = transport.calls.putProject ?? 0;
     store.getState().setCode("after dispose");
@@ -768,7 +853,7 @@ describe("the cloudSync singleton — subscribe-before-attach still works", () =
     // The freshly-attached controller's transport is inert (network
     // failure on everything) — signIn still transitions signing-in →
     // signed-out, two snapshot changes, each a notify().
-    const result = await cloudSync.signIn("anything");
+    const result = await cloudSync.signIn("anything", "anything");
     expect(result.ok).toBe(false);
     expect(fired).toBeGreaterThan(before);
     unsubscribe();
@@ -783,7 +868,7 @@ describe("the cloudSync singleton — subscribe-before-attach still works", () =
     resetCloudSyncForTests();
     resetCloudSyncForTests();
     fired = 0;
-    await cloudSync.signIn("anything"); // exactly 2 notifies from THIS active controller
+    await cloudSync.signIn("anything", "anything"); // exactly 2 notifies from THIS active controller
     expect(fired).toBe(2);
     unsubscribe();
   });
@@ -831,3 +916,23 @@ async function sha256HexForTest(bytes: Uint8Array): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", bytes as BufferSource);
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
+
+describe("the REAL transport's request shape (review: dropping username passed the whole suite)", () => {
+  it("login posts BOTH credentials as JSON — this regression already happened once", async () => {
+    const seen: { url?: string; body?: unknown; headers?: unknown } = {};
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async (url: string, init?: RequestInit) => {
+      seen.url = String(url);
+      seen.body = JSON.parse(String(init?.body ?? "{}"));
+      seen.headers = init?.headers;
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    }) as typeof fetch;
+    try {
+      await createRealCloudTransport().login("eduxx", "a real password");
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+    expect(seen.url).toBe("/api/cloud/login");
+    expect(seen.body).toEqual({ username: "eduxx", password: "a real password" });
+  });
+});

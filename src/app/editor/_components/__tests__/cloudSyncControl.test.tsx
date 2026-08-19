@@ -15,7 +15,12 @@ import CloudSyncControl, {
   formatRelativeTime,
   type CloudSyncControlContentProps,
 } from "@/app/editor/_components/cloudSyncControl";
-import { cloudSync, resetCloudSyncForTests, type CloudSyncSnapshot } from "@/app/editor/_store/cloudSync";
+import {
+  cloudSync,
+  resetCloudSyncForTests,
+  signInFailureMessage,
+  type CloudSyncSnapshot,
+} from "@/app/editor/_store/cloudSync";
 
 const stripTags = (markup: string): string => markup.replace(/<[^>]+>/g, "");
 
@@ -156,6 +161,7 @@ describe("SignInDialog", () => {
       <SignInDialog
         onClose={props.onClose ?? (() => {})}
         onSubmit={props.onSubmit ?? (async () => ({ ok: true }))}
+        initialUsername={props.initialUsername}
         initialPassword={props.initialPassword}
         initialError={props.initialError}
         initialWorking={props.initialWorking}
@@ -171,43 +177,103 @@ describe("SignInDialog", () => {
     expect(markup).toContain('tabindex="-1"');
   });
 
-  it("resting state: a password field and an enabled Sign in button once typed, disabled when empty", () => {
-    const empty = renderDialog({ initialPassword: "" });
-    const emptyButton = /<button type="submit"[^>]*>Sign in<\/button>/.exec(empty)?.[0];
-    expect(emptyButton).toContain('disabled=""');
+  // ---------------------------------------------------------------------
+  // TASK 4: username field, above password, both required
+  // ---------------------------------------------------------------------
 
-    const filled = renderDialog({ initialPassword: "hunter2" });
-    const filledButton = /<button type="submit"[^>]*>Sign in<\/button>/.exec(filled)?.[0];
-    expect(filledButton).not.toContain('disabled=""');
+  it("has a username field ABOVE the password field, both labelled", () => {
+    const markup = renderDialog();
+    const text = stripTags(markup);
+    expect(text).toContain("Username");
+    expect(text).toContain("Password");
+    expect(text.indexOf("Username")).toBeLessThan(text.indexOf("Password"));
+    expect(markup).toMatch(/autocomplete="username"/i);
   });
 
-  it("initialError (test seam) shows a role=alert message tied to the field via aria-describedby", () => {
-    const markup = renderDialog({ initialError: "Incorrect password." });
+  it("resting state: Sign in is disabled until BOTH username and password are filled", () => {
+    const neither = renderDialog({ initialUsername: "", initialPassword: "" });
+    expect(/<button type="submit"[^>]*>Sign in<\/button>/.exec(neither)?.[0]).toContain('disabled=""');
+
+    const usernameOnly = renderDialog({ initialUsername: "eduxx", initialPassword: "" });
+    expect(/<button type="submit"[^>]*>Sign in<\/button>/.exec(usernameOnly)?.[0]).toContain('disabled=""');
+
+    const passwordOnly = renderDialog({ initialUsername: "", initialPassword: "hunter2" });
+    expect(/<button type="submit"[^>]*>Sign in<\/button>/.exec(passwordOnly)?.[0]).toContain('disabled=""');
+
+    const both = renderDialog({ initialUsername: "eduxx", initialPassword: "hunter2" });
+    expect(/<button type="submit"[^>]*>Sign in<\/button>/.exec(both)?.[0]).not.toContain('disabled=""');
+  });
+
+  // ---------------------------------------------------------------------
+  // TASK 3: role=alert error markup — one state per failure shape
+  // ---------------------------------------------------------------------
+
+  it("initialError (test seam) shows a role=alert message, tied to BOTH fields via aria-describedby", () => {
+    const markup = renderDialog({ initialError: "Incorrect username or password." });
     expect(markup).toContain('role="alert"');
-    expect(stripTags(markup)).toContain("Incorrect password.");
-    expect(markup).toContain('aria-invalid="true"');
-    expect(markup).toContain('aria-describedby="cloud-signin-error"');
+    expect(stripTags(markup)).toContain("Incorrect username or password.");
+    // Neither field is singled out as "the" wrong one (TASK 4: the response
+    // never says which of username/password was wrong, so the markup must
+    // not imply one either) — both carry aria-invalid + the same describedby.
+    expect(markup.match(/aria-invalid="true"/g)?.length).toBe(2);
+    expect(markup.match(/aria-describedby="cloud-signin-error"/g)?.length).toBe(2);
     expect(markup).toContain('id="cloud-signin-error"');
   });
 
-  it("no error: aria-invalid is explicitly false, no describedby, no alert", () => {
+  it("no error: aria-invalid is explicitly false on both fields, no describedby, no alert", () => {
     const markup = renderDialog();
-    expect(markup).toContain('aria-invalid="false"');
+    expect(markup.match(/aria-invalid="false"/g)?.length).toBe(2);
     expect(markup).not.toContain("aria-describedby");
     expect(markup).not.toContain('role="alert"');
   });
 
-  it("initialWorking (test seam): both buttons disabled, a role=status 'Signing in…' notice, input disabled", () => {
-    const markup = renderDialog({ initialWorking: true, initialPassword: "hunter2" });
+  it("each signInFailureMessage case renders as its own distinct role=alert text, including 404 (HIGH, security review)", () => {
+    const cases: [label: string, status: number | "network"][] = [
+      ["wrong credentials (401)", 401],
+      ["server not configured / hash unreadable (503)", 503],
+      ["offline / network failure", "network"],
+      ["unexpected server error (5xx)", 500],
+      // THE bug this fix closes: a live deployment 404ing these routes must
+      // never render as "Incorrect username or password" — see
+      // signInFailureMessage's module comment for the full incident.
+      ["unrecognized status (404) — must NOT read as wrong credentials", 404],
+    ];
+    const seen = new Set<string>();
+    for (const [label, status] of cases) {
+      const message = signInFailureMessage(status);
+      const markup = renderDialog({ initialError: message });
+      // react-dom/server HTML-escapes apostrophes in text content — compare
+      // against the RAW markup with the same escaping applied, not the JS
+      // string verbatim (mirrors this file's existing "Can&#x27;t reach the
+      // network." precedent for the offline status-bar title, below).
+      expect(markup, label).toContain(message.replace(/'/g, "&#x27;"));
+      expect(markup, label).toContain('role="alert"');
+      if (status === 404) expect(stripTags(markup), label).not.toContain("Incorrect username or password");
+      seen.add(message);
+    }
+    // All five are worded distinctly from one another (module comment on
+    // signInFailureMessage) — no two cases silently collapsed to the same copy.
+    expect(seen.size).toBe(5);
+  });
+
+  it("the 503 copy specifically names /api/cloud/diagnose and the deployment guide (TASK 2/3)", () => {
+    const markup = renderDialog({ initialError: signInFailureMessage(503) });
+    const text = stripTags(markup);
+    expect(text).toContain("/api/cloud/diagnose");
+    expect(text).toContain("docs/deployment.md");
+  });
+
+  it("initialWorking (test seam): both buttons disabled, a role=status 'Signing in…' notice, both inputs disabled", () => {
+    const markup = renderDialog({ initialWorking: true, initialUsername: "eduxx", initialPassword: "hunter2" });
     expect(markup).toContain('role="status"');
     expect(stripTags(markup)).toContain("Signing in…");
     const cancelButton = /<button type="button"[^>]*>Cancel<\/button>/.exec(markup)?.[0];
     expect(cancelButton).toContain('disabled=""');
     const submitButton = /<button type="submit"[^>]*>Signing in…<\/button>/.exec(markup)?.[0];
     expect(submitButton).toContain('disabled=""');
-    expect(markup).toContain('<input ');
-    const inputTag = /<input[^>]*>/.exec(markup)?.[0];
-    expect(inputTag).toContain("disabled=\"\"");
+    const inputTags = markup.match(/<input[^>]*>/g) ?? [];
+    expect(inputTags).toHaveLength(2);
+    for (const tag of inputTags) expect(tag).toContain('disabled=""');
   });
 
   it("the password field is type=password with autocomplete for a credential manager", () => {
@@ -247,7 +313,7 @@ describe("CloudSyncControl (connected)", () => {
     // route, proving the connected component reads live state, not a
     // hardcoded constant).
     resetCloudSyncForTests();
-    const pending = cloudSync.signIn("anything");
+    const pending = cloudSync.signIn("anything", "anything");
     // Mid-flight snapshot: status is "signing-in" the instant signIn() is
     // called, synchronously, before any await yields.
     expect(cloudSync.getSnapshot().status).toBe("signing-in");

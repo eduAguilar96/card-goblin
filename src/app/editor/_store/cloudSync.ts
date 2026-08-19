@@ -79,7 +79,11 @@ export type OkResult = { ok: true } | CloudFailure;
  * network failure is a valid, expected outcome here, not an exceptional
  * one, so the controller never needs a try/catch around a transport call. */
 export interface CloudTransport {
-  login(password: string): Promise<LoginResult>;
+  /** FEATURE: both fields required (the login route folds a wrong username,
+   * a wrong password, or both into the SAME 401 — see that route's module
+   * comment), so this seam takes them as two separate arguments rather than
+   * silently accepting one and defaulting the other. */
+  login(username: string, password: string): Promise<LoginResult>;
   logout(): Promise<void>;
   getProject(): Promise<GetProjectResult>;
   putProject(baseRevision: number, project: CloudProject): Promise<PutProjectResult>;
@@ -104,12 +108,12 @@ async function toJson<T>(res: Response): Promise<T> {
  * upholding the CloudTransport contract above. */
 export function createRealCloudTransport(): CloudTransport {
   return {
-    async login(password) {
+    async login(username, password) {
       try {
         const res = await fetch("/api/cloud/login", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ password }),
+          body: JSON.stringify({ username, password }),
         });
         return res.ok ? { ok: true } : { ok: false, status: res.status };
       } catch {
@@ -317,8 +321,10 @@ export interface CloudSyncController {
   getSnapshot(): CloudSyncSnapshot;
   subscribe(listener: () => void): () => void;
   /** Resolves once sign-in AND the initial pull have settled (success or
-   * degraded-to-offline) — the dialog awaits this to know when to close. */
-  signIn(password: string): Promise<{ ok: true } | { ok: false; message: string }>;
+   * degraded-to-offline) — the dialog awaits this to know when to close.
+   * Both fields required (FEATURE: username+password) — see CloudTransport
+   * .login's doc comment. */
+  signIn(username: string, password: string): Promise<{ ok: true } | { ok: false; message: string }>;
   signOut(): void;
   /** The "behind" prompt's two answers (brief D, both tested). */
   reload(): Promise<void>;
@@ -357,18 +363,66 @@ function describeFailure(status: number | "network"): string {
  * The sign-in dialog's failure message — exported for a direct unit test.
  * Deliberately narrower than `describeFailure`: a LOGIN failure's only
  * genuinely wrong-credential outcome is 401, so anything else (network,
- * 503, or now a distinct 5xx bucket) must say something other than
- * "Incorrect password" (M1, independent security review — before this fix,
- * every non-401/503/network status, INCLUDING a 500 from a misconfigured
- * `ADMIN_PASSWORD_HASH`, fell through to "Incorrect password", which would
- * have told an operator their own correct password was wrong, forever, with
- * no way to tell it was actually a server-side mistake).
+ * 503, a distinct 5xx bucket, or now anything UNRECOGNIZED) must say
+ * something other than "Incorrect username or password" (M1, independent
+ * security review — before that fix, every non-401/503/network status,
+ * INCLUDING a 500 from a misconfigured `ADMIN_PASSWORD_HASH`, fell through
+ * to the wrong-credential copy, which would have told an operator their own
+ * correct password was wrong, forever, with no way to tell it was actually
+ * a server-side mistake).
+ *
+ * INVERTED to an explicit 401 check, not a fallthrough default (SECOND
+ * independent security review, HIGH — the irony of this exact bug shipping
+ * in a change-set about diagnosability): the PREVIOUS shape of this
+ * function tested 503/network/5xx and fell through to the credentials copy
+ * for literally everything else, which silently included 404 — and the
+ * live deployment this shipped against was ALREADY 404ing these routes.
+ * That means the exact outage this whole task exists to diagnose would have
+ * been reported to the owner as "Incorrect username or password," which is
+ * the single worst possible message for it (it points at retyping a
+ * password that was never the problem, instead of at a route that isn't
+ * deployed). The five branches below are the FIVE distinct copies the
+ * sign-in dialog surfaces (TASK 3 + this fix), each tested directly in
+ * cloudSyncControl.test.tsx via `SignInDialog`'s `initialError` seam, and
+ * `401` is now checked EXPLICITLY rather than being "whatever's left over":
+ *
+ * - "network" — offline or the request never reached the server at all.
+ * - 503 — covers BOTH "env not set" and "the stored hash is unreadable"
+ *   (login/route.ts) with the SAME copy here, since either way this
+ *   browser's only actionable next step is the same one: ask whoever runs
+ *   this deployment to look at the server. TASK 2/3: names
+ *   `/api/cloud/diagnose` and the deployment guide DIRECTLY in the dialog —
+ *   the owner's original complaint was reading devtools to learn even this
+ *   much, so the fix is to say it in the UI instead of making that a
+ *   separate investigation. (The response BODY's own more specific wording
+ *   — `ADMIN_HASH_UNREADABLE_MESSAGE` vs `CLOUD_UNCONFIGURED_MESSAGE` — is
+ *   for whoever's already looking at server logs/the network tab, not this
+ *   dialog, which has no way to show the two differently without ALSO
+ *   telling an unauthenticated caller which one it was.)
+ * - 401 — wrong credentials, and ONLY 401. Deliberately does not say
+ *   "password" alone (TASK 4: username+password) — the login route folds
+ *   wrong-username, wrong-password, and both-wrong into this exact same
+ *   message and the exact same status, so the copy here must not claim to
+ *   know which field was wrong either (login/route.ts's module comment has
+ *   the full reasoning for why the response can't distinguish them).
+ * - any other 5xx — an unexpected SERVER error, distinct from 503: not a
+ *   credential problem and not (as far as the client can tell) a known
+ *   misconfiguration either.
+ * - anything else (400/403/404/…, or a status this function simply doesn't
+ *   recognize) — explicitly NOT folded into the credentials copy. Names the
+ *   actual status code and points at `/api/cloud/diagnose`, because the
+ *   realistic cause is a routing/deployment problem (a route that 404s, a
+ *   proxy/CDN returning its own error page) rather than anything about what
+ *   the user typed.
  */
 export function signInFailureMessage(status: number | "network"): string {
-  if (status === 503) return "Cloud sync isn't set up on this server.";
-  if (status === "network") return "Can't reach the network.";
-  if (typeof status === "number" && status >= 500) return "Something went wrong on the server — try again.";
-  return "Incorrect password.";
+  if (status === "network") return "Can't reach the network. Check your connection and try again.";
+  if (status === 503) {
+    return "Cloud sync isn't set up on this server. Check /api/cloud/diagnose for details, or see the deployment guide (docs/deployment.md).";
+  }
+  if (status === 401) return "Incorrect username or password.";
+  if (status >= 500) return "Something went wrong on the server. Try again.";
+  return `Unexpected server response (HTTP ${status}) — the cloud routes may not be deployed yet; see /api/cloud/diagnose.`;
 }
 
 export interface CloudSyncDeps {
@@ -678,9 +732,9 @@ export function createCloudSyncController(deps: CloudSyncDeps): CloudSyncControl
       return () => listeners.delete(listener);
     },
 
-    async signIn(password) {
+    async signIn(username, password) {
       setSnapshot({ status: "signing-in", errorMessage: null });
-      const result = await transport.login(password);
+      const result = await transport.login(username, password);
       if (!result.ok) {
         setSnapshot({ status: "signed-out" });
         return { ok: false, message: signInFailureMessage(result.status) };
@@ -821,7 +875,7 @@ function makeSingleton(): {
       forwardedListeners.add(listener);
       return () => forwardedListeners.delete(listener);
     },
-    signIn: (password) => active.signIn(password),
+    signIn: (username, password) => active.signIn(username, password),
     signOut: () => active.signOut(),
     reload: () => active.reload(),
     overwrite: () => active.overwrite(),

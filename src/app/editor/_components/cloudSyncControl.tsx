@@ -17,12 +17,23 @@
  * once it attaches, with no reliance on some later unrelated re-render.
  *
  * `SignInDialog` reuses pdfExportModal.tsx's dependency-free a11y recipe
- * verbatim: role="dialog" aria-modal, focus moves in on open and is
- * restored to the opener on close, Tab wraps at the dialog's own ends via
- * dialogFocusTrap.ts's `focusableElementsIn` (the shared fix for the
- * hidden-input trap bug both existing dialogs cite), and Escape/backdrop
- * close it — all suppressed while a sign-in request is in flight, same rule
- * as the PDF modal's `working` guard.
+ * verbatim: role="dialog" aria-modal, focus moves in on open (to the
+ * username field, TASK 4's first field) and is restored to the opener on
+ * close, Tab wraps at the dialog's own ends via dialogFocusTrap.ts's
+ * `focusableElementsIn` (the shared fix for the hidden-input trap bug both
+ * existing dialogs cite), and Escape/backdrop close it — all suppressed
+ * while a sign-in request is in flight, same rule as the PDF modal's
+ * `working` guard.
+ *
+ * TASK 3 (error handling, previously: nothing rendered on failure at all —
+ * the owner had to open devtools to learn a sign-in even failed): a
+ * `role="alert"` message with copy that differs by failure shape
+ * (`signInFailureMessage` in cloudSync.ts owns the exact four strings —
+ * wrong credentials / server misconfigured / offline / unexpected — this
+ * component only renders whatever it's handed), cleared the instant either
+ * field is edited (a stale error sitting under a freshly-retyped password
+ * reads as "still wrong" even before the new attempt resolves), and Sign in
+ * is disabled — with a pending label — for the whole round trip.
  */
 
 import {
@@ -107,9 +118,10 @@ export type SignInResult = { ok: true } | { ok: false; message: string };
 
 export interface SignInDialogProps {
   onClose(): void;
-  onSubmit(password: string): Promise<SignInResult>;
+  onSubmit(username: string, password: string): Promise<SignInResult>;
   /** Test seams (no interaction driver in this project — same pattern as
    * PdfExportModal's initialMarginText/initialFailure). */
+  initialUsername?: string;
   initialPassword?: string;
   initialError?: string | null;
   initialWorking?: boolean;
@@ -118,24 +130,26 @@ export interface SignInDialogProps {
 export function SignInDialog({
   onClose,
   onSubmit,
+  initialUsername = "",
   initialPassword = "",
   initialError = null,
   initialWorking = false,
 }: SignInDialogProps): ReactElement {
+  const [username, setUsername] = useState(initialUsername);
   const [password, setPassword] = useState(initialPassword);
   const [error, setError] = useState<string | null>(initialError);
   const [working, setWorking] = useState(initialWorking);
   const dialogRef = useRef<HTMLDivElement>(null);
-  const passwordRef = useRef<HTMLInputElement>(null);
+  const usernameRef = useRef<HTMLInputElement>(null);
 
-  // Focus the password field on open; restore the opener's focus on close
-  // (every close path — Escape, backdrop, Cancel, a successful submit —
-  // unmounts this component the same way, so one cleanup covers all of
-  // them). Effects never run in renderToStaticMarkup; covered by the manual
-  // browser checklist, same as pdfExportModal.tsx.
+  // Focus the username field (the first field, TASK 4) on open; restore the
+  // opener's focus on close (every close path — Escape, backdrop, Cancel, a
+  // successful submit — unmounts this component the same way, so one
+  // cleanup covers all of them). Effects never run in renderToStaticMarkup;
+  // covered by the manual browser checklist, same as pdfExportModal.tsx.
   useEffect(() => {
     const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    (passwordRef.current ?? dialogRef.current)?.focus();
+    (usernameRef.current ?? dialogRef.current)?.focus();
     return () => opener?.focus();
   }, []);
 
@@ -160,12 +174,21 @@ export function SignInDialog({
     }
   };
 
+  // Shared by both fields (TASK 3: "clear the message when the user edits a
+  // field") — a stale error sitting under a freshly-retyped credential reads
+  // as "still wrong" even before the new attempt has resolved. Guarded on
+  // `error !== null` only to avoid a pointless setState on every keystroke
+  // once it's already clear.
+  const clearErrorOnEdit = (): void => {
+    if (error !== null) setError(null);
+  };
+
   const handleSubmit = async (event: FormEvent): Promise<void> => {
     event.preventDefault();
-    if (working || password.length === 0) return;
+    if (working || username.length === 0 || password.length === 0) return;
     setWorking(true);
     setError(null);
-    const result = await onSubmit(password);
+    const result = await onSubmit(username, password);
     if (result.ok) {
       onClose();
       return;
@@ -199,16 +222,35 @@ export function SignInDialog({
         </h2>
         <form onSubmit={(event) => void handleSubmit(event)} className="flex flex-col gap-3">
           <label className="flex flex-col gap-1 text-xs text-gray-400">
+            Username
+            <input
+              ref={usernameRef}
+              type="text"
+              autoComplete="username"
+              value={username}
+              disabled={working}
+              aria-invalid={error !== null}
+              aria-describedby={error !== null ? "cloud-signin-error" : undefined}
+              onChange={(event) => {
+                setUsername(event.currentTarget.value);
+                clearErrorOnEdit();
+              }}
+              className="w-full rounded border border-gray-600 bg-gray-900 px-2 py-1 text-sm text-gray-200"
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-xs text-gray-400">
             Password
             <input
-              ref={passwordRef}
               type="password"
               autoComplete="current-password"
               value={password}
               disabled={working}
               aria-invalid={error !== null}
               aria-describedby={error !== null ? "cloud-signin-error" : undefined}
-              onChange={(event) => setPassword(event.currentTarget.value)}
+              onChange={(event) => {
+                setPassword(event.currentTarget.value);
+                clearErrorOnEdit();
+              }}
               className="w-full rounded border border-gray-600 bg-gray-900 px-2 py-1 text-sm text-gray-200"
             />
           </label>
@@ -233,7 +275,7 @@ export function SignInDialog({
             </button>
             <button
               type="submit"
-              disabled={working || password.length === 0}
+              disabled={working || username.length === 0 || password.length === 0}
               className="rounded border border-gray-500 bg-gray-600 px-3 py-1 font-semibold text-white hover:bg-gray-500 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {working ? "Signing in…" : "Sign in"}
@@ -254,7 +296,7 @@ export interface CloudSyncControlContentProps {
   /** Injected so the relative-time label is deterministic in tests and so
    * the connected wrapper controls its own refresh cadence. */
   now: number;
-  onSignIn(password: string): Promise<SignInResult>;
+  onSignIn(username: string, password: string): Promise<SignInResult>;
   onSignOut(): void;
   onReload(): void;
   onOverwrite(): void;
@@ -364,7 +406,7 @@ export default function CloudSyncControl(): ReactElement {
     <CloudSyncControlContent
       snapshot={snapshot}
       now={now}
-      onSignIn={(password) => cloudSync.signIn(password)}
+      onSignIn={(username, password) => cloudSync.signIn(username, password)}
       onSignOut={() => cloudSync.signOut()}
       onReload={() => void cloudSync.reload()}
       onOverwrite={() => void cloudSync.overwrite()}

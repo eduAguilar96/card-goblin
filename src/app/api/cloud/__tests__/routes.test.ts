@@ -9,12 +9,13 @@
  * and unconfigured env → a clean 503 everywhere.
  */
 import { NextRequest } from "next/server";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { POST as loginPost } from "@/app/api/cloud/login/route";
 import { POST as logoutPost } from "@/app/api/cloud/logout/route";
 import { GET as projectGet, PUT as projectPut } from "@/app/api/cloud/project/route";
 import { POST as presignPost } from "@/app/api/cloud/assets/presign/route";
 import { GET as assetGet, DELETE as assetDelete } from "@/app/api/cloud/assets/[name]/route";
+import { GET as diagnoseGet } from "@/app/api/cloud/diagnose/route";
 import {
   createInMemoryCloudStorage,
   resetCloudStorageForTests,
@@ -22,8 +23,8 @@ import {
   type CloudStorage,
 } from "@/lib/cloud/r2";
 import { PROJECT_KEY } from "@/lib/cloud/keys";
-import { createSessionCookieValue, hashPassword } from "@/lib/cloud/session";
-import { SESSION_COOKIE_NAME } from "@/lib/cloud/auth";
+import { createSessionCookieValue, hashPassword, verifyPassword } from "@/lib/cloud/session";
+import { DEFAULT_ADMIN_USERNAME, LOGIN_GENERIC_FAILURE_MESSAGE, SESSION_COOKIE_NAME } from "@/lib/cloud/auth";
 
 const TEST_PASSWORD = "correct password for tests";
 const BASE = "http://localhost:3000";
@@ -31,14 +32,16 @@ const BASE = "http://localhost:3000";
 // >= 32 bytes (M3: loadSessionEnvFromProcess now rejects anything shorter).
 const TEST_SESSION_SECRET = "test-session-secret-that-is-long-enough-32b";
 
-async function configureSession(): Promise<void> {
+async function configureSession(opts: { username?: string } = {}): Promise<void> {
   process.env.SESSION_SECRET = TEST_SESSION_SECRET;
   process.env.ADMIN_PASSWORD_HASH = await hashPassword(TEST_PASSWORD);
+  if (opts.username !== undefined) process.env.ADMIN_USERNAME = opts.username;
 }
 
 function clearSessionConfig(): void {
   delete process.env.SESSION_SECRET;
   delete process.env.ADMIN_PASSWORD_HASH;
+  delete process.env.ADMIN_USERNAME;
 }
 
 function sessionCookieHeader(): string {
@@ -132,9 +135,25 @@ describe("authz — 401 without a session cookie, on every protected route", () 
 describe("unconfigured — a clean 503, never a crash or a stack trace", () => {
   it("login, with no ADMIN_PASSWORD_HASH/SESSION_SECRET set", async () => {
     clearSessionConfig();
-    const res = await loginPost(req("/api/cloud/login", { method: "POST", body: { password: "x" } }));
+    const res = await loginPost(req("/api/cloud/login", { method: "POST", body: { username: "x", password: "x" } }));
     expect(res.status).toBe(503);
     expect((await json(res) as { error: string }).error).toMatch(/configured/i);
+  });
+
+  it("login, with SESSION_SECRET/ADMIN_USERNAME set but ADMIN_PASSWORD_HASH unparseable (TASK 2): a DISTINCT 503, not the generic 'not configured' one", async () => {
+    process.env.SESSION_SECRET = TEST_SESSION_SECRET;
+    // The exact dotenv-mangled shape (session.test.ts's fixture) — present,
+    // but not a hash `parseStoredHash` can read.
+    process.env.ADMIN_PASSWORD_HASH = "scrypt31072DB04C5G5r81KlmRt5brOAueGFOewWVkIc9K";
+    const res = await loginPost(
+      req("/api/cloud/login", { method: "POST", body: { username: DEFAULT_ADMIN_USERNAME, password: TEST_PASSWORD } }),
+    );
+    expect(res.status).toBe(503);
+    const body = (await json(res)) as { error: string };
+    expect(body.error).toMatch(/unreadable/i);
+    expect(body.error).not.toMatch(/configured/i); // distinct wording from CLOUD_UNCONFIGURED_MESSAGE
+    // Never any part of the actual (mangled) hash text.
+    expect(body.error).not.toContain("DB04C_5G5r81KlmRt5brOA");
   });
 
   it("logout still succeeds even unconfigured (nothing to clean up)", async () => {
@@ -204,8 +223,13 @@ describe("unconfigured — a clean 503, never a crash or a stack trace", () => {
 // ---------------------------------------------------------------------------
 
 describe("POST /api/cloud/login", () => {
-  it("the correct password: 200 + a session cookie", async () => {
-    const res = await loginPost(req("/api/cloud/login", { method: "POST", body: { password: TEST_PASSWORD } }));
+  it("the correct username + password: 200 + a session cookie", async () => {
+    const res = await loginPost(
+      req("/api/cloud/login", {
+        method: "POST",
+        body: { username: DEFAULT_ADMIN_USERNAME, password: TEST_PASSWORD },
+      }),
+    );
     expect(res.status).toBe(200);
     const setCookie = res.headers.get("set-cookie") ?? "";
     expect(setCookie).toContain(`${SESSION_COOKIE_NAME}=`);
@@ -214,14 +238,17 @@ describe("POST /api/cloud/login", () => {
     expect(setCookie.toLowerCase()).toContain("samesite=lax");
   });
 
-  it("the wrong password: 401, a GENERIC message (doesn't hint at what's wrong)", async () => {
-    const res = await loginPost(req("/api/cloud/login", { method: "POST", body: { password: "nope" } }));
+  it("the wrong password (right username): 401, a GENERIC message (doesn't hint at what's wrong)", async () => {
+    const res = await loginPost(
+      req("/api/cloud/login", { method: "POST", body: { username: DEFAULT_ADMIN_USERNAME, password: "nope" } }),
+    );
     expect(res.status).toBe(401);
     const body = (await json(res)) as { error: string };
     expect(body.error).not.toMatch(/scrypt|hash|salt/i);
+    expect(body.error).toBe(LOGIN_GENERIC_FAILURE_MESSAGE);
   });
 
-  it("a malformed body (no password field) fails the SAME way as a wrong password", async () => {
+  it("a malformed body (no username/password fields) fails the SAME way as wrong credentials", async () => {
     const res = await loginPost(req("/api/cloud/login", { method: "POST", body: { nope: "field" } }));
     expect(res.status).toBe(401);
   });
@@ -248,7 +275,9 @@ describe("POST /api/cloud/login", () => {
       // the honest way to pin this, at the cost of the test itself taking
       // ~500 ms.
       const start = Date.now();
-      const res = await loginPost(req("/api/cloud/login", { method: "POST", body: { password: "nope" } }));
+      const res = await loginPost(
+        req("/api/cloud/login", { method: "POST", body: { username: DEFAULT_ADMIN_USERNAME, password: "nope" } }),
+      );
       const elapsedMs = Date.now() - start;
       expect(res.status).toBe(401);
       // A little under 500 to absorb scheduler jitter/rounding — setTimeout
@@ -257,6 +286,245 @@ describe("POST /api/cloud/login", () => {
     },
     10_000,
   );
+});
+
+// ---------------------------------------------------------------------------
+// TASK 4: username + password — wrong-username, wrong-password, and
+// both-wrong must be INDISTINGUISHABLE (status, message, AND timing).
+// ---------------------------------------------------------------------------
+
+describe("TASK 4: wrong-username, wrong-password, and both-wrong are indistinguishable", () => {
+  const WRONG_CASES: [label: string, username: string, password: string][] = [
+    ["wrong username only", "not-the-admin", TEST_PASSWORD],
+    ["wrong password only", DEFAULT_ADMIN_USERNAME, "not-the-password"],
+    ["both wrong", "not-the-admin", "not-the-password"],
+  ];
+
+  it("all three produce the exact SAME status and SAME response body", async () => {
+    const outcomes = await Promise.all(
+      WRONG_CASES.map(async ([, username, password]) => {
+        const res = await loginPost(req("/api/cloud/login", { method: "POST", body: { username, password } }));
+        return { status: res.status, body: (await json(res)) as { error: string } };
+      }),
+    );
+    for (const outcome of outcomes) {
+      expect(outcome.status).toBe(401);
+      expect(outcome.body).toEqual({ error: LOGIN_GENERIC_FAILURE_MESSAGE });
+    }
+  });
+
+  for (const [label, username, password] of WRONG_CASES) {
+    it(
+      `${label}: also waits out the FULL fixed delay — no early return skips it`,
+      async () => {
+        // Same real-timer rationale as the "wrong password" delay test
+        // above: verifyPassword's native scrypt derivation can't be
+        // fast-forwarded with fake timers.
+        const start = Date.now();
+        const res = await loginPost(req("/api/cloud/login", { method: "POST", body: { username, password } }));
+        const elapsedMs = Date.now() - start;
+        expect(res.status).toBe(401);
+        expect(elapsedMs).toBeGreaterThanOrEqual(450);
+      },
+      10_000,
+    );
+  }
+});
+
+// ---------------------------------------------------------------------------
+// TASK 4: ADMIN_USERNAME — optional env var, defaults to "admin"
+// ---------------------------------------------------------------------------
+
+describe("ADMIN_USERNAME", () => {
+  it('defaults to "admin" when unset (already exercised by "the correct username + password" above; pinned here explicitly)', async () => {
+    const res = await loginPost(
+      req("/api/cloud/login", { method: "POST", body: { username: "admin", password: TEST_PASSWORD } }),
+    );
+    expect(res.status).toBe(200);
+  });
+
+  it("once a custom ADMIN_USERNAME is set, the default \"admin\" no longer works and the custom one does", async () => {
+    await configureSession({ username: "eduxx" });
+    const withDefault = await loginPost(
+      req("/api/cloud/login", { method: "POST", body: { username: "admin", password: TEST_PASSWORD } }),
+    );
+    expect(withDefault.status).toBe(401);
+    const withCustom = await loginPost(
+      req("/api/cloud/login", { method: "POST", body: { username: "eduxx", password: TEST_PASSWORD } }),
+    );
+    expect(withCustom.status).toBe(200);
+  });
+
+  it("ADMIN_USERNAME is trimmed, same rule as the other env vars", async () => {
+    await configureSession({ username: "  eduxx  " });
+    const res = await loginPost(
+      req("/api/cloud/login", { method: "POST", body: { username: "eduxx", password: TEST_PASSWORD } }),
+    );
+    expect(res.status).toBe(200);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// TASK 2a: structured server-side logging, one reason-coded line per attempt
+// ---------------------------------------------------------------------------
+
+describe("cloud-login structured logging (TASK 2a): one reason-coded line per attempt, never a secret", () => {
+  it('logs "cloud-login: reason=ok" on success', async () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      await loginPost(
+        req("/api/cloud/login", { method: "POST", body: { username: DEFAULT_ADMIN_USERNAME, password: TEST_PASSWORD } }),
+      );
+      expect(logSpy).toHaveBeenCalledWith("cloud-login: reason=ok");
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+
+  it(
+    'logs the right reason code for each failure branch, and NEVER the username/password/hash values',
+    async () => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      try {
+        await loginPost(
+          req("/api/cloud/login", {
+            method: "POST",
+            body: { username: "someone-else", password: TEST_PASSWORD },
+          }),
+        );
+        expect(warnSpy).toHaveBeenLastCalledWith("cloud-login: reason=username-mismatch");
+
+        await loginPost(
+          req("/api/cloud/login", {
+            method: "POST",
+            body: { username: DEFAULT_ADMIN_USERNAME, password: "a wrong password" },
+          }),
+        );
+        expect(warnSpy).toHaveBeenLastCalledWith("cloud-login: reason=password-mismatch");
+
+        clearSessionConfig();
+        await loginPost(req("/api/cloud/login", { method: "POST", body: { username: "x", password: "y" } }));
+        expect(warnSpy).toHaveBeenLastCalledWith("cloud-login: reason=no-env");
+
+        await configureSession();
+        process.env.ADMIN_PASSWORD_HASH = "scrypt31072DB04C5G5r81KlmRt5brOAueGFOewWVkIc9K"; // dotenv-mangled shape
+        await loginPost(req("/api/cloud/login", { method: "POST", body: { username: "x", password: "y" } }));
+        expect(warnSpy).toHaveBeenLastCalledWith("cloud-login: reason=hash-unparseable");
+
+        // Not once, across every call above, did a log line carry any part
+        // of a credential or the hash — only the reason code.
+        const allLoggedText = warnSpy.mock.calls.map((call) => call.join(" ")).join("\n");
+        expect(allLoggedText).not.toContain(TEST_PASSWORD);
+        expect(allLoggedText).not.toContain("someone-else");
+        expect(allLoggedText).not.toContain("a wrong password");
+        expect(allLoggedText).not.toContain(DEFAULT_ADMIN_USERNAME);
+        expect(allLoggedText).not.toContain("DB04C_5G5r81KlmRt5brOA");
+        for (const call of warnSpy.mock.calls) {
+          expect(call).toHaveLength(1); // exactly one string arg, nothing appended
+          expect(call[0]).toMatch(/^cloud-login: reason=(no-env|hash-unparseable|username-mismatch|password-mismatch)$/);
+        }
+      } finally {
+        warnSpy.mockRestore();
+      }
+    },
+    10_000, // two of the calls above pay the real 500 ms credential-failure delay
+  );
+});
+
+// ---------------------------------------------------------------------------
+// TASK 2b: GET /api/cloud/diagnose
+// ---------------------------------------------------------------------------
+
+describe("GET /api/cloud/diagnose", () => {
+  const R2_VARS = ["R2_ACCOUNT_ID", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_BUCKET"] as const;
+
+  afterEach(() => {
+    for (const key of R2_VARS) delete process.env[key];
+  });
+
+  it("is reachable with NO session cookie at all — deliberately unauthenticated", async () => {
+    clearSessionConfig();
+    const res = await diagnoseGet();
+    expect(res.status).toBe(200);
+  });
+
+  it("a fully healthy config: every summary and detail bool true, hash parses as the new dot format", async () => {
+    for (const key of R2_VARS) process.env[key] = "some-value";
+    process.env.ADMIN_USERNAME = "eduxx";
+    const res = await diagnoseGet();
+    expect(await json(res)).toEqual({
+      configured: { r2: true, session: true, admin: true },
+      adminHash: { present: true, parses: true, algorithm: "scrypt", looksDotenvMangled: false },
+      sessionSecret: { present: true, meetsMinimumLength: true },
+      r2: { accountId: true, accessKeyId: true, secretAccessKey: true, bucket: true },
+    });
+  });
+
+  it("nothing configured at all: every bool false, every detail null", async () => {
+    clearSessionConfig();
+    const res = await diagnoseGet();
+    expect(await json(res)).toEqual({
+      configured: { r2: false, session: false, admin: false },
+      adminHash: { present: false, parses: false, algorithm: null, looksDotenvMangled: false },
+      sessionSecret: { present: false, meetsMinimumLength: false },
+      r2: { accountId: false, accessKeyId: false, secretAccessKey: false, bucket: false },
+    });
+  });
+
+  it("a dotenv-mangled hash is named specifically (TASK 2's whole point) rather than just 'doesn't parse'", async () => {
+    process.env.ADMIN_PASSWORD_HASH = "scrypt31072DB04C5G5r81KlmRt5brOAueGFOewWVkIc9K";
+    const res = await diagnoseGet();
+    const body = (await json(res)) as { adminHash: unknown; configured: { admin: boolean } };
+    expect(body.adminHash).toEqual({
+      present: true,
+      parses: false,
+      algorithm: null,
+      looksDotenvMangled: true,
+    });
+    expect(body.configured.admin).toBe(false);
+  });
+
+  it("a legacy $-separated hash still reports parses:true (TASK 1's no-broken-window guarantee, visible in diagnostics — without disclosing WHICH separator, which would date the operator's last rotation)", async () => {
+    process.env.ADMIN_PASSWORD_HASH = (await hashPassword(TEST_PASSWORD)).replaceAll(".", "$");
+    const res = await diagnoseGet();
+    const body = (await json(res)) as { adminHash: unknown };
+    expect(body.adminHash).toEqual({
+      present: true,
+      parses: true,
+      algorithm: "scrypt",
+      looksDotenvMangled: false,
+    });
+  });
+
+  it("a SESSION_SECRET present but under the minimum length: present true, meetsMinimumLength false, configured.session false", async () => {
+    process.env.SESSION_SECRET = "too-short";
+    const res = await diagnoseGet();
+    const body = (await json(res)) as { sessionSecret: unknown; configured: { session: boolean } };
+    expect(body.sessionSecret).toEqual({ present: true, meetsMinimumLength: false });
+    expect(body.configured.session).toBe(false);
+  });
+
+  it("partial R2 config: each of the four vars reported independently, never collapsed to one bool", async () => {
+    process.env.R2_ACCOUNT_ID = "some-account-id";
+    process.env.R2_BUCKET = "some-bucket";
+    const res = await diagnoseGet();
+    const body = (await json(res)) as { r2: unknown; configured: { r2: boolean } };
+    expect(body.r2).toEqual({ accountId: true, accessKeyId: false, secretAccessKey: false, bucket: true });
+    expect(body.configured.r2).toBe(false);
+  });
+
+  it("never leaks a secret VALUE anywhere in the payload — only booleans/enums, exactly as documented", async () => {
+    process.env.R2_ACCOUNT_ID = "super-secret-account-id-value";
+    process.env.R2_ACCESS_KEY_ID = "super-secret-key-id-value";
+    process.env.R2_SECRET_ACCESS_KEY = "super-secret-access-key-value";
+    process.env.R2_BUCKET = "super-secret-bucket-value";
+    process.env.ADMIN_USERNAME = "super-secret-username-value";
+    const res = await diagnoseGet();
+    const text = JSON.stringify(await json(res));
+    expect(text).not.toContain("super-secret");
+    expect(text).not.toContain(TEST_SESSION_SECRET);
+    expect(text).not.toContain(TEST_PASSWORD);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -603,5 +871,45 @@ describe("DELETE /api/cloud/assets/[name]", () => {
       params: Promise.resolve({ name: "bad name" }),
     });
     expect(res.status).toBe(400);
+  });
+});
+
+describe("the wrong-username path still pays for scrypt (review: an early skip is a timing oracle)", () => {
+  // Mutating the route to `usernameOk ? await verifyPassword(...) : false`
+  // passed the whole suite while creating a 227ms, 30/30-separable username
+  // oracle: the existing delay assertions can't see it because the fixed
+  // 500ms delay is longer than scrypt's ~200ms. This pin self-calibrates —
+  // it measures scrypt on THIS machine, then requires the wrong-username
+  // login to have spent a meaningful share of it.
+  it("a wrong username costs the delay PLUS real password work", async () => {
+    const hash = await hashPassword(TEST_PASSWORD);
+    process.env.ADMIN_PASSWORD_HASH = hash;
+
+    const t0 = performance.now();
+    await verifyPassword(TEST_PASSWORD, hash);
+    const scryptMs = performance.now() - t0;
+
+    const t1 = performance.now();
+    await loginPost(
+      req("/api/cloud/login", {
+        method: "POST",
+        body: { username: "definitely-not-the-admin", password: TEST_PASSWORD },
+      }),
+    );
+    const loginMs = performance.now() - t1;
+
+    // Half of one scrypt above the fixed delay: generous enough for a noisy
+    // CI box, far below the ~500ms a scrypt-skipping route would return in.
+    // FAILURE_DELAY_MS is private to the route; 500 is its documented value.
+    expect(loginMs).toBeGreaterThan(500 + scryptMs * 0.5);
+  }, 20_000);
+});
+
+describe("logout clears a __Host- cookie (which browsers reject without Path=/)", () => {
+  it("sets Path=/ — a narrower path would silently fail to clear the session", async () => {
+    const res = await logoutPost();
+    const cookie = res.headers.get("set-cookie") ?? "";
+    expect(cookie).toContain("Path=/");
+    expect(cookie).toContain(SESSION_COOKIE_NAME);
   });
 });

@@ -15,6 +15,38 @@ import { CLOUD_UNCONFIGURED_MESSAGE } from "@/lib/cloud/r2";
 export { CLOUD_UNCONFIGURED_MESSAGE };
 
 /**
+ * The login route's OTHER 503 (independent security review): distinct from
+ * `CLOUD_UNCONFIGURED_MESSAGE`, which means "the env vars aren't set at
+ * all." This one means they ARE set, but `ADMIN_PASSWORD_HASH` doesn't
+ * parse — historically almost always the dotenv-expand `$` footgun
+ * (session.ts's module comment has the full mechanism: a bare `$` in a
+ * `.env.local` VALUE reads as a variable reference), which silently
+ * truncated/mangled a `$`-separated hash with no error at load time. Before
+ * TASK 1's dot-separated format, that failure mode was INDISTINGUISHABLE
+ * from a wrong password (a 401, forever, however carefully the real
+ * password was typed) — same 503 SHAPE as `CLOUD_UNCONFIGURED_MESSAGE`
+ * (status + a plain `{error}` body, never a 401), but its own wording,
+ * because the fix is different (regenerate the hash, not "type the password
+ * again"). The dot format needs no escaping anywhere, so a hash minted by
+ * the CURRENT `npm run hash-password` can no longer land here via this
+ * route — this message (and `GET /api/cloud/diagnose`'s
+ * `looksDotenvMangled`) exist for a hash that's stale, hand-edited, or
+ * otherwise just malformed. Never includes any part of the actual hash.
+ */
+export const ADMIN_HASH_UNREADABLE_MESSAGE =
+  "The stored password hash is unreadable — regenerate it with `npm run hash-password` and " +
+  "update ADMIN_PASSWORD_HASH, or check GET /api/cloud/diagnose for exactly what's wrong " +
+  "with the current one.";
+
+/** The login route's single 401 body (TASK 4: shared verbatim by a wrong
+ * username, a wrong password, and both wrong — see that route's module
+ * comment) — exported here, not defined in route.ts, because a Next.js
+ * route.ts file may only export HTTP-method handlers (same C1 fix as
+ * `extractCredentials` below), and routes.test.ts asserts against this
+ * exact string rather than a duplicated literal. */
+export const LOGIN_GENERIC_FAILURE_MESSAGE = "Incorrect username or password.";
+
+/**
  * `__Host-` prefixed (L7, review): browsers REFUSE to even set a cookie
  * named `__Host-*` unless it carries `Secure`, `Path=/`, and no `Domain`
  * attribute — all three already true of this cookie (`withSessionCookie`
@@ -32,8 +64,10 @@ const SESSION_MAX_AGE_SECONDS = 30 * 24 * 60 * 60; // 30 days (§7.6) — mirror
  * characters — see `sessionSecretByteLength`) matches this module's own
  * `openssl rand -base64 32` / `randomBytes(32)` guidance in deployment.md,
  * so a secret generated the documented way always clears it with room to
- * spare. */
-const MIN_SESSION_SECRET_BYTES = 32;
+ * spare. Exported (TASK 2b) so `GET /api/cloud/diagnose` can report
+ * `meetsMinimumLength` against the SAME floor this module enforces, rather
+ * than a second hardcoded `32` drifting out of sync with this one. */
+export const MIN_SESSION_SECRET_BYTES = 32;
 
 /** UTF-8 BYTE length, deliberately not `secret.length` (UTF-16 code units):
  * `createHmac` consumes a string key as its UTF-8 byte encoding, so bytes —
@@ -42,25 +76,51 @@ const MIN_SESSION_SECRET_BYTES = 32;
  * every generator command in deployment.md produces). Using `.length`
  * instead would be measuring the wrong unit; env vars are free-form text an
  * operator could paste from anywhere, so this is worth getting exactly
- * right rather than assuming ASCII. */
-function sessionSecretByteLength(secret: string): number {
+ * right rather than assuming ASCII. Exported for the same reason as
+ * `MIN_SESSION_SECRET_BYTES` above (`GET /api/cloud/diagnose`). */
+export function sessionSecretByteLength(secret: string): number {
   return new TextEncoder().encode(secret).length;
 }
+
+/** The sign-in username when `ADMIN_USERNAME` is unset/blank (FEATURE: a
+ * lone password box advertises "one admin, guess the password" — requiring
+ * a username too, even a well-known default one, means a credential-
+ * stuffing bot must submit two correct fields instead of one, and the
+ * sign-in form itself never announces the account name to anyone who loads
+ * the page). Deliberately NOT a secret and NOT a second entropy source — see
+ * login/route.ts's module comment for the honest accounting of what this
+ * does and doesn't buy. Keeping the DEFAULT working out of the box (rather
+ * than requiring `ADMIN_USERNAME` alongside `ADMIN_PASSWORD_HASH`/
+ * `SESSION_SECRET`) matches this module's existing rule that only the
+ * genuinely REQUIRED vars gate "is cloud sync configured" — see
+ * `loadSessionEnvFromProcess` below, which never fails closed over this
+ * one. */
+export const DEFAULT_ADMIN_USERNAME = "admin";
 
 export interface SessionEnv {
   sessionSecret: string;
   adminPasswordHash: string;
+  /** `ADMIN_USERNAME`, trimmed, or `DEFAULT_ADMIN_USERNAME` when unset/blank
+   * — always a real string, never itself a reason this is null. */
+  adminUsername: string;
 }
 
 /**
- * Reads `SESSION_SECRET` + `ADMIN_PASSWORD_HASH`. Blank counts as missing
- * (mirrors r2.ts's loadR2ConfigFromEnv) — auth is a SEPARATE "configured?"
- * question from R2's, so login can 503 independently of storage. A
- * `SESSION_SECRET` present but under `MIN_SESSION_SECRET_BYTES` ALSO reads
- * as "not configured" (M3, review) — failing closed the same way a missing
- * secret does, rather than accepting a dangerously weak one, matches this
- * module's existing posture: every other "is this safe to proceed with"
- * question here already answers with 503, never a degraded-but-running mode.
+ * Reads `SESSION_SECRET` + `ADMIN_PASSWORD_HASH` (+ optional
+ * `ADMIN_USERNAME`). Blank counts as missing (mirrors r2.ts's
+ * loadR2ConfigFromEnv) — auth is a SEPARATE "configured?" question from
+ * R2's, so login can 503 independently of storage. A `SESSION_SECRET`
+ * present but under `MIN_SESSION_SECRET_BYTES` ALSO reads as "not
+ * configured" (M3, review) — failing closed the same way a missing secret
+ * does, rather than accepting a dangerously weak one, matches this module's
+ * existing posture: every other "is this safe to proceed with" question
+ * here already answers with 503, never a degraded-but-running mode.
+ * `ADMIN_USERNAME` is exempt from that posture ON PURPOSE: it's optional
+ * with a working default, so its absence is never a reason to 503 — only
+ * `sessionSecret`/`adminPasswordHash` gate this function's null return.
+ * Whether the STORED password hash itself is well-formed is a separate
+ * question this function does not answer — see session.ts's
+ * `isStoredHashReadable`, which the login route checks on its own.
  */
 export function loadSessionEnvFromProcess(
   env: Record<string, string | undefined> = process.env,
@@ -69,7 +129,8 @@ export function loadSessionEnvFromProcess(
   const adminPasswordHash = env.ADMIN_PASSWORD_HASH?.trim();
   if (!sessionSecret || !adminPasswordHash) return null;
   if (sessionSecretByteLength(sessionSecret) < MIN_SESSION_SECRET_BYTES) return null;
-  return { sessionSecret, adminPasswordHash };
+  const adminUsername = env.ADMIN_USERNAME?.trim() || DEFAULT_ADMIN_USERNAME;
+  return { sessionSecret, adminPasswordHash, adminUsername };
 }
 
 export type SessionCheck = { ok: true } | { ok: false; status: 401 | 503; error: string };
@@ -126,20 +187,34 @@ export function withClearedSessionCookie(response: NextResponse): NextResponse {
   return response;
 }
 
-/** Pull `password` out of an arbitrary JSON body — "" for anything that
- * isn't `{password: string}` (the login route's malformed-body path folds
- * into the same delayed, generic failure a wrong password gets — see
- * login/route.ts's module comment). Lives here (not in the route file)
- * because a route.ts file may only export its HTTP-method handlers — see
- * keys.ts's module comment for the same C1 fix applied to it. */
-export function extractPassword(body: unknown): string {
+export interface LoginCredentials {
+  username: string;
+  password: string;
+}
+
+/** "" for anything that isn't a string at `body[key]` — the shared shape
+ * both fields of `extractCredentials` fall back to. */
+function stringField(body: unknown, key: string): string {
   if (
     typeof body === "object" &&
     body !== null &&
-    "password" in body &&
-    typeof (body as { password: unknown }).password === "string"
+    key in body &&
+    typeof (body as Record<string, unknown>)[key] === "string"
   ) {
-    return (body as { password: string }).password;
+    return (body as Record<string, string>)[key];
   }
   return "";
+}
+
+/** Pull `{username, password}` out of an arbitrary JSON body — each field
+ * independently "" when absent or non-string (the login route's malformed-
+ * body path folds into the same delayed, generic failure a wrong
+ * username/password gets — see login/route.ts's module comment). Neither
+ * field is trimmed: exact, case-sensitive matching, same "no silent
+ * normalization" rule `verifyPassword` already documents for the password
+ * half. Lives here (not in the route file) because a route.ts file may only
+ * export its HTTP-method handlers — see keys.ts's module comment for the
+ * same C1 fix applied to it. */
+export function extractCredentials(body: unknown): LoginCredentials {
+  return { username: stringField(body, "username"), password: stringField(body, "password") };
 }

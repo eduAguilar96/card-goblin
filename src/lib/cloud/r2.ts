@@ -144,6 +144,31 @@ export function loadR2ConfigFromEnv(env: Record<string, string | undefined> = pr
   return { accountId, accessKeyId, secretAccessKey, bucket };
 }
 
+export interface R2ConfigDiagnostics {
+  accountId: boolean;
+  accessKeyId: boolean;
+  secretAccessKey: boolean;
+  bucket: boolean;
+}
+
+/**
+ * Per-variable presence (TASK 2b, `GET /api/cloud/diagnose`) — unlike
+ * `loadR2ConfigFromEnv`'s all-or-nothing `null`, this reports EACH of the
+ * four independently so an operator can see exactly which one is still
+ * blank instead of a single undifferentiated "not configured." Same
+ * blank-counts-as-missing rule as `loadR2ConfigFromEnv`. Never returns a
+ * VALUE, only presence — safe for an unauthenticated route (that route's
+ * own doc comment has the full reasoning).
+ */
+export function inspectR2ConfigFromEnv(env: Record<string, string | undefined> = process.env): R2ConfigDiagnostics {
+  return {
+    accountId: !!env.R2_ACCOUNT_ID?.trim(),
+    accessKeyId: !!env.R2_ACCESS_KEY_ID?.trim(),
+    secretAccessKey: !!env.R2_SECRET_ACCESS_KEY?.trim(),
+    bucket: !!env.R2_BUCKET?.trim(),
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Real R2 implementation (aws4fetch-signed S3 API calls)
 // ---------------------------------------------------------------------------

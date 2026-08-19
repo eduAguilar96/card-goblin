@@ -8,20 +8,28 @@ summary: Sign in to sync your project across devices — what syncs, the behind-
 
 If whoever runs this copy of CardGoblin has turned it on, a **Sign in** button appears
 in the status bar. Signing in carries your project — code, sheet rows, and uploaded
-images — to any other computer where you sign in with the same password. It's
-optional: without it (or before you sign in), everything works exactly like the
-[autosave](autosave.md)-only experience described elsewhere in these pages.
+images — to any other computer where you sign in with the same username and
+password. It's optional: without it (or before you sign in), everything works
+exactly like the [autosave](autosave.md)-only experience described elsewhere in
+these pages.
 
-This is not an accounts system. There's one password for the whole site, set by
-whoever deployed it — see [Setting it up](#setting-it-up) if that's you.
+This is not an accounts system. There's one username and password for the whole
+site, set by whoever deployed it — see [Setting it up](#setting-it-up) if that's
+you.
 
 ## Signing in
 
-Click **Sign in** and enter the password. On success, CardGoblin fetches whatever
-project is saved in the cloud and loads it — replacing what was in this browser —
-then downloads any images that came with it that this browser doesn't already have,
-showing progress ("3 of 8 images…") while it does. If nothing has ever been pushed to
-the cloud yet, your current local project simply becomes the starting point.
+Click **Sign in** and enter the username and password. On success, CardGoblin
+fetches whatever project is saved in the cloud and loads it — replacing what was in
+this browser — then downloads any images that came with it that this browser
+doesn't already have, showing progress ("3 of 8 images…") while it does. If nothing
+has ever been pushed to the cloud yet, your current local project simply becomes
+the starting point.
+
+If sign-in fails, the dialog now says why: a wrong username or password, the server
+not being set up for cloud sync at all, a network problem reaching it, or an
+unexpected server error — each with its own message, so you're not left guessing
+which one it was.
 
 ## What syncs, and when
 
@@ -81,10 +89,10 @@ Either way, nothing is silently thrown away: the choice is always yours.
   deleting what's no longer there — the old images stay in cloud storage,
   unreferenced, until something uploads a new image with that same name. Not a
   privacy concern beyond what already applies to the rest of a signed-in project
-  (still only reachable with the shared password), just unclaimed storage.
-- **One password for everyone who has it.** There's no per-person identity — anyone
-  with the password can sign in and see or change the project. Treat it like the key
-  to a shared drive, not an individual login.
+  (still only reachable with the shared credentials), just unclaimed storage.
+- **One username and password for everyone who has them.** There's no per-person
+  identity — anyone with the credentials can sign in and see or change the project.
+  Treat them like the key to a shared drive, not an individual login.
 - **Sign out clears THIS browser, not every copy of your session.** There's no
   server-side account system to revoke a session from (the same "no database" choice
   that keeps this simple) — a session lasts up to 30 days once granted. If a device
@@ -100,6 +108,7 @@ Either way, nothing is silently thrown away: the choice is always yours.
 
 Cloud sync needs a Cloudflare R2 bucket and a few environment variables — see
 [`docs/deployment.md`](../../deployment.md) in the repository for the full runbook
-(the six env vars, the bucket and CORS setup, and generating the admin password with
-`npm run hash-password`). A session lasts **30 days** before you're asked to sign in
-again.
+(the six required env vars, the bucket and CORS setup, generating the admin
+password with `npm run hash-password`, and an optional `ADMIN_USERNAME` if you'd
+rather the account name not default to "admin"). A session lasts **30 days** before
+you're asked to sign in again.

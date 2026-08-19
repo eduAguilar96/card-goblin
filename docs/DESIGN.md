@@ -1113,12 +1113,30 @@ behaves exactly as it does today.
   projects/default/assets/<name>     raw bytes, original mime
   ```
 
-- **Auth: one password, no user table.** `ADMIN_PASSWORD_HASH` +
-  `SESSION_SECRET` as server-only env vars; a login route compares with a
-  timing-safe check and sets an HMAC-signed `httpOnly; Secure; SameSite=Lax`
-  session cookie (30 days). Serverless has no shared memory, so brute-force
-  defence is a long random password plus a fixed artificial delay on failure,
-  NOT an in-process rate limiter that resets every cold start.
+- **Auth: a username and password, no user table** († 2026-08-18 — was
+  password-only). `ADMIN_USERNAME` (default `admin`, overridable so the login
+  form doesn't announce the account), `ADMIN_PASSWORD_HASH`, and
+  `SESSION_SECRET` as server-only env vars; a login route compares both with
+  timing-safe checks — **always computing both, never short-circuiting**, so a
+  wrong username costs the same scrypt work as a wrong password — and sets an
+  HMAC-signed `__Host-` session cookie (30 days). A wrong username, a wrong
+  password, and both wrong return the same status, body, and delay. Serverless
+  has no shared memory, so brute-force defence is a long random password plus a
+  fixed delay on failure, NOT an in-process rate limiter that resets every cold
+  start — and that delay throttles one connection, not an attacker firing
+  requests in parallel.
+- **Hash encoding** († 2026-08-18): the stored hash is dot-separated
+  (`scrypt.N.r.p.salt.hash`). The original `$`-separated form was silently
+  destroyed by Next's dotenv expansion in `.env.local` — `$131072` reads as a
+  variable — and neither single nor double quotes prevent it, only backslashes.
+  Dots need no escaping anywhere; base64url contains no dot, so parsing stays
+  unambiguous. The legacy `$` form still verifies, so code and config can be
+  updated in either order.
+- **Diagnostics** († 2026-08-18): `GET /api/cloud/diagnose` reports booleans
+  about configuration (never values, lengths, the username, or which separator
+  a hash uses — the last two are oracles), and every login attempt logs a
+  reason code. Added after a misconfigured deployment presented as "incorrect
+  password" with nothing else to go on.
 
 - **The 4.5 MB wall.** Vercel caps serverless request bodies, so asset bytes
   must never traverse a route handler. Every asset transfer uses a

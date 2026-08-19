@@ -6,8 +6,9 @@
 // hash into your env (Vercel project settings, .env.local, …), never the
 // password itself.
 //
-// FORMAT: `scrypt$N$r$p$salt$hash`, salt/hash base64url. This is a
-// DELIBERATE, hand-kept-in-sync DUPLICATE of the encode half of
+// FORMAT: `scrypt.N.r.p.salt.hash`, salt/hash base64url — DOT-separated
+// (TASK 1, owner directive, post-mortem on a real deployment failure).
+// This is a DELIBERATE, hand-kept-in-sync DUPLICATE of the encode half of
 // src/lib/cloud/session.ts's hashPassword — Node scripts in this repo are
 // plain .mjs (see generate-dicier-codes.mjs, generate-font-metrics.mjs) and
 // can't import the app's TypeScript source directly, so the ~15 lines of
@@ -16,6 +17,26 @@
 // too (the format is self-describing — N/r/p travel WITH the hash — so a
 // mismatch wouldn't break verification of hashes already minted, but new
 // ones should still match what the app documents as its default).
+//
+// THE FORMER FOOTGUN, why `.` and not the original `$` (cost a real hour to
+// diagnose, the reason this format changed): Next's env loader runs
+// dotenv-expand on `.env.local`, which treats a bare `$` in a VALUE as the
+// start of a variable reference (`$NAME`/`${NAME}`) — and its notion of a
+// valid NAME includes leading digits, which was exactly the OLD format's
+// `$N$r$p$salt$hash` shape. `ADMIN_PASSWORD_HASH=scrypt$131072$8$1$<salt>$<hash>`
+// silently loaded as `scrypt31072<mangled tail>` — no error, just a shorter,
+// wrong hash that looked exactly like a wrong password until someone thought
+// to count characters. Quoting didn't help (dotenv strips quotes BEFORE
+// expansion runs), and escaping every `$` as `\$` — while it technically
+// survived — was rejected as a fix: one un-escaped `$` (a hand-edit, a
+// fresh copy-paste) silently reintroduces the exact same bug with no error
+// at load time either. Dotenv-expand never treats `.` as special, so THIS
+// format needs no escaping or quoting anywhere — `.env.local`, Vercel's
+// dashboard, a shell export — which is what makes it the actual fix rather
+// than a more-careful workaround. `parseStoredHash` (session.ts) still
+// ACCEPTS an old `$`-separated hash on read, so a deployment doesn't need to
+// regenerate its password the moment this ships — but this script only ever
+// EMITS the new form now.
 //
 // MINIMUM LENGTH: this script refuses a password under 16 characters
 // (independent security review, H1) — the single admin password IS the
@@ -43,7 +64,7 @@ const MAXMEM = 256 * 1024 * 1024; // 128*N*r*p is 128 MiB; Node's default ceilin
 async function hashPassword(password) {
   const salt = randomBytes(SALT_BYTES);
   const derived = await scryptAsync(password, salt, KEYLEN, { N, r: R, p: P, maxmem: MAXMEM });
-  return ["scrypt", N, R, P, salt.toString("base64url"), derived.toString("base64url")].join("$");
+  return ["scrypt", N, R, P, salt.toString("base64url"), derived.toString("base64url")].join(".");
 }
 
 /** Strip a trailing CRLF/LF (independent security review, M7): defense in
@@ -189,12 +210,17 @@ async function main() {
   }
 
   const hash = await hashPassword(password);
-  console.log("\nADMIN_PASSWORD_HASH:\n");
-  console.log(hash);
   console.log(
-    "\nPaste the line above (the WHOLE scrypt$... string) as your ADMIN_PASSWORD_HASH " +
-      "env var. The password itself was never written to disk or shell history — this " +
-      "hash is the only thing you need to keep.",
+    "\nHashed. Nothing above this line — not the password, not this hash — was written to " +
+      "disk or shell history; the hash below is the only thing you need to keep. One form, " +
+      "pasted verbatim — no escaping or quoting needed anywhere (.env.local, Vercel's " +
+      "dashboard, a shell export):\n",
+  );
+  console.log(`  ADMIN_PASSWORD_HASH=${hash}\n`);
+  console.log(
+    "(An older deployment's ADMIN_PASSWORD_HASH may still use the $-separated format — that " +
+      "still works, no rush to regenerate it; this script just never emits that form anymore. " +
+      "GET /api/cloud/diagnose reports which separator is currently stored.)",
   );
 }
 

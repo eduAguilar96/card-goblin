@@ -10,7 +10,7 @@ This is a repo-level operational doc, not a wiki page — the *what it does and 
 it behaves* half lives at [`/docs/cloud-sync`](wiki/export-and-project/07-cloud-sync.md)
 (card designers); this page is *how to turn it on* (whoever runs the deployment).
 
-## The six environment variables
+## The six required environment variables
 
 | Variable | What it's for |
 |---|---|
@@ -32,6 +32,13 @@ project/asset routes 503 ("cloud not configured"); `ADMIN_PASSWORD_HASH`/
 `SESSION_SECRET` missing → login 503s the same way. Either way, the editor itself —
 signed out — is unaffected. There's no state where a misconfigured deployment
 crashes or half-works; it's cloud sync specifically that's unavailable.
+
+There's also one **optional** seventh variable: `ADMIN_USERNAME`. Unset or blank
+defaults to `"admin"` — cloud sync works fully without ever setting it. Set it if
+you'd rather the sign-in form not effectively announce the account name (a lone
+password box implies "the username is always admin, guess the password"); see
+[Set the admin username](#set-the-admin-username-optional) below. Unlike the six
+above, its absence never 503s anything — it just means the default applies.
 
 ## Create the R2 bucket
 
@@ -114,16 +121,29 @@ npm run hash-password
 ```
 
 Prompts twice on **stdin** (masked, never echoed), refuses anything under 16
-characters, and prints a `scrypt$...` line — paste the WHOLE line as
-`ADMIN_PASSWORD_HASH`. The script never takes the password as a command-line
-argument on purpose: argv is visible to every other process on the machine (`ps`)
-and typically lands in shell history, which the intended secret input method
-(stdin) avoids. See `scripts/hash-password.mjs` for the format details (mirrored,
-deliberately, from `src/lib/cloud/session.ts`).
+characters, and prints a `scrypt.N.r.p.salt.hash` line — paste the WHOLE line as
+`ADMIN_PASSWORD_HASH`, **exactly as printed, no escaping or quoting needed
+anywhere** (Vercel's dashboard, a local `.env.local`, a shell export). The script
+never takes the password as a command-line argument on purpose: argv is visible to
+every other process on the machine (`ps`) and typically lands in shell history,
+which the intended secret input method (stdin) avoids. See
+`scripts/hash-password.mjs` for the format details (mirrored, deliberately, from
+`src/lib/cloud/session.ts`).
+
+**Why dot-separated, and why that matters here specifically:** Next's env loader
+runs `dotenv-expand` on `.env.local`, which treats a bare `$` in a VALUE as a
+variable reference — an earlier `scrypt$N$r$p$salt$hash` format silently corrupted
+itself on load with no error at all, which is exactly the failure this section used
+to warn about working around with backslash escaping. The dot-separated format
+sidesteps the bug entirely instead: `dotenv-expand` never treats `.` as special, so
+there's nothing left to escape. **A hash minted before this change (the older
+`scrypt$...` form) still verifies** — the server accepts both separators on read —
+so there's no rush to regenerate an already-working deployment's password; only
+`npm run hash-password` itself only ever emits the new form now.
 
 Pick something long and ideally randomly generated (a password manager's generator,
 or e.g. `node -e "console.log(require('node:crypto').randomBytes(18).toString('base64url'))"`
-for a 24-character random one) — this is the ONE credential every signed-in device
+for a 24-character random one) — this is the credential every signed-in device
 shares, and per `src/app/api/cloud/login/route.ts`'s own doc comment, a fixed
 per-attempt delay is the only brute-force defense on the LOGIN ROUTE itself
 (serverless functions share no memory across invocations, so a request-counting
@@ -140,13 +160,67 @@ but every device already signed in stays signed in, for up to 30 days, regardles
 If a device or the password itself may be compromised, rotate `SESSION_SECRET`
 too (above) — that's the lever that actually revokes existing sessions.
 
+## Set the admin username (optional)
+
+`ADMIN_USERNAME` pairs a username with the password above — a lone password box
+implies "the account is always admin, guess the password"; requiring a username
+too (even a non-default one) means a credential-stuffing bot has to get two fields
+right, and the sign-in form itself never announces the account name to anyone who
+loads the page. Unset or blank defaults to `"admin"` — cloud sync works fully
+without ever touching this variable, and its absence is never a reason anything
+503s (contrast the six required variables above).
+
+Be honest about what this does and doesn't buy: it's checked with the same
+timing-safe discipline as the password (`verifyUsername`,
+`src/lib/cloud/session.ts`), and a wrong username, a wrong password, and both wrong
+all produce the exact same 401 status, message, and fixed delay — nothing about the
+response lets an attacker learn which field was wrong. It is NOT a second password
+with its own entropy budget, though — the deployment's real perimeter is still the
+password's length (16-character floor, above). Set it to plain text; it's not
+hashed and isn't treated as secret-at-rest the way the password is.
+
+## Troubleshooting: start with `/api/cloud/diagnose`
+
+`GET /api/cloud/diagnose` (no sign-in required — the route is deliberately
+unauthenticated, since it reveals only configuration booleans, never a secret
+value) is the fastest way to answer "why won't this deployment sign in":
+
+```bash
+curl https://your-deployed-domain.example/api/cloud/diagnose
+```
+
+It reports, per piece, whether R2/the session secret/the admin hash are configured,
+plus enough detail to self-diagnose the two most common mistakes without reading
+server logs:
+
+- **`adminHash.looksDotenvMangled: true`** — `ADMIN_PASSWORD_HASH` is present but
+  has the exact shape `dotenv-expand` corruption leaves behind (the failure mode
+  the dot-separated format above exists to prevent). Fix: re-copy the value from
+  `npm run hash-password`'s output, or re-run it.
+- **`adminHash.parses: false`** (without the above) — the hash is present but
+  otherwise malformed (wrong length, truncated, hand-edited). Regenerate it.
+- **`adminHash.separator: "$"`** — a hash from before TASK 1 is still in place.
+  This is FINE and still works (see "Set the admin password" above) — not
+  something you need to act on.
+- **`sessionSecret.meetsMinimumLength: false`** — `SESSION_SECRET` is set but
+  under 32 bytes; the server treats it as not configured at all rather than
+  signing cookies with a weak key. Regenerate it (above).
+- **`r2.*`** — each of the four R2 variables reported individually, so a
+  half-filled config shows exactly which one is still blank.
+
+If everything above reads `true`/healthy and sign-in STILL fails, the remaining
+cause is almost always a wrong username or password rather than a server
+misconfiguration — the sign-in dialog's own error message distinguishes that case
+from "ask whoever runs this deployment to check `/api/cloud/diagnose`" already.
+
 ## Verifying it worked
 
-With all six variables set and deployed, `/editor` should show a **Sign in** button
-in the status bar. Signing in with the password you hashed should pull whatever's
-already in the bucket (nothing, the first time) and start showing a synced status.
-If Sign in instead fails with "Cloud sync isn't set up on this server," double-check
-`ADMIN_PASSWORD_HASH`/`SESSION_SECRET` reached the runtime environment (a redeploy is
-often required after adding env vars). If sign-in succeeds but asset uploads fail
-silently (the status bar shows **Offline** shortly after adding an image), it's
-almost always the CORS policy above.
+With all six required variables set and deployed, `/editor` should show a **Sign
+in** button in the status bar. Signing in with the username/password you
+configured should pull whatever's already in the bucket (nothing, the first time)
+and start showing a synced status. If Sign in instead fails with "Cloud sync isn't
+set up on this server," check `/api/cloud/diagnose` first (above) rather than
+guessing — it'll say exactly which variable didn't reach the runtime environment (a
+redeploy is often required after adding env vars). If sign-in succeeds but asset
+uploads fail silently (the status bar shows **Offline** shortly after adding an
+image), it's almost always the CORS policy above.

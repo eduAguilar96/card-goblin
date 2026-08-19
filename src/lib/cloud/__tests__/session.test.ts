@@ -15,8 +15,11 @@ import {
   SESSION_DURATION_MS,
   createSessionCookieValue,
   hashPassword,
+  inspectStoredHash,
+  isStoredHashReadable,
   verifyPassword,
   verifySessionCookieValue,
+  verifyUsername,
 } from "../session";
 
 /**
@@ -61,9 +64,9 @@ describe("hashPassword / verifyPassword", () => {
     expect(await verifyPassword("Sesame ", hash)).toBe(false);
   });
 
-  it("produces the documented self-describing format: scrypt$N$r$p$salt$hash", async () => {
+  it("produces the documented self-describing format: scrypt.N.r.p.salt.hash (TASK 1: dotenv-safe, dot-separated)", async () => {
     const hash = await hashPassword("x");
-    expect(hash).toMatch(/^scrypt\$\d+\$\d+\$\d+\$[A-Za-z0-9_-]+\$[A-Za-z0-9_-]+$/);
+    expect(hash).toMatch(/^scrypt\.\d+\.\d+\.\d+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/);
   });
 
   it("two hashes of the SAME password differ (random salt per call)", async () => {
@@ -97,12 +100,56 @@ describe("hashPassword / verifyPassword", () => {
       // into scrypt — not discovered by trying to allocate for it.
       ["N/r/p whose 128*N*r*p exceeds the memory ceiling", "scrypt$131072$8$1000$c2FsdA$aGFzaA"],
       ["an enormous N alone blows the ceiling", `scrypt$${2 ** 30}$8$1$c2FsdA$aGFzaA`],
+      // TASK 1 (dot-separated format): the SAME malformed shapes, spelled
+      // with the new delimiter, must be rejected exactly as strictly.
+      ["dot form: too few fields", "scrypt.16384.8.1.salt"],
+      ["dot form: too many fields", "scrypt.16384.8.1.salt.hash.extra"],
+      ["dot form: non-numeric N", "scrypt.abc.8.1.c2FsdA.aGFzaA"],
+      ["dot form: empty salt", "scrypt.16384.8.1..aGFzaA"],
+      ["dot form: empty hash", "scrypt.16384.8.1.c2FsdA."],
+      ["dot form: N not a power of two", "scrypt.20000.8.1.c2FsdA.aGFzaA"],
+      // TASK 1: mixed/malformed separators — a string using BOTH delimiters
+      // is never a valid instance of either format.
+      ["mixed separators: dot fields inside a $-delimited attempt", "scrypt$131072.8$1$c2FsdA$aGFzaA"],
+      ["mixed separators: a stray $ inside an otherwise dot-delimited hash", "scrypt.131072.8$1.c2FsdA.aGFzaA"],
+      // TASK 1: the EXACT dotenv-expand corruption shape (module note atop
+      // session.ts) — `scrypt$131072$8$1$<salt>$<hash>` loses every `$` to
+      // variable expansion, collapsing to "scrypt" + digits + a mangled
+      // remainder with NO separator surviving anywhere. Must fail closed
+      // like any other garbage, not be silently "recovered" as valid.
+      [
+        "dotenv-mangled: no separators survive at all (the exact real-world corruption)",
+        "scrypt31072DB04C5G5r81KlmRt5brOAueGFOewWVkIc9KWD7CmEhnVRhb9GZQzERTVeQjE5gTUXMrEeIlXb9ePu9",
+      ],
     ];
     for (const [label, stored] of GARBAGE) {
       it(label, async () => {
         await expect(verifyPassword("anything", stored)).resolves.toBe(false);
       });
     }
+  });
+
+  describe("TASK 1: the dot-separated format is the default; the legacy $-separated format is still accepted", () => {
+    it("a hash minted in the legacy $ format (e.g. from before this change, or already deployed) still verifies — no broken window", async () => {
+      // Every character INSIDE a segment (the numeric params, and the
+      // base64url salt/hash) is identical between the two forms — only the
+      // delimiter differs, and base64url's alphabet contains neither `.`
+      // nor `$` — so swapping the delimiter is a lossless, mechanical
+      // conversion between the two representations of the SAME hash. This
+      // is exactly the relationship the format decision relies on (see
+      // session.ts's module comment).
+      const dotForm = await hashPassword("correct horse battery staple");
+      const legacyForm = dotForm.replaceAll(".", "$");
+      expect(legacyForm).not.toBe(dotForm);
+      expect(legacyForm).toMatch(/^scrypt\$\d+\$\d+\$\d+\$[A-Za-z0-9_-]+\$[A-Za-z0-9_-]+$/);
+      await expect(verifyPassword("correct horse battery staple", legacyForm)).resolves.toBe(true);
+      await expect(verifyPassword("wrong password", legacyForm)).resolves.toBe(false);
+    });
+
+    it("hashPassword itself NEVER emits the legacy $ form", async () => {
+      const hash = await hashPassword("x");
+      expect(hash).not.toContain("$");
+    });
   });
 
   it("a real hash with one character of the hash field flipped: false, not a throw", async () => {
@@ -127,6 +174,65 @@ describe("hashPassword / verifyPassword", () => {
       await expect(verifyPassword("x", truncated)).resolves.toBe(true);
     },
   );
+});
+
+// ---------------------------------------------------------------------------
+// Independent security review: two hashes that PARSED successfully but could
+// never actually authenticate — a "diagnose reports healthy, login always
+// fails, or (worse) login accepts near-any password" false green. Both are
+// separate `it`s (not folded into the GARBAGE array above) because both
+// build their fixture from a REAL hashPassword() output — borrowing a
+// realistic salt/hash rather than a hand-typed literal isolates each test
+// to the ONE specific defect it's pinning.
+// ---------------------------------------------------------------------------
+
+describe("false-green findings (independent security review)", () => {
+  it(
+    "N/r/p whose 128*N*r*p lands EXACTLY on SCRYPT_MAXMEM is rejected (>=, not >) — " +
+      "Node's scrypt actually THROWS at this exact boundary, so accepting it as " +
+      "'readable' would report a permanently-broken hash as healthy",
+    async () => {
+      const real = await hashPassword("x");
+      const [, , , , salt, hash] = real.split(".");
+      // 131072 * 16 * 1 = 2^21; 128 * 2^21 = 268435456 = SCRYPT_MAXMEM exactly
+      // (double this module's own default r=8 — still a plausible operator typo,
+      // not an absurd value).
+      const atCeiling = ["scrypt", "131072", "16", "1", salt, hash].join(".");
+      expect(isStoredHashReadable(atCeiling)).toBe(false);
+      await expect(verifyPassword("x", atCeiling)).resolves.toBe(false);
+    },
+  );
+
+  it(
+    "a hash TRUNCATED to a near-empty hash field (still non-empty, just short) is " +
+      "rejected by a minimum decoded length — without this floor it parses as a " +
+      "valid 1-byte hash, and ANY password has a 1-in-256 chance of verifying",
+    async () => {
+      const real = await hashPassword("x");
+      const [, n, r, p, salt] = real.split(".");
+      const oneByteHash = "AA"; // 2 base64url chars decode to exactly 1 byte
+      expect(Buffer.from(oneByteHash, "base64url").length).toBe(1);
+      const severelyTruncated = ["scrypt", n, r, p, salt, oneByteHash].join(".");
+      expect(isStoredHashReadable(severelyTruncated)).toBe(false);
+      await expect(verifyPassword("x", severelyTruncated)).resolves.toBe(false);
+      // Not a fluke of THIS password — no password should verify against a
+      // hash this module refuses to even attempt.
+      await expect(verifyPassword("some other password entirely", severelyTruncated)).resolves.toBe(false);
+    },
+  );
+
+  it("the floor is exactly 32 bytes — 31 rejected, 32 accepted (boundary pin)", async () => {
+    const real = await hashPassword("x");
+    const [, n, r, p, salt] = real.split(".");
+    // 43 base64url chars decode to 32 bytes exactly (43*6=258 bits -> floor 32 bytes,
+    // with 2 leftover bits); 42 chars decode to 31 bytes.
+    const hash32 = "A".repeat(43);
+    const hash31 = "A".repeat(42);
+    expect(Buffer.from(hash32, "base64url").length).toBe(32);
+    expect(Buffer.from(hash31, "base64url").length).toBe(31);
+    expect(isStoredHashReadable(["scrypt", n, r, p, salt, hash31].join("."))).toBe(false);
+    expect(isStoredHashReadable(["scrypt", n, r, p, salt, hash32].join("."))).toBe(true);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -220,6 +326,119 @@ describe("createSessionCookieValue / verifySessionCookieValue", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Username comparison (TASK 4) — timing-safe, same discipline as the
+// password/cookie checks above; previously shipped without direct coverage.
+// ---------------------------------------------------------------------------
+
+describe("verifyUsername", () => {
+  it("matching username: true", () => {
+    expect(verifyUsername("admin", "admin")).toBe(true);
+  });
+
+  it("a different username: false", () => {
+    expect(verifyUsername("root", "admin")).toBe(false);
+  });
+
+  it("different lengths: false, not a throw (length-checked before timingSafeEqual, which throws on a mismatch)", () => {
+    expect(() => verifyUsername("a", "much-longer-name")).not.toThrow();
+    expect(verifyUsername("a", "much-longer-name")).toBe(false);
+    expect(verifyUsername("much-longer-name", "a")).toBe(false);
+  });
+
+  it("case-sensitive (no silent normalization, same rule as the password)", () => {
+    expect(verifyUsername("Admin", "admin")).toBe(false);
+  });
+
+  it("empty vs non-empty: false", () => {
+    expect(verifyUsername("", "admin")).toBe(false);
+  });
+
+  it("empty vs empty: true (degenerate but consistent — a same-length, zero-content comparison)", () => {
+    expect(verifyUsername("", "")).toBe(true);
+  });
+
+  it("multi-byte characters compare by UTF-8 bytes, same posture as sessionSecretByteLength (auth.ts)", () => {
+    expect(verifyUsername("é", "é")).toBe(true);
+    expect(verifyUsername("é", "e")).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// inspectStoredHash (TASK 2b: GET /api/cloud/diagnose support) — read-only
+// diagnostics layered on top of parseStoredHash, never used by the actual
+// auth path (verifyPassword/isStoredHashReadable) above.
+// ---------------------------------------------------------------------------
+
+describe("inspectStoredHash", () => {
+  it("undefined (ADMIN_PASSWORD_HASH unset): present false, everything else its neutral default", () => {
+    expect(inspectStoredHash(undefined)).toEqual({
+      present: false,
+      parses: false,
+      algorithm: null,
+      separator: null,
+      looksDotenvMangled: false,
+    });
+  });
+
+  it("blank/whitespace-only: treated the same as unset", () => {
+    expect(inspectStoredHash("   ").present).toBe(false);
+  });
+
+  it("a healthy new-format (dot) hash: present, parses, algorithm scrypt, separator '.', not mangled", async () => {
+    const hash = await hashPassword("x");
+    expect(inspectStoredHash(hash)).toEqual({
+      present: true,
+      parses: true,
+      algorithm: "scrypt",
+      separator: ".",
+      looksDotenvMangled: false,
+    });
+  });
+
+  it("a healthy legacy ($) hash: present, parses, separator '$', not mangled", async () => {
+    const hash = (await hashPassword("x")).replaceAll(".", "$");
+    expect(inspectStoredHash(hash)).toEqual({
+      present: true,
+      parses: true,
+      algorithm: "scrypt",
+      separator: "$",
+      looksDotenvMangled: false,
+    });
+  });
+
+  it("the exact dotenv-mangled shape: present, does NOT parse, and is named specifically (not just generic garbage)", () => {
+    const mangled = "scrypt31072DB04C5G5r81KlmRt5brOAueGFOewWVkIc9K";
+    expect(inspectStoredHash(mangled)).toEqual({
+      present: true,
+      parses: false,
+      algorithm: null,
+      separator: null,
+      looksDotenvMangled: true,
+    });
+  });
+
+  it("generic garbage that ISN'T the dotenv-mangled shape: doesn't parse, and looksDotenvMangled stays false (not a catch-all)", () => {
+    expect(inspectStoredHash("not a hash at all")).toEqual({
+      present: true,
+      parses: false,
+      algorithm: null,
+      separator: null,
+      looksDotenvMangled: false,
+    });
+    // Same algorithm tag, but a `$`/`.`-delimited shape that fails on
+    // parameters, not on the "no separators at all" shape looksDotenvMangled
+    // specifically detects.
+    expect(inspectStoredHash("scrypt$abc$8$1$c2FsdA$aGFzaA").looksDotenvMangled).toBe(false);
+  });
+
+  it("a well-formed hash is NEVER flagged as mangled, for either separator (regression guard)", async () => {
+    const dotHash = await hashPassword("x");
+    expect(inspectStoredHash(dotHash).looksDotenvMangled).toBe(false);
+    expect(inspectStoredHash(dotHash.replaceAll(".", "$")).looksDotenvMangled).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Structural pin: "verification is not string-===" (brief F, literal)
 // ---------------------------------------------------------------------------
 
@@ -239,9 +458,9 @@ describe("verification is not a naive string compare (structural pin)", () => {
     expect(source).toMatch(/from ["']node:crypto["']/);
   });
 
-  it("both the password check and the cookie signature check call it (at least twice)", () => {
+  it("the password check, the username check, and the cookie signature check all call it (at least three times)", () => {
     const occurrences = source.match(/timingSafeEqual\(/g) ?? [];
-    expect(occurrences.length).toBeGreaterThanOrEqual(2);
+    expect(occurrences.length).toBeGreaterThanOrEqual(3);
   });
 
   it("the derived/expected buffers are never compared with a bare === or !==", () => {
