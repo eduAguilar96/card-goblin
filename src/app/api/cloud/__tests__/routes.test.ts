@@ -627,6 +627,21 @@ describe("PUT /api/cloud/project — payload validation (brief C: rejected whole
     ).toBe(400);
   });
 
+  it("asset with the SVG mime used by the local asset library: accepted", async () => {
+    expect(
+      (
+        await putWith({
+          baseRevision: 0,
+          project: {
+            code: "",
+            sheets: {},
+            assets: [{ name: "energy_frame", mime: "image/svg+xml", size: 488, hash: "ab" }],
+          },
+        })
+      ).status,
+    ).toBe(200);
+  });
+
   it("asset over the size cap: 400", async () => {
     expect(
       (
@@ -812,6 +827,12 @@ describe("POST /api/cloud/assets/presign", () => {
 
   it("a valid request: 200 with a URL", async () => {
     const res = await presign({ name: "dragon", mime: "image/png", size: 1024 });
+    expect(res.status).toBe(200);
+    expect(typeof (await json(res) as { url: string }).url).toBe("string");
+  });
+
+  it("an SVG request: 200 with a URL (existing local SVG projects can sync)", async () => {
+    const res = await presign({ name: "energy_frame", mime: "image/svg+xml", size: 488 });
     expect(res.status).toBe(200);
     expect(typeof (await json(res) as { url: string }).url).toBe("string");
   });

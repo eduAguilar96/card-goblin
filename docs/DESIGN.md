@@ -1253,6 +1253,22 @@ behaves exactly as it does today.
   once the real restore has already landed), so it can never read the
   empty placeholder list that exists before IndexedDB answers.
 
+- **SVG is a first-class cloud asset, with the trust boundary kept explicit**
+  († 2026-08-19 — production bug). The local asset library has always accepted
+  `image/svg+xml`, and existing projects use SVG frames, but the cloud-specific
+  MIME allowlist admitted raster formats only. First sign-in therefore reached
+  the presign route, received `400 Invalid mime type` for every SVG, correctly
+  refused to publish a manifest whose bytes were missing, and stayed Offline —
+  making the integrity fix above look like broken sync. The shared manifest +
+  presign allowlist now admits the exact `image/svg+xml` string; it is still an
+  exact reviewed list, not `image/*` (`image/html`, parameters, and unknown
+  subtypes remain rejected). CardGoblin consumes stored SVG bytes only as image
+  resources (`<img>` / SVG `<image>` and the existing image-based export path),
+  never parses or injects their XML into the application DOM. Presign failures
+  now also carry the route's safe error text into the controller and name the
+  affected asset, so the next incompatible format is diagnosable from the UI
+  rather than only from DevTools.
+
 - **Failure posture (⚑8's spirit).** Any cloud failure — offline, expired
   session, R2 error — degrades to local-only editing with a quiet indicator,
   never a lost edit and never a blocked editor. Sign-out clears the session

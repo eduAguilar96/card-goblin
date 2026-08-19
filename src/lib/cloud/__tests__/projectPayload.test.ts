@@ -16,14 +16,10 @@ import {
 } from "../projectPayload";
 
 describe("isSupportedCloudImageMime (L1: a strict allowlist, not startsWith)", () => {
-  it("accepts the allowlisted raster formats", () => {
-    for (const mime of ["image/png", "image/jpeg", "image/gif", "image/webp", "image/avif"]) {
+  it("accepts the reviewed image formats, including SVG used by existing projects", () => {
+    for (const mime of ["image/png", "image/jpeg", "image/gif", "image/webp", "image/avif", "image/svg+xml"]) {
       expect(isSupportedCloudImageMime(mime)).toBe(true);
     }
-  });
-
-  it("rejects SVG (XML — can carry embedded scripts)", () => {
-    expect(isSupportedCloudImageMime("image/svg+xml")).toBe(false);
   });
 
   it("rejects a bare 'image/' and a nonsense 'image/*' subtype", () => {
@@ -105,8 +101,13 @@ describe("parseCloudProject", () => {
       expect(result?.assets).toEqual([baseEntry]);
     });
 
-    it("rejects an unsupported mime (L1) even though it's a valid image/* string", () => {
-      expect(parseCloudProject({ ...VALID, assets: [{ ...baseEntry, mime: "image/svg+xml" }] })).toBeNull();
+    it("accepts an SVG manifest entry (cloud/local format parity)", () => {
+      const svgEntry = { ...baseEntry, mime: "image/svg+xml" };
+      expect(parseCloudProject({ ...VALID, assets: [svgEntry] })?.assets).toEqual([svgEntry]);
+    });
+
+    it("rejects an unreviewed image/* subtype (L1)", () => {
+      expect(parseCloudProject({ ...VALID, assets: [{ ...baseEntry, mime: "image/x-icon" }] })).toBeNull();
     });
 
     it("rejects a too-long name (L2)", () => {

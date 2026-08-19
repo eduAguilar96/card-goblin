@@ -30,15 +30,17 @@ import type { SheetsState } from "@/app/editor/_store/editorStore";
  * The image MIME types cloud sync accepts — STRICTER than assetStore.ts's
  * `isImageMime` (independent security review, L1): a bare
  * `mime.startsWith("image/")` also accepts `"image/"` itself, `"image/png;
- * charset=x"`, `"image/html"`, and `"image/svg+xml"` (SVG is XML and can
- * carry embedded scripts — a real risk once bytes are stored and later
- * fetched back as a URL, unlike a raster format). Deliberately NOT a change
- * to `isImageMime` itself: that check is existing, tested, intentional
- * behavior for the LOCAL (this-browser-only, IndexedDB) asset library
- * (assetStore.test.ts's "accepts any image/* subtype", m8) — a materially
- * lower-stakes trust boundary than bytes stored in a shared R2 bucket
- * reachable by presigned URL from any signed-in device. Cloud sync gets its
- * own, narrower allowlist rather than forking or loosening that contract.
+ * charset=x"`, `"image/html"`, and arbitrary unreviewed subtypes.
+ * `image/svg+xml` is deliberately included: the local asset library has
+ * always accepted SVG, and every consumer treats the stored bytes as an
+ * image resource (`<img>` / SVG `<image>`), never parses or injects the XML
+ * into CardGoblin's DOM. Excluding it made an otherwise valid local project
+ * impossible to adopt on first sign-in. This remains an EXACT allowlist,
+ * not `image/*`; HTML-like, parameterized, and unknown subtypes stay out.
+ * Deliberately NOT a change to `isImageMime` itself: that check is existing,
+ * tested, intentional behavior for the LOCAL (this-browser-only, IndexedDB)
+ * asset library (assetStore.test.ts's "accepts any image/* subtype", m8).
+ * Cloud sync keeps its narrower reviewed list at the shared R2 boundary.
  * Reused by the presign route (`assets/presign/route.ts`) so the same rule
  * applies wherever a mime type crosses into R2.
  */
@@ -48,6 +50,7 @@ const ALLOWED_CLOUD_IMAGE_MIMES = new Set([
   "image/gif",
   "image/webp",
   "image/avif",
+  "image/svg+xml",
 ]);
 
 export function isSupportedCloudImageMime(mime: string): boolean {

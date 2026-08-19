@@ -51,7 +51,10 @@ which one it was.
   push to the cloud about **10 seconds** after your last change (much slower than
   autosave's 1 second: cloud writes cost real money at scale, local ones don't).
 - **Uploaded images** ([the Assets drawer](assets.md)) upload or delete the moment
-  you add or remove them, independent of that 10-second wait.
+  you add or remove them, independent of that 10-second wait. PNG, JPEG, GIF,
+  WebP, AVIF, and SVG assets are supported by cloud sync. If a future or unusual
+  local image format is rejected, **Offline** names the asset and the server's
+  reason instead of reducing the problem to an anonymous error code.
 - Signing out, or closing the tab, doesn't lose anything queued — leaving the page
   flushes any pending sync first.
 

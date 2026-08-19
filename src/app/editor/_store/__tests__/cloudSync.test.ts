@@ -194,6 +194,8 @@ interface FakeServerAsset {
   mime: string;
 }
 
+type FakeFailure = number | "network" | { status: number | "network"; message?: string };
+
 /** An in-memory "R2 + routes" stand-in implementing CloudTransport directly
  * — deliberately hand-rolled rather than routed through the real routes, so
  * these tests exercise cloudSync.ts's OWN logic (debounce/mute/state
@@ -205,7 +207,7 @@ function createFakeTransport(): CloudTransport & {
   server: { revision: number; project: CloudProject | null; assets: Map<string, FakeServerAsset> };
   loginUsername: string | null;
   loginPassword: string | null;
-  nextFailure: Partial<Record<keyof CloudTransport, number | "network">>;
+  nextFailure: Partial<Record<keyof CloudTransport, FakeFailure>>;
 } {
   const calls: Record<string, number> = {};
   const bump = (name: string): void => {
@@ -216,7 +218,7 @@ function createFakeTransport(): CloudTransport & {
     project: null,
     assets: new Map(),
   };
-  const nextFailure: Partial<Record<keyof CloudTransport, number | "network">> = {};
+  const nextFailure: Partial<Record<keyof CloudTransport, FakeFailure>> = {};
   let loginUsername: string | null = GOOD_USERNAME;
   let loginPassword: string | null = "correct-password";
 
@@ -224,7 +226,10 @@ function createFakeTransport(): CloudTransport & {
     const status = nextFailure[name];
     if (status === undefined) return null;
     delete nextFailure[name];
-    return { ok: false, status } as T;
+    return {
+      ok: false,
+      ...(typeof status === "object" ? status : { status }),
+    } as T;
   };
 
   return {
@@ -273,7 +278,11 @@ function createFakeTransport(): CloudTransport & {
       const failure = nextFailure.putProject;
       if (failure !== undefined) {
         delete nextFailure.putProject;
-        return { ok: false, conflict: false, status: failure };
+        return {
+          ok: false,
+          conflict: false,
+          status: typeof failure === "object" ? failure.status : failure,
+        };
       }
       if (baseRevision !== server.revision) {
         return { ok: false, conflict: true, revision: server.revision };
@@ -568,6 +577,23 @@ describe("first sign-in: adopt local when the cloud is empty (FIX 1)", () => {
       expect(transport.calls.uploadToPresignedUrl).toBe(1);
     },
   );
+
+  it("preserves SVG bytes and mime in both R2 and the project manifest", async () => {
+    const { assetStore, controller, transport } = harness();
+    const svgBytes = new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg"><path d="M0 0h1v1z"/></svg>');
+    await assetStore.upload("cost_energy_frame", "image/svg+xml", svgBytes);
+
+    await controller.signIn(GOOD_USERNAME, "correct-password");
+
+    expect(transport.server.assets.get("cost_energy_frame")).toEqual({
+      bytes: svgBytes,
+      mime: "image/svg+xml",
+    });
+    expect(transport.server.project?.assets).toEqual([
+      expect.objectContaining({ name: "cost_energy_frame", mime: "image/svg+xml", size: svgBytes.byteLength }),
+    ]);
+    expect(controller.getSnapshot().status).toBe("idle");
+  });
 
   it("nothing local to upload → zero asset calls, the manifest push still lands", async () => {
     const { controller, transport } = harness();
@@ -1326,6 +1352,18 @@ describe("failure posture — degrade to local-only, never block editing", () =>
     await expect(assetStore.upload("dragon", "image/png", new Uint8Array([1]))).resolves.toBeDefined();
     await flushAsync();
     expect(controller.getSnapshot().status).toBe("offline");
+    expect(controller.getSnapshot().errorMessage).toContain('image "dragon"');
+  });
+
+  it("an asset presign rejection names the asset and preserves the route's reason", async () => {
+    const { assetStore, controller, transport } = harness();
+    await controller.signIn(GOOD_USERNAME, "correct-password");
+    transport.nextFailure.presignAssetPut = { status: 400, message: "Invalid mime type." };
+    await assetStore.upload("legacy_art", "image/x-icon", new Uint8Array([1]));
+    await flushAsync();
+    expect(controller.getSnapshot().errorMessage).toBe(
+      'Couldn\'t upload image "legacy_art": Invalid mime type.',
+    );
   });
 
   it("an asset upload failure (PUT itself) degrades to offline, doesn't throw", async () => {
@@ -1598,5 +1636,21 @@ describe("the REAL transport's request shape (review: dropping username passed t
     }
     expect(seen.url).toBe("/api/cloud/login");
     expect(seen.body).toEqual({ username: "eduxx", password: "a real password" });
+  });
+
+  it("presign retains a JSON route error so the controller can explain a rejected asset", async () => {
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify({ error: "Invalid mime type." }), {
+        status: 400,
+        headers: { "content-type": "application/json" },
+      })) as typeof fetch;
+    try {
+      await expect(
+        createRealCloudTransport().presignAssetPut("legacy_art", "image/x-icon", 10),
+      ).resolves.toEqual({ ok: false, status: 400, message: "Invalid mime type." });
+    } finally {
+      globalThis.fetch = realFetch;
+    }
   });
 });

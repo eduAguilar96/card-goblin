@@ -126,7 +126,7 @@ import type { CloudAssetManifestEntry, CloudProject } from "@/lib/cloud/projectP
 // Transport — the injectable network seam (mirrors ProjectStorage/AssetAdapter)
 // ---------------------------------------------------------------------------
 
-export type CloudFailure = { ok: false; status: number | "network" };
+export type CloudFailure = { ok: false; status: number | "network"; message?: string };
 
 export type LoginResult = { ok: true } | CloudFailure;
 
@@ -168,6 +168,18 @@ export interface CloudTransport {
 
 async function toJson<T>(res: Response): Promise<T> {
   return (await res.json()) as T;
+}
+
+/** Preserve a route's safe, user-facing error when it has one. This is
+ * best-effort because proxies and platform errors can return HTML or an
+ * empty body; callers always retain the status-code fallback. */
+async function responseErrorMessage(res: Response): Promise<string | undefined> {
+  try {
+    const data = await toJson<{ error?: unknown }>(res);
+    return typeof data.error === "string" && data.error.length > 0 ? data.error : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** The real transport: fetches to our own `/api/cloud/*` routes, plus raw
@@ -239,7 +251,9 @@ export function createRealCloudTransport(): CloudTransport {
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ name, mime, size }),
         });
-        if (!res.ok) return { ok: false, status: res.status };
+        if (!res.ok) {
+          return { ok: false, status: res.status, message: await responseErrorMessage(res) };
+        }
         const data = await toJson<{ url: string }>(res);
         return { ok: true, url: data.url };
       } catch {
@@ -1114,12 +1128,13 @@ export function createCloudSyncController(deps: CloudSyncDeps): CloudSyncControl
     const bytes = await assetBytes(stored);
     const presign = await transport.presignAssetPut(name, stored.mime, bytes.byteLength);
     if (!presign.ok) {
-      setSnapshot({ status: "offline", errorMessage: describeFailure(presign.status) });
+      const reason = presign.message ?? describeFailure(presign.status);
+      setSnapshot({ status: "offline", errorMessage: `Couldn't upload image "${name}": ${reason}` });
       return false;
     }
     const uploaded = await transport.uploadToPresignedUrl(presign.url, bytes, stored.mime);
     if (!uploaded) {
-      setSnapshot({ status: "offline", errorMessage: "Couldn't upload an image." });
+      setSnapshot({ status: "offline", errorMessage: `Couldn't upload image "${name}".` });
       return false;
     }
     // HIGH fix: this is the ONE place that gets to say "R2 actually has
