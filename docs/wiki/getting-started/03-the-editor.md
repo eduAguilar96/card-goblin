@@ -64,6 +64,11 @@ One tab per `Sheet:` you declare in code. The **columns come from your code**; t
   in.
 - Your data survives schema edits. Rename a column in code (same position, same type)
   and its data comes with it.
+- **Columns are resizable.** Drag the right edge of a column header, or focus its
+  resize handle and use the left/right arrow keys. Turn on **Wrap text** in the tab
+  bar when you want long Text cells (such as card descriptions) to wrap and grow
+  their rows vertically. Number and enum cells stay single-line, and turning wrapping
+  off returns Text cells to the compact single-line view without changing their data.
 - **The row number is editable.** Click it and type a new position — the row moves
   there and every row between shifts to make room (typing `2` on row 10 of A..J
   yields A J B C D E F G H I; a number ≤ 0 or past the end clamps to the first or last

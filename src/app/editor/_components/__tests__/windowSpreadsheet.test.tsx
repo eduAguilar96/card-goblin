@@ -65,6 +65,25 @@ describe("SpreadsheetContent (demo)", () => {
     expect(text).toContain("count · Number");
   });
 
+  it("gives every column an accessible resize handle and starts at the 144 px default", () => {
+    const handles = markup.match(/<span[^>]*role="separator"[^>]*>/g) ?? [];
+    expect(handles).toHaveLength(4);
+    for (const handle of handles) {
+      expect(handle).toContain('aria-orientation="vertical"');
+      expect(handle).toContain('aria-valuenow="144"');
+      expect(handle).toContain('tabindex="0"');
+    }
+    for (const column of ["name", "cost", "health", "count"]) {
+      expect(markup).toContain(`aria-label="resize ${column} column"`);
+    }
+  });
+
+  it("offers optional wrapping but keeps the compact single-line editor by default", () => {
+    expect(markup).toContain('aria-pressed="false"');
+    expect(stripTags(markup)).toContain("Wrap text");
+    expect(markup).not.toContain("<textarea");
+  });
+
   it("renders 2 rows × 4 columns of data inputs, plus one row-index gutter input per row", () => {
     // 8 data cells + 2 gutter fields (§3.6, ◆42 — the gutter is an <input> now).
     expect(markup.match(/<input/g)).toHaveLength(10);

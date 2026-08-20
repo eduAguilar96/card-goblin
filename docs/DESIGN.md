@@ -768,6 +768,12 @@ input, §7.4) rather than owning it.
   cells red; pristine rows render dimmed (◆29). Data survives schema edits (◆26);
   a compile diff showing exactly one column removed and one added **at the same
   index with the same type** is treated as a rename and migrates the data (◆26†).
+  Columns start at 144 px and expose a drag/keyboard resize handle in each header
+  (96–720 px); widths are local editor-view state, not project data. A **Wrap text**
+  toggle is off by default. When enabled, Text-column editors wrap at the current
+  column width and grow their row to their content; Number and Enum editors remain
+  single-line. This keeps compact sheets compact while making long description
+  fields readable without changing the stored cell value.
   Library risk: `react-spreadsheet` may resist custom editors/tabs — fallback is a
   small bespoke grid; decision deferred until task 6 (§5).
 - **Preview window:** two views over the same model, chosen by a segmented toggle

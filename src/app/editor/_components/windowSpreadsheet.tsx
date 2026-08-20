@@ -54,10 +54,14 @@ import {
   cellEditReduce,
   cellFlagKey,
   cellValueOf,
+  clampColumnWidth,
   columnTypeLabel,
+  DEFAULT_COLUMN_WIDTH_PX,
   enumOptionsOf,
   gridTabsOf,
   isPristineRow,
+  MAX_COLUMN_WIDTH_PX,
+  MIN_COLUMN_WIDTH_PX,
   parseClipboardBlock,
   pasteCommitsDirectly,
   pasteOps,
@@ -117,6 +121,13 @@ export function SpreadsheetContent({
   // schema, the render falls back to the first sheet without a state write
   // (and comes back should the name return — session preservation, ◆26).
   const [activeName, setActiveName] = useState<string | null>(null);
+  const [wrapText, setWrapText] = useState(false);
+  // View-only sizing: deliberately absent from the project/store payload.
+  // A Map avoids special object keys (`constructor`, `__proto__`) becoming
+  // surprising if Goblin identifiers ever broaden beyond today's grammar.
+  const [columnWidths, setColumnWidths] = useState<
+    ReadonlyMap<string, ReadonlyMap<string, number>>
+  >(() => new Map());
   // Per-tab scroll memory: saved when switching AWAY (in the click handler,
   // while the outgoing sheet still owns the scroll box), restored by the
   // effect below — so switching preserves each tab's position.
@@ -167,35 +178,62 @@ export function SpreadsheetContent({
     setActiveName(name);
   };
 
+  const resizeColumn = (sheetName: string, columnName: string, width: number): void => {
+    setColumnWidths((previous) => {
+      const next = new Map(previous);
+      const sheetWidths = new Map(previous.get(sheetName));
+      sheetWidths.set(columnName, clampColumnWidth(width));
+      next.set(sheetName, sheetWidths);
+      return next;
+    });
+  };
+
   return (
     <div className="flex h-full w-full flex-col overflow-hidden bg-gray-800 text-sm text-gray-200">
       <div
-        role="tablist"
-        aria-label="Sheets"
-        className="flex shrink-0 items-end gap-1 overflow-x-auto border-b border-gray-700 bg-gray-900 px-2 pt-1.5"
+        className="flex shrink-0 items-end border-b border-gray-700 bg-gray-900 pl-2"
       >
-        {tabs.map((tab) => {
-          const isActive = tab.name === activeSheetName;
-          return (
-            <button
-              key={tab.name}
-              type="button"
-              role="tab"
-              aria-selected={isActive}
-              onClick={() => switchTab(tab.name)}
-              className={
-                isActive
-                  ? "whitespace-nowrap rounded-t border border-b-0 border-gray-700 bg-gray-800 px-3 py-1 text-xs font-semibold text-white"
-                  : "whitespace-nowrap rounded-t border border-transparent px-3 py-1 text-xs text-gray-400 hover:bg-gray-800 hover:text-gray-200"
-              }
-            >
-              {tab.name}
-              <span className={isActive ? "ml-1.5 font-normal text-gray-400" : "ml-1.5 text-gray-500"}>
-                {tab.rowCount}
-              </span>
-            </button>
-          );
-        })}
+        <div
+          role="tablist"
+          aria-label="Sheets"
+          className="flex min-w-0 flex-1 items-end gap-1 overflow-x-auto pt-1.5"
+        >
+          {tabs.map((tab) => {
+            const isActive = tab.name === activeSheetName;
+            return (
+              <button
+                key={tab.name}
+                type="button"
+                role="tab"
+                aria-selected={isActive}
+                onClick={() => switchTab(tab.name)}
+                className={
+                  isActive
+                    ? "whitespace-nowrap rounded-t border border-b-0 border-gray-700 bg-gray-800 px-3 py-1 text-xs font-semibold text-white"
+                    : "whitespace-nowrap rounded-t border border-transparent px-3 py-1 text-xs text-gray-400 hover:bg-gray-800 hover:text-gray-200"
+                }
+              >
+                {tab.name}
+                <span className={isActive ? "ml-1.5 font-normal text-gray-400" : "ml-1.5 text-gray-500"}>
+                  {tab.rowCount}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+        <button
+          type="button"
+          aria-pressed={wrapText}
+          title="Wrap Text cells and grow rows to fit their content"
+          onClick={() => setWrapText((enabled) => !enabled)}
+          className={`mb-1 mr-2 ml-2 shrink-0 rounded border px-2 py-0.5 text-[11px] outline-none focus-visible:ring-1 focus-visible:ring-sky-500 ${
+            wrapText
+              ? "border-sky-600 bg-sky-950 text-sky-200"
+              : "border-gray-700 text-gray-400 hover:border-gray-600 hover:text-gray-200"
+          }`}
+        >
+          Wrap text
+        </button>
       </div>
       <div ref={scrollRef} className="min-h-0 flex-1 overflow-auto">
         {active && (
@@ -205,6 +243,9 @@ export function SpreadsheetContent({
             state={Object.hasOwn(sheets, active.name) ? sheets[active.name] : EMPTY_SHEET}
             flags={flags}
             actions={actions}
+            columnWidths={columnWidths.get(active.name)}
+            wrapText={wrapText}
+            onColumnResize={(columnName, width) => resizeColumn(active.name, columnName, width)}
           />
         )}
       </div>
@@ -225,15 +266,30 @@ interface SheetGridProps {
   state: SheetState;
   flags: ReadonlyMap<string, string>;
   actions: SpreadsheetActions;
+  columnWidths: ReadonlyMap<string, number> | undefined;
+  wrapText: boolean;
+  onColumnResize(columnName: string, width: number): void;
 }
 
-function SheetGrid({ sheet, state, flags, actions }: SheetGridProps): ReactElement {
+function SheetGrid({
+  sheet,
+  state,
+  flags,
+  actions,
+  columnWidths,
+  wrapText,
+  onColumnResize,
+}: SheetGridProps): ReactElement {
   // Column identity comes from the SCHEMA only (⚑3). Row objects may carry
   // orphaned columns and `__orphan__*` tombstones (◆26/◆26† — session
   // preservation); enumerating schema columns is what keeps them invisible.
   // Do not "fix" this to derive columns from row keys.
   const columnNames = sheet.columns.map((column) => column.name);
   const zeroColumns = sheet.columns.length === 0;
+  const widths = sheet.columns.map(
+    (column) => columnWidths?.get(column.name) ?? DEFAULT_COLUMN_WIDTH_PX,
+  );
+  const minimumTableWidth = 56 + widths.reduce((sum, width) => sum + width, 0) + 160;
 
   const handlePaste = (
     e: ClipboardEvent<HTMLElement>,
@@ -261,17 +317,30 @@ function SheetGrid({ sheet, state, flags, actions }: SheetGridProps): ReactEleme
           this sheet has no columns; rows control card count
         </p>
       )}
-      <table className="border-separate border-spacing-0 text-xs">
+      <table
+        className="w-full table-fixed border-separate border-spacing-0 text-xs"
+        style={{ minWidth: minimumTableWidth }}
+      >
+        <colgroup>
+          <col style={{ width: 56 }} />
+          {sheet.columns.map((column, index) => (
+            <col key={column.name} style={{ width: widths[index] }} />
+          ))}
+          <col />
+        </colgroup>
         <thead>
           <tr>
             {/* Sticky header row: the grid stays usable at the panel's
                 default 30% height — only the body scrolls under it. */}
             <th className={`${HEADER_TH} w-14 min-w-14`} aria-label="Row number" />
-            {sheet.columns.map((column) => (
-              <th key={column.name} className={`${HEADER_TH} text-left`}>
-                {column.name}
-                <span className="font-normal text-gray-500"> · {columnTypeLabel(column.type)}</span>
-              </th>
+            {sheet.columns.map((column, index) => (
+              <ResizableColumnHeader
+                key={column.name}
+                name={column.name}
+                typeLabel={columnTypeLabel(column.type)}
+                width={widths[index]}
+                onResize={(width) => onColumnResize(column.name, width)}
+              />
             ))}
             <th className={`${HEADER_TH} w-full`} aria-hidden />
           </tr>
@@ -335,6 +404,8 @@ function SheetGrid({ sheet, state, flags, actions }: SheetGridProps): ReactEleme
                         <TextCell
                           value={value}
                           flagged={flag !== undefined}
+                          multiline={wrapText && column.type.kind === "Text"}
+                          columnWidth={widths[c]}
                           onCommit={(next) => actions.setCell(sheet.name, r, column.name, next)}
                           onPasteBlock={(e) => handlePaste(e, r, c, false)}
                         />
@@ -367,6 +438,74 @@ function SheetGrid({ sheet, state, flags, actions }: SheetGridProps): ReactEleme
 
 const HEADER_TH =
   "sticky top-0 z-10 whitespace-nowrap border-b border-r border-gray-700 bg-gray-900 px-2 py-1.5 font-semibold text-gray-300";
+
+interface ResizableColumnHeaderProps {
+  name: string;
+  typeLabel: string;
+  width: number;
+  onResize(width: number): void;
+}
+
+/** Header boundary resizing uses pointer capture so a fast drag keeps working
+ * after the pointer leaves the narrow handle. The same separator is keyboard
+ * reachable; arrows resize by a deliberate 16 px step. */
+function ResizableColumnHeader({
+  name,
+  typeLabel,
+  width,
+  onResize,
+}: ResizableColumnHeaderProps): ReactElement {
+  const drag = useRef<{ pointerId: number; startX: number; startWidth: number } | null>(null);
+  return (
+    <th className={`${HEADER_TH} relative text-left`}>
+      <span className="block overflow-hidden text-ellipsis">
+        {name}
+        <span className="font-normal text-gray-500"> · {typeLabel}</span>
+      </span>
+      <span
+        role="separator"
+        aria-label={`resize ${name} column`}
+        aria-orientation="vertical"
+        aria-valuemin={MIN_COLUMN_WIDTH_PX}
+        aria-valuemax={MAX_COLUMN_WIDTH_PX}
+        aria-valuenow={width}
+        tabIndex={0}
+        title="Drag to resize; use Left/Right arrow keys for 16 px steps"
+        onPointerDown={(event) => {
+          if (event.button !== 0) return;
+          drag.current = {
+            pointerId: event.pointerId,
+            startX: event.clientX,
+            startWidth: width,
+          };
+          event.currentTarget.setPointerCapture(event.pointerId);
+          event.preventDefault();
+        }}
+        onPointerMove={(event) => {
+          const active = drag.current;
+          if (active?.pointerId !== event.pointerId) return;
+          onResize(active.startWidth + event.clientX - active.startX);
+        }}
+        onPointerUp={(event) => {
+          if (drag.current?.pointerId !== event.pointerId) return;
+          drag.current = null;
+          event.currentTarget.releasePointerCapture(event.pointerId);
+        }}
+        onPointerCancel={() => {
+          drag.current = null;
+        }}
+        onKeyDown={(event) => {
+          if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+          event.preventDefault();
+          onResize(width + (event.key === "ArrowRight" ? 16 : -16));
+        }}
+        className="group/resize absolute inset-y-0 -right-1 z-20 w-2 cursor-col-resize touch-none outline-none"
+      >
+        <span className="absolute inset-y-0 left-1/2 w-px bg-transparent group-hover/resize:bg-sky-500 group-focus/resize:bg-sky-400" />
+      </span>
+    </th>
+  );
+}
 
 interface RowIndexCellProps {
   /** 0-based — the row's CURRENT position. */
@@ -419,22 +558,40 @@ function RowIndexCell({ rowIndex, rowCount, onMove }: RowIndexCellProps): ReactE
 interface TextCellProps {
   value: string;
   flagged: boolean;
+  multiline: boolean;
+  columnWidth: number;
   onCommit(value: string): void;
   onPasteBlock(e: ClipboardEvent<HTMLElement>): void;
 }
 
 /** Text/Number cell: a thin wire over gridModel's cellEditReduce (MINOR-5 —
- * the draft/commit/revert rules live there, unit-tested). Enter commits by
- * blurring; commits reach the store only on REAL changes (◆29 — a spurious
- * setCell costs a row its pristine state); Escape reverts the draft. */
-function TextCell({ value, flagged, onCommit, onPasteBlock }: TextCellProps): ReactElement {
+ * the draft/commit/revert rules live there, unit-tested). In optional wrap
+ * mode, Text cells become auto-height textareas; Enter still commits in place.
+ * Commits reach the store only on REAL changes (◆29 — a spurious setCell costs
+ * a row its pristine state); Escape reverts the draft. */
+function TextCell({
+  value,
+  flagged,
+  multiline,
+  columnWidth,
+  onCommit,
+  onPasteBlock,
+}: TextCellProps): ReactElement {
   const [draft, setDraft] = useState<CellDraft>(null);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const shownValue = draft ?? value;
+  useEffect(() => {
+    const textarea = textareaRef.current;
+    if (!textarea || !multiline) return;
+    textarea.style.height = "0px";
+    textarea.style.height = `${textarea.scrollHeight}px`;
+  }, [shownValue, multiline, columnWidth]);
   const apply = (action: CellEditAction): void => {
     const result = cellEditReduce(draft, value, action);
     setDraft(result.draft);
     if (result.commit !== undefined) onCommit(result.commit);
   };
-  const onKeyDown = (e: KeyboardEvent<HTMLInputElement>): void => {
+  const onKeyDown = (e: KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>): void => {
     if (e.key === "Enter") {
       // adversarial review item 3: this used to call blur(), which commits
       // via the onBlur handler below — but ALSO moves focus to
@@ -451,16 +608,29 @@ function TextCell({ value, flagged, onCommit, onPasteBlock }: TextCellProps): Re
       apply({ kind: "escape" }); // revert in place
     }
   };
-  return (
-    <input
-      value={draft ?? value}
+  const editorClassName = `block min-w-0 w-full bg-transparent px-2 py-1 outline-none focus:bg-gray-900/50 focus:ring-1 focus:ring-inset focus:ring-sky-600 ${
+    flagged ? "text-red-200" : ""
+  }`;
+  return multiline ? (
+    <textarea
+      ref={textareaRef}
+      rows={1}
+      value={shownValue}
+      aria-label="wrapped text cell"
       onChange={(e) => apply({ kind: "type", value: e.currentTarget.value })}
       onBlur={() => apply({ kind: "commit" })}
       onKeyDown={onKeyDown}
       onPaste={onPasteBlock}
-      className={`w-36 bg-transparent px-2 py-1 outline-none focus:bg-gray-900/50 focus:ring-1 focus:ring-inset focus:ring-sky-600 ${
-        flagged ? "text-red-200" : ""
-      }`}
+      className={`${editorClassName} resize-none overflow-hidden whitespace-pre-wrap break-words`}
+    />
+  ) : (
+    <input
+      value={shownValue}
+      onChange={(e) => apply({ kind: "type", value: e.currentTarget.value })}
+      onBlur={() => apply({ kind: "commit" })}
+      onKeyDown={onKeyDown}
+      onPaste={onPasteBlock}
+      className={editorClassName}
     />
   );
 }
@@ -496,7 +666,7 @@ function EnumCell({ value, cases, flagged, onCommit, onPasteBlock }: EnumCellPro
       // wash always shows). Drop to transparent ONLY when flagged, so both
       // cell kinds render identically red; the unflagged chip look is
       // unchanged.
-      className={`w-36 px-1.5 py-1 outline-none focus:bg-gray-900/50 focus:ring-1 focus:ring-inset focus:ring-sky-600 ${
+      className={`block min-w-0 w-full px-1.5 py-1 outline-none focus:bg-gray-900/50 focus:ring-1 focus:ring-inset focus:ring-sky-600 ${
         flagged ? "bg-transparent text-red-200" : "bg-gray-800"
       }`}
     >

@@ -18,6 +18,7 @@ import {
   cellEditReduce,
   cellFlagKey,
   cellValueOf,
+  clampColumnWidth,
   columnHeaderLabel,
   columnTypeLabel,
   enumOptionsOf,
@@ -28,6 +29,9 @@ import {
   pasteOps,
   resolveIndexEdit,
   type PasteOp,
+  DEFAULT_COLUMN_WIDTH_PX,
+  MAX_COLUMN_WIDTH_PX,
+  MIN_COLUMN_WIDTH_PX,
 } from "@/app/editor/_components/gridModel";
 
 // -- tabs and columns --------------------------------------------------------
@@ -80,6 +84,19 @@ describe("column headers", () => {
       }),
     ).toBe("suit · Suit");
     expect(columnTypeLabel({ kind: "Enum", enumName: "Rank", cases: [] })).toBe("Rank");
+  });
+});
+
+describe("column sizing", () => {
+  it("rounds in-range widths and clamps pointer/keyboard resizing to the supported range", () => {
+    expect(clampColumnWidth(211.6)).toBe(212);
+    expect(clampColumnWidth(MIN_COLUMN_WIDTH_PX - 50)).toBe(MIN_COLUMN_WIDTH_PX);
+    expect(clampColumnWidth(MAX_COLUMN_WIDTH_PX + 50)).toBe(MAX_COLUMN_WIDTH_PX);
+  });
+
+  it("falls back to the default for a non-finite browser measurement", () => {
+    expect(clampColumnWidth(Number.NaN)).toBe(DEFAULT_COLUMN_WIDTH_PX);
+    expect(clampColumnWidth(Number.POSITIVE_INFINITY)).toBe(DEFAULT_COLUMN_WIDTH_PX);
   });
 });
 

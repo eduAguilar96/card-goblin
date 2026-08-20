@@ -34,6 +34,17 @@ export interface GridTab {
   rowCount: number;
 }
 
+/** Column sizing belongs to the view, not the sheet payload. Keeping the bounds
+ * here makes pointer and keyboard resizing share one tested policy. */
+export const DEFAULT_COLUMN_WIDTH_PX = 144;
+export const MIN_COLUMN_WIDTH_PX = 96;
+export const MAX_COLUMN_WIDTH_PX = 720;
+
+export function clampColumnWidth(width: number): number {
+  if (!Number.isFinite(width)) return DEFAULT_COLUMN_WIDTH_PX;
+  return Math.min(MAX_COLUMN_WIDTH_PX, Math.max(MIN_COLUMN_WIDTH_PX, Math.round(width)));
+}
+
 /**
  * One tab per sheet of the LAST GOOD schema, in declaration order (§4.2
  * M5†). Tabs come only from the schema: store sheets absent from it —
