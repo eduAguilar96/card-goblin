@@ -272,6 +272,88 @@ describe("createR2Storage — presigned URL signing (L4)", () => {
 describe("createR2Storage — server-side request shape and diagnostics", () => {
   const config = { accountId: "acct", accessKeyId: "AKIAFAKE", secretAccessKey: "fakesecret", bucket: "bucket" };
 
+  it("GET requests identity encoding and carries the returned strong ETag unchanged into If-Match", async () => {
+    const seen: Request[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const request = input instanceof Request ? input : new Request(input);
+        seen.push(request);
+        if (request.method === "GET") {
+          return new Response("stored project", {
+            status: 200,
+            headers: { etag: '"stored-object-etag"', "content-type": "application/json" },
+          });
+        }
+        return new Response(null, { status: 200, headers: { etag: '"next-object-etag"' } });
+      }),
+    );
+
+    const storage = createR2Storage(config);
+    const stored = await storage.getObject("projects/default/project.json");
+    expect(stored?.etag).toBe('"stored-object-etag"');
+    await storage.putObject(
+      "projects/default/project.json",
+      new Uint8Array([1, 2, 3]),
+      "application/json",
+      stored!.etag,
+    );
+
+    expect(seen).toHaveLength(2);
+    expect(seen[0].method).toBe("GET");
+    expect(seen[0].cache).toBe("no-store");
+    expect(seen[0].headers.get("accept-encoding")).toBe("identity");
+    expect(seen[0].headers.get("authorization")).toContain(
+      "SignedHeaders=accept-encoding;host;x-amz-content-sha256;x-amz-date",
+    );
+    expect(seen[1].method).toBe("PUT");
+    expect(seen[1].headers.get("if-match")).toBe('"stored-object-etag"');
+  });
+
+  it("still maps a rejected strong If-Match to a conditional-write conflict", async () => {
+    let seen: Request | null = null;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        seen = input instanceof Request ? input : new Request(input);
+        return new Response("<Error><Code>PreconditionFailed</Code></Error>", { status: 412 });
+      }),
+    );
+
+    await expect(
+      createR2Storage(config).putObject(
+        "projects/default/project.json",
+        new Uint8Array([1]),
+        "application/json",
+        '"stale-strong-etag"',
+      ),
+    ).rejects.toBeInstanceOf(CloudConditionalWriteError);
+    expect(seen).not.toBeNull();
+    expect(seen!.headers.get("if-match")).toBe('"stale-strong-etag"');
+  });
+
+  it.each([
+    ["missing", undefined, "MissingETag"],
+    ["weak", 'W/"transfer-compressed-etag"', "WeakETag"],
+  ])("fails closed on a %s GET validator instead of attempting an unsafe conditional write", async (_label, etag, code) => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response("stored project", {
+          status: 200,
+          headers: etag === undefined ? undefined : { etag },
+        }),
+      ),
+    );
+
+    await expect(createR2Storage(config).getObject("projects/default/project.json")).rejects.toMatchObject({
+      name: "CloudStorageError",
+      operation: "GET",
+      status: 200,
+      code,
+    });
+  });
+
   it("PUT sends an explicit exact Content-Length instead of relying on the runtime to infer it", async () => {
     let seen: Request | null = null;
     vi.stubGlobal(

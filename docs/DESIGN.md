@@ -1368,6 +1368,22 @@ behaves exactly as it does today.
   unexpected/network failures remain safely classified without leaking
   secrets, instead of every cause becoming `Cloud storage error.`
 
+- **Project reads must preserve R2's strong object ETag across transfer
+  encoding** († 2026-08-19 — production bug). The revision pre-check can say
+  `baseRevision === currentRevision` and still lose a real concurrent race,
+  so updates correctly reuse the just-read object's ETag in a storage-level
+  `If-Match`. A sufficiently large `project.json`, however, was compressed on
+  the server-to-R2 GET path and exposed as `W/"..."`; HTTP `If-Match` uses
+  strong comparison, so that weak validator can never satisfy the following
+  conditional PUT. The route consequently reported a false 409 at the same
+  revision, making larger Goblin scripts look like conflicts. Server-side R2
+  object reads now bypass fetch caches and explicitly request
+  `Accept-Encoding: identity`, preserving the current stored strong ETag used
+  by the conditional write. This does NOT strip a weak prefix, retry
+  unconditionally, or otherwise relax conflict safety: a missing/weak ETag
+  fails closed as a diagnosable storage error, while a stale strong ETag still
+  fails at R2 and follows the existing 409 path.
+
 - **Failure posture (⚑8's spirit).** Any cloud failure — offline, expired
   session, R2 error — degrades to local-only editing with a quiet indicator,
   never a lost edit and never a blocked editor. Sign-out clears the session

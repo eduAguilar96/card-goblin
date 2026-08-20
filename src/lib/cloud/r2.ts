@@ -26,8 +26,9 @@ import { AwsClient } from "aws4fetch";
 
 export interface StoredObject {
   bytes: Uint8Array;
-  /** Opaque, storage-assigned — used only for conditional-write comparisons
-   * (`ifMatch` below), never parsed. */
+  /** Strong, opaque, storage-assigned — used only for conditional-write
+   * comparisons (`ifMatch` below), never parsed beyond rejecting a weak or
+   * missing validator at the real R2 boundary. */
   etag: string;
   mime: string;
 }
@@ -304,7 +305,24 @@ export function createR2Storage(config: R2Config): CloudStorage {
 
   return {
     async getObject(key) {
-      const res = await r2Fetch("GET", key, () => client.fetch(objectUrl(config, key), { method: "GET" }));
+      const res = await r2Fetch("GET", key, () =>
+        client.fetch(objectUrl(config, key), {
+          method: "GET",
+          // This read participates in compare-and-swap. It must observe R2,
+          // not a framework/runtime cache holding an older representation.
+          cache: "no-store",
+          headers: {
+            // The ETag from this read becomes the next project's If-Match.
+            // A transfer-compressed response may expose that validator as
+            // weak (`W/"..."`), which can never satisfy If-Match's strong
+            // comparison even when the stored object has not changed.
+            // Request the stored representation so R2 returns its strong
+            // object ETag. Never strip W/ or retry a write unconditionally:
+            // both would weaken the concurrent-write guard.
+            "accept-encoding": "identity",
+          },
+        }),
+      );
       if (res.status === 404) {
         const code = await r2ErrorCode(res);
         // R2 normally answers an absent object with NoSuchKey. A blank 404
@@ -318,10 +336,21 @@ export function createR2Storage(config: R2Config): CloudStorage {
         });
       }
       if (!res.ok) throw await storageResponseError("GET", key, res);
+      const etag = res.headers.get("etag");
+      if (etag === null || etag === "" || etag.startsWith("W/")) {
+        // Fail closed. Removing W/ would manufacture a strong validator from
+        // a weak one; continuing without a validator would make the next PUT
+        // unconditional. Both would compromise the storage-level race guard.
+        throw new CloudStorageError(`R2 GET ${key} returned no strong ETag`, {
+          operation: "GET",
+          status: res.status,
+          code: etag?.startsWith("W/") ? "WeakETag" : "MissingETag",
+        });
+      }
       const bytes = new Uint8Array(await res.arrayBuffer());
       return {
         bytes,
-        etag: res.headers.get("etag") ?? "",
+        etag,
         mime: res.headers.get("content-type") ?? "application/octet-stream",
       };
     },

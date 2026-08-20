@@ -746,6 +746,32 @@ describe("PUT /api/cloud/project — the revision guard", () => {
     expect(await json(res)).toEqual({ error: "Cloud storage error (R2 PUT 411 MissingContentLength)." });
   });
 
+  it("a weak read ETag is a storage failure, not a false revision conflict", async () => {
+    const real = createInMemoryCloudStorage();
+    const weakRead: CloudStorage = {
+      ...real,
+      async getObject() {
+        throw new CloudStorageError("R2 returned a transfer-compressed validator", {
+          operation: "GET",
+          status: 200,
+          code: "WeakETag",
+        });
+      },
+    };
+    setCloudStorageForTests(weakRead);
+
+    const res = await projectPut(
+      req("/api/cloud/project", {
+        method: "PUT",
+        signedIn: true,
+        body: { baseRevision: 1, project: { code: "larger script", sheets: {}, assets: [] } },
+      }),
+    );
+    expect(res.status).toBe(502);
+    expect(res.status).not.toBe(409);
+    expect(await json(res)).toEqual({ error: "Cloud storage error (R2 GET 200 WeakETag)." });
+  });
+
   it("baseRevision matches the CURRENT (non-zero) revision: writes again, increments", async () => {
     await projectPut(
       req("/api/cloud/project", {

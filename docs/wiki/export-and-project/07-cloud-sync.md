@@ -93,6 +93,8 @@ were open at once. Instead the status bar offers two choices:
   replacing what the other device wrote.
 
 Either way, nothing is silently thrown away: the choice is always yours.
+The size or complexity of your Goblin script does not itself create a conflict;
+a conflict means the cloud copy actually changed after this browser last read it.
 
 ## "Your editor has work that isn't in the cloud"
 
