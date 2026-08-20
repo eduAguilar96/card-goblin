@@ -768,6 +768,14 @@ input, §7.4) rather than owning it.
   cells red; pristine rows render dimmed (◆29). Data survives schema edits (◆26);
   a compile diff showing exactly one column removed and one added **at the same
   index with the same type** is treated as a rename and migrates the data (◆26†).
+  A sheet tab can be renamed from its explicit **Rename** control or by
+  double-clicking the tab. Rename is an inline draft (Enter/blur commits, Escape
+  cancels); commit atomically rewrites the `Sheet:` declaration and every Card
+  `sheet:` reference, moves the row state to the new sheet key, and recompiles.
+  It is disabled while code is broken and rejects invalid/colliding names or a
+  destination with session-preserved orphan data, so a rename never overwrites
+  rows. The code window updates because both windows edit one project source,
+  but no code changes occur for each character typed into the rename draft.
   Columns start at 144 px and expose a drag/keyboard resize handle in each header
   (96–720 px); widths are local editor-view state, not project data. A **Wrap text**
   toggle is off by default. When enabled, Text-column editors wrap at the current

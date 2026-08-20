@@ -50,6 +50,7 @@ import type {
   EditedRows,
   Program,
   ProjectResult,
+  Range,
   RenderModel,
   SheetRows,
   ValueType,
@@ -151,6 +152,13 @@ export interface EditorState {
    * `from` and `to`, so a debounced recompile would show stale per-row flags
    * — and a stale [row]/[card] binding value — for up to 300 ms. */
   moveRow(sheet: string, fromIndex: number, toIndex: number): void;
+  /** Rename a schema sheet as one atomic project edit: rewrites the `Sheet:`
+   * declaration and every resolved Card `sheet:` reference, moves the row
+   * state to the new key, then publishes a synchronous good compile. The
+   * action rejects stale/broken source, invalid or colliding names, and an
+   * orphaned destination sheet rather than risking a range-based rewrite or
+   * overwriting session-preserved data. */
+  renameSheet(oldName: string, newName: string): RenameSheetResult;
   /** Replace the whole project (§6.2: autosave restore, reset-to-demo) —
    * equivalent to seeding a fresh store while keeping subscribers: seed
    * normalized, last-goods cleared, pending debounce cancelled, eager
@@ -162,6 +170,10 @@ export interface EditorState {
   /** Runs the pending debounced compile now; no-op when nothing is pending. */
   flushCompile(): void;
 }
+
+export type RenameSheetResult =
+  | { ok: true; name: string }
+  | { ok: false; message: string };
 
 // ---------------------------------------------------------------------------
 // Pure helpers (exported for unit tests)
@@ -307,6 +319,69 @@ export function reconcileSheets(
     if (moved) mutable()[sheet.name] = { rows, editedRows: entry.editedRows };
   }
   return next ?? sheets;
+}
+
+/** Convert the AST's line/column ranges back into source offsets while
+ * preserving whichever newline convention the project uses. */
+function sourceOffset(source: string, range: Range, end: boolean): number {
+  const targetLine = end ? range.endLine : range.startLine;
+  const targetCol = end ? range.endCol : range.startCol;
+  let line = 0;
+  let offset = 0;
+  while (line < targetLine && offset < source.length) {
+    const char = source[offset++];
+    if (char === "\r") {
+      if (source[offset] === "\n") offset++;
+      line++;
+    } else if (char === "\n") {
+      line++;
+    }
+  }
+  return offset + targetCol;
+}
+
+/** Rename only semantic sheet-name positions — labels, comments, strings,
+ * columns, and unrelated identifiers that happen to share the spelling are
+ * deliberately untouched. The caller only uses the current GOOD program,
+ * so every range belongs to the exact source string being edited. */
+function renamedSheetSource(
+  source: string,
+  program: Program,
+  oldName: string,
+  newName: string,
+): string | null {
+  const sheet = program.declarations.find(
+    (decl) => decl.kind === "SheetDecl" && decl.name.name === oldName,
+  );
+  if (!sheet || sheet.kind !== "SheetDecl") return null;
+
+  const ranges: Range[] = [sheet.name.range];
+  for (const decl of program.declarations) {
+    if (decl.kind !== "CardDecl") continue;
+    for (const item of decl.items) {
+      if (
+        item.kind === "Property" &&
+        item.key.name === "sheet" &&
+        item.value.kind === "Identifier" &&
+        item.value.name === oldName
+      ) {
+        ranges.push(item.value.range);
+      }
+    }
+  }
+
+  const replacements = ranges
+    .map((range) => ({
+      start: sourceOffset(source, range, false),
+      end: sourceOffset(source, range, true),
+    }))
+    .sort((a, b) => b.start - a.start);
+  let renamed = source;
+  for (const replacement of replacements) {
+    renamed =
+      renamed.slice(0, replacement.start) + newName + renamed.slice(replacement.end);
+  }
+  return renamed;
 }
 
 /** First free tombstone slot for a displaced orphan: `__orphan__<column>`,
@@ -573,6 +648,93 @@ export function createEditorStore(
         // recompute NOW, not after the 300 ms debounce.
         cancelPending();
         runCompile();
+      },
+
+      renameSheet: (oldName, proposedName) => {
+        // A pending code keystroke means `compile.program` still describes an
+        // older source string. Land it first so the ranges below are safe.
+        if (timer !== null) {
+          cancelPending();
+          runCompile();
+        }
+
+        const state = get();
+        if (
+          state.compile === null ||
+          state.isStale ||
+          state.compile.diagnostics.some((d) => d.severity === "error")
+        ) {
+          return { ok: false, message: "Fix the code errors before renaming a sheet." };
+        }
+        if (!state.lastGoodSchema?.some((sheet) => sheet.name === oldName)) {
+          return { ok: false, message: `Sheet '${oldName}' no longer exists.` };
+        }
+
+        const newName = proposedName.trim();
+        if (newName === oldName) return { ok: true, name: oldName };
+        if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(newName)) {
+          return {
+            ok: false,
+            message: "Sheet names must start with a letter and contain only letters, numbers, or underscores.",
+          };
+        }
+        if (Object.hasOwn(state.sheets, newName)) {
+          return {
+            ok: false,
+            message: `Sheet data named '${newName}' already exists; choose another name.`,
+          };
+        }
+
+        const code = renamedSheetSource(state.code, state.compile.program, oldName, newName);
+        if (code === null) {
+          return { ok: false, message: `Could not find the Sheet declaration for '${oldName}'.` };
+        }
+
+        const sheets = { ...state.sheets };
+        sheets[newName] = sheets[oldName];
+        delete sheets[oldName];
+
+        // Preflight before mutating anything: reserved names and collisions
+        // with any other declaration are best diagnosed by the language
+        // itself, whose rules remain the single source of truth.
+        let result = compileProject(
+          code,
+          rowsOf(sheets),
+          editedOf(sheets),
+          assetSource.getAssetNames(),
+        );
+        const error = result.diagnostics.find((d) => d.severity === "error");
+        if (error) return { ok: false, message: error.message };
+
+        const extracted = extractSchema(result.bindings);
+        const schema = schemaEquals(state.lastGoodSchema, extracted)
+          ? state.lastGoodSchema
+          : extracted;
+        const reconciled = reconcileSheets(sheets, state.lastGoodSchema, schema);
+        if (reconciled !== sheets) {
+          result = compileProject(
+            code,
+            rowsOf(reconciled),
+            editedOf(reconciled),
+            assetSource.getAssetNames(),
+          );
+        }
+
+        // One store publication keeps code, rows, schema, and preview atomic
+        // for subscribers (including autosave and the Monaco controlled value).
+        set({
+          code,
+          sheets: reconciled,
+          compile: toCompileState(result),
+          lastGoodSchema: schema,
+          lastGoodModel: {
+            model: result.model,
+            dataDiagnostics: result.dataDiagnostics,
+            excludedPristineRows: result.excludedPristineRows,
+          },
+          isStale: false,
+        });
+        return { ok: true, name: newName };
       },
 
       replaceProject: (next) => {

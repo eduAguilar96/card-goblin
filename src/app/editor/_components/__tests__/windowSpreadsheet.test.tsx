@@ -24,6 +24,7 @@ const noopActions: SpreadsheetActions = {
   addRow: () => undefined,
   deleteRow: () => undefined,
   moveRow: () => undefined,
+  renameSheet: (_oldName, newName) => ({ ok: true, name: newName }),
 };
 
 function renderState(state: EditorState): string {
@@ -55,6 +56,28 @@ describe("SpreadsheetContent (demo)", () => {
     expect(markup).toContain('role="tablist"');
     expect(markup).toContain('aria-selected="true"');
     expect(stripTags(markup)).toContain("Monsters");
+  });
+
+  it("offers an explicit rename control and advertises the tab double-click shortcut", () => {
+    expect(markup).toContain('aria-label="Rename Monsters sheet"');
+    expect(markup).toContain('title="Double-click to rename Monsters"');
+    expect(stripTags(markup)).toContain("Rename");
+  });
+
+  it("disables rename while the visible schema is stale", () => {
+    const state = createEditorStore().getState();
+    const staleMarkup = renderToStaticMarkup(
+      <SpreadsheetContent
+        schema={state.lastGoodSchema}
+        sheets={state.sheets}
+        dataDiagnostics={[]}
+        actions={noopActions}
+        isStale
+      />,
+    );
+    expect(staleMarkup).toContain('aria-label="Rename Monsters sheet"');
+    expect(staleMarkup).toContain("disabled=\"\"");
+    expect(staleMarkup).toContain("Fix code errors before renaming");
   });
 
   it("renders exactly the schema's columns as name · type headers (⚑3: no add-column UI)", () => {

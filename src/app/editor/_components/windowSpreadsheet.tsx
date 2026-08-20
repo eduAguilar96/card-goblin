@@ -80,6 +80,10 @@ export interface SpreadsheetActions extends PasteTarget {
   deleteRow(sheet: string, row: number): void;
   /** §3.6, ◆42: commits from the row-number gutter. */
   moveRow(sheet: string, fromIndex: number, toIndex: number): void;
+  /** Atomic schema/source + row-state rename (the store validates it). */
+  renameSheet(oldName: string, newName: string):
+    | { ok: true; name: string }
+    | { ok: false; message: string };
 }
 
 export default function WindowSpreadsheet(): ReactElement {
@@ -90,9 +94,11 @@ export default function WindowSpreadsheet(): ReactElement {
   const addRow = useEditorStore((s) => s.addRow);
   const deleteRow = useEditorStore((s) => s.deleteRow);
   const moveRow = useEditorStore((s) => s.moveRow);
+  const renameSheet = useEditorStore((s) => s.renameSheet);
+  const isStale = useEditorStore((s) => s.isStale);
   const actions = useMemo<SpreadsheetActions>(
-    () => ({ setCell, addRow, deleteRow, moveRow }),
-    [setCell, addRow, deleteRow, moveRow],
+    () => ({ setCell, addRow, deleteRow, moveRow, renameSheet }),
+    [setCell, addRow, deleteRow, moveRow, renameSheet],
   );
   return (
     <SpreadsheetContent
@@ -100,6 +106,7 @@ export default function WindowSpreadsheet(): ReactElement {
       sheets={sheets}
       dataDiagnostics={compile?.dataDiagnostics ?? NO_DIAGNOSTICS}
       actions={actions}
+      isStale={isStale}
     />
   );
 }
@@ -109,6 +116,8 @@ export interface SpreadsheetContentProps {
   sheets: SheetsState;
   dataDiagnostics: readonly DataDiagnostic[];
   actions: SpreadsheetActions;
+  /** A stale schema is safe to VIEW but not safe to source-rewrite by range. */
+  isStale?: boolean;
 }
 
 export function SpreadsheetContent({
@@ -116,12 +125,17 @@ export function SpreadsheetContent({
   sheets,
   dataDiagnostics,
   actions,
+  isStale = false,
 }: SpreadsheetContentProps): ReactElement {
   // Active tab is LOCAL state, name-keyed: if the active sheet leaves the
   // schema, the render falls back to the first sheet without a state write
   // (and comes back should the name return — session preservation, ◆26).
   const [activeName, setActiveName] = useState<string | null>(null);
   const [wrapText, setWrapText] = useState(false);
+  const [renamingName, setRenamingName] = useState<string | null>(null);
+  const [renameDraft, setRenameDraft] = useState("");
+  const [renameError, setRenameError] = useState<string | null>(null);
+  const renameInputRef = useRef<HTMLInputElement | null>(null);
   // View-only sizing: deliberately absent from the project/store payload.
   // A Map avoids special object keys (`constructor`, `__proto__`) becoming
   // surprising if Goblin identifiers ever broaden beyond today's grammar.
@@ -145,6 +159,12 @@ export function SpreadsheetContent({
     el.scrollLeft = pos?.left ?? 0;
     el.scrollTop = pos?.top ?? 0;
   }, [activeSheetName]);
+
+  useEffect(() => {
+    if (renamingName === null) return;
+    renameInputRef.current?.focus();
+    renameInputRef.current?.select();
+  }, [renamingName]);
 
   const flags = useMemo(() => buildFlagIndex(dataDiagnostics), [dataDiagnostics]);
 
@@ -178,6 +198,47 @@ export function SpreadsheetContent({
     setActiveName(name);
   };
 
+  const beginRename = (name: string): void => {
+    if (isStale) return;
+    setActiveName(name);
+    setRenamingName(name);
+    setRenameDraft(name);
+    setRenameError(null);
+  };
+
+  const cancelRename = (): void => {
+    setRenamingName(null);
+    setRenameError(null);
+  };
+
+  const commitRename = (): void => {
+    if (renamingName === null) return;
+    const oldName = renamingName;
+    const result = actions.renameSheet(oldName, renameDraft);
+    if (!result.ok) {
+      setRenameError(result.message);
+      return;
+    }
+    if (result.name !== oldName) {
+      setColumnWidths((previous) => {
+        const widths = previous.get(oldName);
+        if (widths === undefined) return previous;
+        const next = new Map(previous);
+        next.delete(oldName);
+        next.set(result.name, widths);
+        return next;
+      });
+      const scroll = scrollPositions.current.get(oldName);
+      if (scroll !== undefined) {
+        scrollPositions.current.delete(oldName);
+        scrollPositions.current.set(result.name, scroll);
+      }
+    }
+    setActiveName(result.name);
+    setRenamingName(null);
+    setRenameError(null);
+  };
+
   const resizeColumn = (sheetName: string, columnName: string, width: number): void => {
     setColumnWidths((previous) => {
       const next = new Map(previous);
@@ -200,6 +261,45 @@ export function SpreadsheetContent({
         >
           {tabs.map((tab) => {
             const isActive = tab.name === activeSheetName;
+            if (renamingName === tab.name) {
+              return (
+                <div
+                  key={tab.name}
+                  role="tab"
+                  aria-selected={isActive}
+                  className="flex items-center gap-1 whitespace-nowrap rounded-t border border-b-0 border-gray-700 bg-gray-800 px-2 py-0.5 text-xs text-white"
+                >
+                  <input
+                    ref={renameInputRef}
+                    value={renameDraft}
+                    aria-label={`Rename sheet ${tab.name}`}
+                    aria-invalid={renameError !== null}
+                    title={renameError ?? "Enter to rename · Escape to cancel"}
+                    onChange={(event) => {
+                      setRenameDraft(event.target.value);
+                      setRenameError(null);
+                    }}
+                    onBlur={commitRename}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        commitRename();
+                      } else if (event.key === "Escape") {
+                        event.preventDefault();
+                        cancelRename();
+                      }
+                    }}
+                    className={`min-w-20 rounded border bg-gray-950 px-1 py-0.5 text-xs text-white outline-none focus:ring-1 ${
+                      renameError
+                        ? "border-red-500 focus:ring-red-500"
+                        : "border-sky-600 focus:ring-sky-500"
+                    }`}
+                    style={{ width: `${Math.max(8, Math.min(28, renameDraft.length + 2))}ch` }}
+                  />
+                  <span className="font-normal text-gray-400">{tab.rowCount}</span>
+                </div>
+              );
+            }
             return (
               <button
                 key={tab.name}
@@ -207,6 +307,12 @@ export function SpreadsheetContent({
                 role="tab"
                 aria-selected={isActive}
                 onClick={() => switchTab(tab.name)}
+                onDoubleClick={() => beginRename(tab.name)}
+                title={
+                  isStale
+                    ? "Fix code errors before renaming this sheet"
+                    : `Double-click to rename ${tab.name}`
+                }
                 className={
                   isActive
                     ? "whitespace-nowrap rounded-t border border-b-0 border-gray-700 bg-gray-800 px-3 py-1 text-xs font-semibold text-white"
@@ -221,6 +327,33 @@ export function SpreadsheetContent({
             );
           })}
         </div>
+        {renameError && (
+          <span role="alert" className="ml-2 max-w-64 truncate text-[11px] text-red-300">
+            {renameError}
+          </span>
+        )}
+        <button
+          type="button"
+          disabled={isStale || activeSheetName === undefined || renamingName !== null}
+          aria-label={
+            activeSheetName === undefined
+              ? "Rename sheet"
+              : `Rename ${activeSheetName} sheet`
+          }
+          title={
+            isStale
+              ? "Fix code errors before renaming a sheet"
+              : renamingName !== null
+                ? "Finish or cancel the current rename"
+              : "Rename sheet (updates the Sheet declaration and Card references in code)"
+          }
+          onClick={() => {
+            if (activeSheetName !== undefined) beginRename(activeSheetName);
+          }}
+          className="mb-1 ml-2 shrink-0 rounded border border-gray-700 px-2 py-0.5 text-[11px] text-gray-400 outline-none hover:border-gray-600 hover:text-gray-200 focus-visible:ring-1 focus-visible:ring-sky-500 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          Rename
+        </button>
         <button
           type="button"
           aria-pressed={wrapText}

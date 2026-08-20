@@ -553,6 +553,98 @@ describe("column rename through the store (◆26†)", () => {
   });
 });
 
+// -- explicit sheet rename --------------------------------------------------
+
+describe("renameSheet", () => {
+  it("atomically renames the declaration, Card reference, and row-state key", () => {
+    const store = createEditorStore();
+    const originalSheet = store.getState().sheets.Monsters;
+
+    expect(store.getState().renameSheet("Monsters", "Creatures")).toEqual({
+      ok: true,
+      name: "Creatures",
+    });
+
+    const state = store.getState();
+    expect(state.code).toContain("Sheet: Creatures");
+    expect(state.code).toContain("  sheet: Creatures");
+    expect(state.code).not.toContain("Sheet: Monsters");
+    expect(state.code).not.toContain("  sheet: Monsters");
+    expect(Object.hasOwn(state.sheets, "Monsters")).toBe(false);
+    expect(state.sheets.Creatures).toBe(originalSheet);
+    expect(state.sheets.Creatures.rows.map((row) => row.name)).toEqual(["Dragon", "Imp"]);
+    expect(state.lastGoodSchema?.[0].name).toBe("Creatures");
+    expect(state.compile?.bindings.cards[0].sheet?.decl.name.name).toBe("Creatures");
+    expect(state.isStale).toBe(false);
+    expect(state.lastGoodModel?.model.decks[0].cards).toHaveLength(9);
+  });
+
+  it("uses fresh ranges after a pending code edit and leaves comments/strings untouched", () => {
+    vi.useFakeTimers();
+    const store = createEditorStore();
+    store.getState().setCode(
+      `# Monsters is a display word, not a reference\n${DEMO_PROJECT_SOURCE}`.replace(
+        'text: "Cost: [cost]"',
+        'text: "Monsters cost: [cost]"',
+      ),
+    );
+
+    expect(store.getState().renameSheet("Monsters", "Creatures").ok).toBe(true);
+    const code = store.getState().code;
+    expect(code).toContain("# Monsters is a display word, not a reference");
+    expect(code).toContain('text: "Monsters cost: [cost]"');
+    expect(code).toContain("Sheet: Creatures");
+    expect(code).toContain("sheet: Creatures");
+    vi.advanceTimersByTime(10 * COMPILE_DEBOUNCE_MS);
+    expect(store.getState().code).toBe(code); // pending compile was consumed
+  });
+
+  it("rejects invalid, reserved, and declaration-colliding names without mutating the project", () => {
+    for (const proposed of ["two words", "2Monsters", "Card", "Suit"]) {
+      const store = createEditorStore();
+      const before = store.getState();
+      const result = store.getState().renameSheet("Monsters", proposed);
+      expect(result.ok).toBe(false);
+      const after = store.getState();
+      expect(after.code).toBe(before.code);
+      expect(after.sheets).toBe(before.sheets);
+      expect(after.lastGoodSchema).toBe(before.lastGoodSchema);
+    }
+  });
+
+  it("rejects a destination with orphaned row data instead of overwriting it", () => {
+    const store = createEditorStore({
+      code: "Sheet: Current\n  column value: Text\n",
+      sheets: {
+        Current: { rows: [{ value: "live" }], editedRows: [true] },
+        Former: { rows: [{ value: "preserved" }], editedRows: [true] },
+      },
+    });
+    const before = store.getState();
+    const result = store.getState().renameSheet("Current", "Former");
+    expect(result).toEqual({
+      ok: false,
+      message: "Sheet data named 'Former' already exists; choose another name.",
+    });
+    expect(store.getState().code).toBe(before.code);
+    expect(store.getState().sheets).toBe(before.sheets);
+  });
+
+  it("lands pending source first and refuses the rename when that source is broken", () => {
+    vi.useFakeTimers();
+    const store = createEditorStore();
+    store.getState().setCode(`${DEMO_PROJECT_SOURCE}\nCard: (((\n`);
+    const beforeSheets = store.getState().sheets;
+    expect(store.getState().renameSheet("Monsters", "Creatures")).toEqual({
+      ok: false,
+      message: "Fix the code errors before renaming a sheet.",
+    });
+    expect(store.getState().isStale).toBe(true);
+    expect(store.getState().code).toContain("Sheet: Monsters");
+    expect(store.getState().sheets).toBe(beforeSheets);
+  });
+});
+
 // -- reconcileSheets (pure, ◆26) ---------------------------------------------
 
 const col = (name: string, kind: "Text" | "Number" = "Text"): SchemaColumn => ({
