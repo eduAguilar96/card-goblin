@@ -28,6 +28,52 @@ A template gets its data from whichever Card is using it — there are no parame
 pass. The same template can be used by several Cards, and it's checked against each of
 them.
 
+## Reusing Templates
+
+A Template can call another Template by writing its name as a node header:
+
+```goblin
+Template: MonsterFront
+  Frame:
+  If: [elite]
+    EliteBadge:
+```
+
+The called shapes are inserted at that exact position, so source order still controls
+which shapes draw on top. Calls may be nested and may sit inside `If`, `Else`, or
+`Repeat`. Calls take no label, children, or arguments.
+
+A called Template deliberately does not capture the caller's local `let` values or
+`Repeat` index. It sees its own locals, global lets, Card loops, sheet columns,
+`[row]`, and `[card]`. This keeps a Template's meaning independent of who calls it;
+explicit arguments are not part of the language yet.
+
+For compatibility, a Template may still literally be named `If` or `Else` and used
+as `Front: If` or `Back: Else`. Those two names cannot use nested-call shorthand,
+because `If:` and `Else:` are structural there.
+
+## Drawing conditionally
+
+```goblin
+If: [equipment]
+  EquipmentFrontRotated:
+Else:
+  EquipmentFront:
+```
+
+`If:` takes a one-line Bool expression. `Else:` is optional and must be the next
+nonblank, non-comment sibling at the same indentation. Both branches are checked; only the
+selected branch runs, so an unselected branch emits no shapes, reads no lets, and
+produces no data errors. Branches have their own local scope. For else-if, nest an
+`If:` inside `Else:`.
+
+## Local values
+
+Use `let name: expression` anywhere a Template node can appear, including inside
+`If`, `Else`, and `Repeat`. A local let is immutable, visible throughout its lexical
+block even before its declaration, and newly evaluated for each Template call,
+selected branch, or Repeat iteration. A callee cannot see it.
+
 ## The coordinate grid
 
 Cards use an abstract unit grid, so a layout survives a change of card size and still
@@ -60,7 +106,7 @@ card, whatever size the card turns out to be.
 | `Text` | `x y size text` | `color` (black), `pivot` (top_left), `rotate` (0) | one line; `size` is text height in units — see [Text & TextBox](text.md) |
 | `TextBox` | `x y width height text size` | `color` (black), `align` (left), `line_height` (1.3), `overflow` (clip), `pivot` (top_left), `rotate` (0) | wrapped multi-line text in a box — see [Text & TextBox](text.md) |
 | `Icon` | `x y size code` | `color` (black), `pivot` (top_left), `style` (flat_dark), `rotate` (0) | a game glyph — see [Icons](icons.md) |
-| `Image` | `x y width height src` | `fit` (contain), `pivot` (top_left), `rotate` (0) | your own artwork, from a URL or an uploaded asset — see [Images](images.md) |
+| `Image` | `x y width height src` | `fit` (contain), `color` (white/unchanged), `pivot` (top_left), `rotate` (0) | your own artwork with optional multiply tint — see [Images](images.md) |
 | `Qr` | `x y size data` | `color` (black), `background` (white), `level` (m), `pivot` (top_left), `rotate` (0) | a scannable QR code — see [QR codes](qr-codes.md) |
 | `Repeat: N as i` | — | — | draws its children N times — see below |
 
@@ -197,4 +243,8 @@ and arcs are all just math on `[i]`.
 - The count can come from data (`Repeat: [health] as i`) or be computed.
 - Repeats nest freely — a grid is a repeat inside a repeat.
 - The count expression must fit on **one line**.
-- Cap: **500 drawn copies per card**, so a bad cell can't hang the preview.
+- Cap: **500 Repeat expansions per card**. Every iteration of every `Repeat`
+  counts once against the same budget, including outer and inner iterations in
+  nested repeats — it is not a count of the shapes eventually drawn. Crossing
+  the cap produces D004 and makes that affected card an error placeholder; it
+  does not keep partially truncated artwork.

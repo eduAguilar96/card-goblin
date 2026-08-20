@@ -8,6 +8,9 @@
  * keywords recognized by the parser in header position only (◆30†). Only the
  * declaration words (`case`, `column`) and expression-structure words
  * (`if then else and or not as`) are reserved and lex as keyword tokens.
+ * The binding/control words `let`, `If`, and `Else` deliberately remain plain
+ * identifiers: they are contextual forms recognized only in their parser
+ * positions, preserving declarations and columns with those names.
  *
  * A parse never throws: all lexical problems become E001 diagnostics and the
  * lexer recovers on the same line.

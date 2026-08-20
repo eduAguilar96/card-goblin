@@ -21,7 +21,7 @@
 // ---------------------------------------------------------------------------
 
 /**
- * D001–D009 are the §3.8 catalog. D000 is OUTSIDE the catalog by design,
+ * D001–D010 are the §3.8 catalog. D000 is OUTSIDE the catalog by design,
  * mirroring the checker's E000: it never marks a data-entry mistake. It is
  * used (a) per card, when a card cannot be evaluated because its code has
  * compile errors (the squiggles own the surface; the model just marks the
@@ -38,7 +38,8 @@ export type DataDiagnosticCode =
   | "D006"
   | "D007"
   | "D008"
-  | "D009";
+  | "D009"
+  | "D010";
 
 /** Cell provenance — the grid flags this cell red (§3.8 D001–D003). */
 export interface CellRef {
@@ -70,7 +71,7 @@ export interface DataDiagnostic {
    */
   cell?: CellRef;
   /**
-   * Present for card-scoped diagnostics (D004–D006, D008–D009, and per-card
+   * Present for card-scoped diagnostics (D004–D006, D008–D010, and per-card
    * D000). D007 and the model-level D000 carry neither `cell` nor `cardRef`
    * — they are deck/model-level (the message names the deck).
    */
@@ -197,11 +198,13 @@ export type InlineIcon =
  * sitting on the line's em box and advances by EXACTLY `size` — no safety
  * margin on the slot (the margin belongs to measured text, not to a width
  * that is true by construction). Wide asset art letterboxes inside the slot;
- * Dicier glyphs draw at the text's color in the default `flat_dark` face.
+ * Dicier glyphs draw in the default `flat_dark` face. `color`, when present,
+ * overrides the owning Text/TextBox color for this run; absence inherits and
+ * keeps legacy models/hashes byte-identical.
  */
 export type TextRun =
-  | { kind: "text"; text: string; x: number }
-  | { kind: "icon"; x: number; icon: InlineIcon };
+  | { kind: "text"; text: string; x: number; color?: string }
+  | { kind: "icon"; x: number; icon: InlineIcon; color?: string };
 
 /**
  * One resolved TextBox line (◆44): its runs plus the line's measured total
@@ -452,6 +455,9 @@ export interface ImageShape {
   height: number | "auto";
   /** Resolved Text expression — usually a URL, possibly from a sheet column. */
   src: string;
+  /** Optional tint color. Omitted for the default/explicit white so legacy
+   * Image models and content hashes stay byte-identical. */
+  color?: string;
   /** How the image maps onto the box (§3.3); `contain` when omitted. */
   fit: ImageFit;
   /** Which point of the box x/y name (§3.4). With an `auto` dimension the

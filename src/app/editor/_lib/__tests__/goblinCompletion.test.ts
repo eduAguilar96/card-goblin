@@ -178,8 +178,32 @@ describe("comments", () => {
 });
 
 describe("plain strings", () => {
-  it("no completions inside a text: string", () => {
+  it("no completions in ordinary text inside a text: string", () => {
     expect(at(src("Template: T", "  Text:", '    text: "Hel¦')).suggestions).toEqual([]);
+  });
+
+  it("offers a paired color scope after an unescaped opening brace", () => {
+    const r = at(src("Template: T", "  Text:", '    text: "Pay {¦"'));
+    expect(labels(r)).toEqual(["color scope"]);
+    expect(byLabel(r, "color scope").insertText).toBe("color:${1:red}}${2:text}{/color}");
+    expect(byLabel(r, "color scope").snippet).toBe(true);
+    expect(at(src("Template: T", "  Text:", '    text: "Pay {{¦"')).suggestions).toEqual([]);
+  });
+
+  it("offers the normal Color vocabulary inside a color-scope opener", () => {
+    const doc = src("Template: T", "  TextBox:", '    text: "{color:re¦}Ready{/color}"');
+    const r = at(doc);
+    expect(labels(r)).toContain("red");
+    expect(labels(r)).toContain("rebeccapurple");
+    expect(labels(r)).toContain("#RRGGBB");
+    const clean = doc.replace("¦", "");
+    expect(clean.slice(r.replaceStart, r.replaceEnd)).toBe("re");
+  });
+
+  it("keeps bracket interpolation completion ahead of the string-scope helper", () => {
+    const r = at(src("Template: T", "  Text:", '    text: "{color:red}[co¦]{/color}"'));
+    expect(labels(r)).toContain("cost");
+    expect(labels(r)).not.toContain("color scope");
   });
 
   it("[[ escape does not open a data-ref context", () => {
@@ -367,6 +391,84 @@ describe("bracket refs", () => {
     expect(r.replaceEnd).toBe(clean.indexOf("cost]") + 4);
     expect(labels(r)).toContain("cost");
   });
+
+  it("hoists local/global lets and preserves lookup precedence", () => {
+    const r = at(
+      src(
+        "let accent: #cc0000",
+        "Template: T",
+        "  let outer: 1",
+        "  Repeat: 2 as i",
+        "    If: true",
+        "      Text:",
+        "        x: [¦",
+        "      let inner: 2", // after the use: same-block lets are hoisted
+        "Card: M",
+        "  sheet: Monsters",
+        "  loop: Rarity as r",
+        "  Front: T",
+      ),
+    );
+    expect(labels(r).slice(0, 7)).toEqual(["inner", "i", "outer", "r", "name", "cost", "suit"]);
+    expect(labels(r)).toEqual([
+      "inner", "i", "outer", "r", "name", "cost", "suit", "accent", "row", "card",
+    ]);
+    expect(byLabel(r, "inner").detail).toContain("local let");
+    expect(byLabel(r, "accent").detail).toContain("global let");
+  });
+
+  it("global let initializers union Card loops and rank globals before columns", () => {
+    const r = at(
+      src(
+        "let cost: 2",
+        "let derived: [¦",
+        "Card: M",
+        "  sheet: Monsters",
+        "  loop: Rarity as rarity",
+      ),
+    );
+    expect(labels(r)).toContain("rarity");
+    expect(labels(r).filter((label) => label === "cost")).toHaveLength(1);
+    expect(byLabel(r, "cost").detail).toContain("global let");
+  });
+
+  it("branch locals do not leak to a sibling branch", () => {
+    const r = at(
+      src(
+        "Template: T",
+        "  If: true",
+        "    let only_then: 1",
+        "  Else:",
+        "    Text:",
+        "      x: [¦",
+      ),
+    );
+    expect(labels(r)).not.toContain("only_then");
+  });
+
+  it("callee scope follows transitive Card usage without capturing caller Repeat variables", () => {
+    const snap: CompletionSnapshot = {
+      sheets: [{ name: "Monsters", columns: [{ name: "hp", type: "Number", enumName: null }] }],
+      enums: [],
+      templates: ["Caller", "callee"],
+    };
+    const r = at(
+      src(
+        "Template: Caller",
+        "  Repeat: 2 as caller_i",
+        "    callee:",
+        "Template: callee",
+        "  Text:",
+        "    x: [¦",
+        "Card: M",
+        "  sheet: Monsters",
+        "  Front: Caller",
+      ),
+      snap,
+    );
+    expect(labels(r)).toContain("hp");
+    expect(labels(r)).not.toContain("caller_i");
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -392,11 +494,12 @@ describe("property keys", () => {
     ]);
   });
 
-  it("Image keys include src and fit (§3.3 M2)", () => {
+  it("Image keys include src, fit, and the optional multiplicative color", () => {
     const r = at(src("Template: T", "  Image:", "    ¦"));
-    expect(labels(r)).toEqual(["x", "y", "width", "height", "src", "fit", "pivot", "rotate"]);
+    expect(labels(r)).toEqual(["x", "y", "width", "height", "src", "fit", "color", "pivot", "rotate"]);
     expect(byLabel(r, "src").detail).toBe("Text — image URL");
     expect(byLabel(r, "fit").detail).toContain("contain | cover | stretch");
+    expect(byLabel(r, "color").detail).toContain("default white");
   });
 
   it("Qr keys include data/level/background (§7.1a)", () => {
@@ -430,16 +533,20 @@ describe("property keys", () => {
     expect(byLabel(r, "size").detail).toBe([...SIZE_PRESETS.keys()].join(" | "));
   });
 
-  it("Template and Repeat bodies offer element openers", () => {
+  it("Template and Repeat bodies offer nodes, local lets, and Template calls", () => {
     for (const doc of [
       src("Template: T", "  ¦"),
       src("Template: T", "  Repeat: 3 as i", "    ¦"),
     ]) {
       const r = at(doc);
       expect(labels(r)).toEqual([
-        "Rectangle", "Text", "TextBox", "Icon", "Image", "Qr", "Repeat",
+        "Rectangle", "Text", "TextBox", "Icon", "Image", "Qr", "Repeat", "If", "let",
+        "MonsterFront", "ExtraFront",
       ]);
       expect(byLabel(r, "Rectangle").insertText).toBe("Rectangle: ");
+      expect(byLabel(r, "Image").detail).toBe(
+        "x y width height src (fit color pivot rotate)",
+      );
     }
   });
 
@@ -448,11 +555,45 @@ describe("property keys", () => {
     expect(byLabel(at(src("Enum: E", "  ¦")), "case").insertText).toBe("case ");
   });
 
-  it("top level offers the four block openers (empty doc included)", () => {
-    expect(labels(at("¦"))).toEqual(["Enum", "Sheet", "Template", "Card"]);
-    expect(computeCompletions("", 0, SNAP).suggestions.map((s) => s.label)).toEqual([
-      "Enum", "Sheet", "Template", "Card",
+  it("keeps let contextual: `column let:` is still a column declaration", () => {
+    expect(labels(at(src("Sheet: S", "  column let: ¦")))).toEqual([
+      "Text", "Number", "Suit", "Rarity",
     ]);
+  });
+
+  it("top level offers the four block openers and contextual let (empty doc included)", () => {
+    expect(labels(at("¦"))).toEqual(["Enum", "Sheet", "Template", "Card", "let"]);
+    expect(computeCompletions("", 0, SNAP).suggestions.map((s) => s.label)).toEqual([
+      "Enum", "Sheet", "Template", "Card", "let",
+    ]);
+  });
+
+  it("pairs Else only with the preceding same-indent If", () => {
+    const paired = at(src("Template: T", "  If: true", "    Text:", "  ¦"));
+    expect(labels(paired)).toContain("Else");
+    expect(byLabel(paired, "Else").insertText).toBe("Else:");
+
+    const unpaired = at(src("Template: T", "  Text:", "    text: \"x\"", "  ¦"));
+    expect(labels(unpaired)).not.toContain("Else");
+  });
+
+  it("offers lowercase calls but omits If/Else call shorthand and the enclosing Template", () => {
+    const snap: CompletionSnapshot = { sheets: [], enums: [], templates: ["Frame", "badge", "If", "Else"] };
+    const r = at(src("Template: Frame", "  ¦"), snap);
+    expect(r.suggestions.filter((s) => s.kind === "template").map((s) => s.label)).toEqual([
+      "badge",
+    ]);
+    expect(byLabel(r, "badge").insertText).toBe("badge:");
+    expect(r.suggestions.some((s) => s.kind === "template" && s.label === "If")).toBe(false);
+    expect(r.suggestions.some((s) => s.kind === "template" && s.label === "Else")).toBe(false);
+  });
+
+  it("keeps a Template named `let` selectable beside the contextual binding keyword", () => {
+    const snap: CompletionSnapshot = { sheets: [], enums: [], templates: ["Frame", "let"] };
+    const r = at(src("Template: Frame", "  ¦"), snap);
+    expect(byLabel(r, "let").kind).toBe("keyword");
+    expect(byLabel(r, "let:").kind).toBe("template");
+    expect(byLabel(r, "let:").insertText).toBe("let:");
   });
 
   it("an existing colon suppresses the `: ` suffix (mid-word overtype)", () => {
@@ -507,6 +648,20 @@ describe("value positions", () => {
     expect(labels(at(src("Card: M", "  Back: ¦")))).toEqual(["MonsterFront", "ExtraFront"]);
   });
 
+  it("keeps If/Else contextual as direct face Template names", () => {
+    const snap: CompletionSnapshot = { sheets: [], enums: [], templates: ["If", "Else"] };
+    expect(labels(at(src("Template: If", "Card: C", "  Front: ¦"), snap))).toEqual([
+      "If", "Else",
+    ]);
+  });
+
+  it("completes expressions in let initializers and their continuations", () => {
+    const direct = at(src("let equipment: [¦"));
+    expect(labels(direct)).toContain("cost");
+    const continued = at(src("let equipment: [cost] == 1", "  or [¦"));
+    expect(labels(continued)).toContain("cost");
+  });
+
   it("loop: walks enum → as → variable-naming silence", () => {
     const enums = at(src("Card: M", "  loop: ¦"));
     expect(labels(enums)).toEqual(["Suit", "Rarity"]);
@@ -528,6 +683,13 @@ describe("value positions", () => {
     expect(hint.group).toBe(3);
     expect(hint.insertText).toBe("#");
     expect(labels(r)).toContain("if"); // expression still legal here
+  });
+
+  it("Image color: offers the same Color and expression vocabulary", () => {
+    const r = at(src("Template: T", "  Image:", "    color: ¦"));
+    expect(labels(r)).toContain("white");
+    expect(labels(r)).toContain("#RRGGBB");
+    expect(labels(r)).toContain("if");
   });
 
   it("pivot: offers the nine canonical tokens + center, default marked (§3.4 M3)", () => {
@@ -916,6 +1078,7 @@ describe("compiler pins (E008 probes)", () => {
     "    height: 12",
     '    src: "https://example.com/[name].png"',
     "    fit: cover",
+    "    color: white",
     "    pivot: center",
     "    rotate: 400",
     "  TextBox:",

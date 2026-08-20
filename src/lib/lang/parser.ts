@@ -14,10 +14,14 @@
  *   expression words already lex as keywords). Value positions still accept
  *   them — that is how `column name: Text` names the `Text` type.
  *
- * - Property-line continuation (◆23†): only a property line (lowercase key +
- *   ':') continues — its expression extends across following lines while they
- *   are indented strictly deeper than the key. Block headers never continue
- *   (their deeper lines are children); `Repeat:` headers are single-line.
+ * - `let`, `If:`, and `Else:` are contextual composition forms. `let` is a
+ *   binding only as `let <name>:` at program/template-node indentation;
+ *   structural If/Else are recognized only in template-node position. Other
+ *   identifier headers there are Template calls, including lowercase names.
+ *
+ * - Property-line continuation (◆23†): property and `let` initializer lines
+ *   continue across deeper-indented lines. Block headers never continue (their
+ *   deeper lines are children); `Repeat:` and structural `If:` are single-line.
  *
  * Error tolerance (⚑8/§4.1): a parse NEVER throws. Every syntax problem is an
  * E001 with a precise range, and the parser recovers at the next line at the
@@ -31,14 +35,18 @@ import type {
   Declaration,
   ElementKind,
   ElementNode,
+  ElseNode,
   EnumCase,
   Expr,
   FaceNode,
+  IfNode,
+  LetNode,
   NameRef,
   Program,
   PropertyNode,
   RepeatNode,
   SheetDecl,
+  TemplateCallNode,
   TemplateNode,
 } from "./ast";
 import type { Diagnostic, Range } from "./diagnostics";
@@ -261,6 +269,34 @@ class Parser {
     this.skipToEol();
   }
 
+  /** Uppercase structural Else or the common lowercase spelling mistake. */
+  private isElseHeader(): boolean {
+    const t = this.peek();
+    const colon = this.peekAt(1);
+    return (
+      ((t.kind === "identifier" && t.text === "Else") ||
+        (t.kind === "keyword" && t.word === "else")) &&
+      colon.kind === "op" &&
+      colon.op === ":"
+    );
+  }
+
+  /** Consume an orphan/duplicate/misindented Else and its accidental subtree. */
+  private recoverOrphanElse(): void {
+    const head = this.peek();
+    const lowercase = head.kind === "keyword";
+    this.error(
+      lowercase
+        ? "Lowercase 'else:' is not a structural block; use 'Else:' immediately after its 'If:' at the same indentation"
+        : "'Else:' must immediately follow an 'If:' block at the same indentation",
+      head.range,
+    );
+    this.next();
+    this.next(); // ':'
+    this.skipToEol();
+    if (this.peek().kind === "indent") this.sync(0);
+  }
+
   private expectIdent(message: string): NameRef | null {
     const t = this.peek();
     if (t.kind === "identifier") {
@@ -305,6 +341,15 @@ class Parser {
       if (t.kind === "indent") {
         this.error("Unexpected indentation at top level", t.range);
         this.sync(0);
+        continue;
+      }
+      if (this.isElseHeader()) {
+        this.recoverOrphanElse();
+        continue;
+      }
+      if (t.kind === "identifier" && t.text === "let") {
+        const binding = this.parseLet();
+        if (binding) declarations.push(binding);
         continue;
       }
       if (
@@ -430,6 +475,10 @@ class Parser {
 
   private parseEnumCase(cases: EnumCase[]): void {
     const t = this.peek();
+    if (this.isElseHeader()) {
+      this.recoverOrphanElse();
+      return;
+    }
     if (t.kind === "keyword" && t.word === "case") {
       this.next();
       const name = this.expectDeclaredName("Expected a case name after 'case'");
@@ -454,6 +503,10 @@ class Parser {
 
   private parseColumn(sheet: SheetDecl): void {
     const t = this.peek();
+    if (this.isElseHeader()) {
+      this.recoverOrphanElse();
+      return;
+    }
     if (t.kind === "keyword" && t.word === "column") {
       this.next();
       // The column name is an ordinary identifier — `column count: Number`
@@ -499,10 +552,75 @@ class Parser {
     this.sync(0);
   }
 
+  // -- immutable bindings --------------------------------------------------
+
+  /** `let <name>: <expr>`; initializer continuation matches a property line. */
+  private parseLet(): LetNode | null {
+    const head = this.next(); // contextual 'let' identifier
+    const name = this.expectDeclaredName("Expected a binding name after 'let'");
+    if (!name) {
+      this.sync(0);
+      return null;
+    }
+    if (!this.atOp(":")) {
+      const bad = this.peek();
+      this.error(
+        `Expected ':' after binding name '${name.name}', found ${this.describe(bad)}`,
+        bad.range,
+      );
+      this.sync(0);
+      return null;
+    }
+    this.next();
+
+    this.exprCtx = { multiline: true, contDepth: 0 };
+    this.exprHadError = false;
+    const initializer = this.parseExpr();
+    const endLook = this.lookahead();
+    const ctx = this.exprCtx;
+    if (endLook.found) {
+      if (!this.exprHadError) {
+        this.error(
+          `Expected end of line, found ${this.describe(endLook.token)} — indented lines after a let continue its initializer`,
+          endLook.token.range,
+        );
+      }
+      this.exprCtx = null;
+      this.sync(ctx.contDepth);
+    } else {
+      this.exprCtx = null;
+      if (this.peek().kind === "newline") this.next();
+      let depth = ctx.contDepth;
+      while (depth > 0 && this.peek().kind === "dedent") {
+        this.next();
+        depth--;
+      }
+    }
+    this.exprHadError = false;
+
+    return {
+      kind: "Let",
+      name,
+      initializer,
+      range: spanRanges(head.range, initializer.range),
+    };
+  }
+
   // -- template nodes (§3.3) ------------------------------------------------
 
   private parseTemplateNode(): TemplateNode | null {
     const t = this.peek();
+    if (this.isElseHeader()) {
+      this.recoverOrphanElse();
+      return null;
+    }
+    if (
+      t.kind === "identifier" &&
+      t.text === "let" &&
+      this.peekAt(1).kind === "identifier"
+    ) {
+      return this.parseLet();
+    }
     if (
       t.kind === "identifier" &&
       this.peekAt(1).kind === "op" &&
@@ -519,28 +637,16 @@ class Parser {
         return this.parseElement(t.text);
       }
       if (t.text === "Repeat") return this.parseRepeat();
+      if (t.text === "If") return this.parseStructuralIf();
       if (BLOCK_OPENERS.has(t.text)) {
         this.error(`'${t.text}:' is not allowed inside a template`, t.range);
         this.sync(0);
         return null;
       }
-      if (/^[a-z]/.test(t.text)) {
-        this.error(
-          `Property line '${t.text}:' is only allowed inside an element (Rectangle:, Text:, TextBox:, Icon:, Image:, Qr:)`,
-          t.range,
-        );
-        this.sync(0);
-        return null;
-      }
-      this.error(
-        `Unknown element '${t.text}:' — expected Rectangle:, Text:, TextBox:, Icon:, Image:, Qr:, or Repeat:`,
-        t.range,
-      );
-      this.sync(0);
-      return null;
+      return this.parseTemplateCall();
     }
     this.error(
-      `Expected an element (Rectangle:, Text:, TextBox:, Icon:, Image:, Qr:, or Repeat:), found ${this.describe(t)}`,
+      `Expected a template node (element, Repeat:, If:, let binding, or Template call), found ${this.describe(t)}`,
       t.range,
     );
     this.sync(0);
@@ -560,6 +666,10 @@ class Parser {
     const properties: PropertyNode[] = [];
     this.parseBlockChildren(() => {
       const t = this.peek();
+      if (this.isElseHeader()) {
+        this.recoverOrphanElse();
+        return;
+      }
       if (
         t.kind === "identifier" &&
         this.peekAt(1).kind === "op" &&
@@ -631,10 +741,100 @@ class Parser {
     };
   }
 
+  /** `If: <bool-expr>` followed by an optional same-indent `Else:` block. */
+  private parseStructuralIf(): IfNode {
+    const head = this.next(); // 'If'
+    this.next(); // ':'
+    this.exprCtx = { multiline: false, contDepth: 0 };
+    this.exprHadError = false;
+    let condition: Expr;
+    if (this.peek().kind === "newline" || this.peek().kind === "eof") {
+      const at = this.peek().range;
+      this.exprError(
+        "'If:' is structural and requires a condition expression; a Template named 'If' can only be selected by Front: or Back:",
+        at,
+      );
+      condition = { kind: "Error", range: at };
+    } else {
+      condition = this.parseExpr();
+    }
+    this.exprCtx = null;
+    if (this.exprHadError) this.skipToEol();
+    else this.finishLine();
+    this.exprHadError = false;
+
+    const thenChildren: TemplateNode[] = [];
+    this.parseBlockChildren(() => {
+      const node = this.parseTemplateNode();
+      if (node) thenChildren.push(node);
+    });
+
+    let elseBranch: ElseNode | null = null;
+    const maybeElse = this.peek();
+    if (
+      maybeElse.kind === "identifier" &&
+      maybeElse.text === "Else" &&
+      this.peekAt(1).kind === "op" &&
+      (this.peekAt(1) as Token & { kind: "op" }).op === ":"
+    ) {
+      elseBranch = this.parsePairedElse();
+    }
+
+    const end = elseBranch?.range ?? this.lastRange;
+    return {
+      kind: "IfBlock",
+      condition,
+      thenChildren,
+      elseBranch,
+      range: spanRanges(head.range, end),
+    };
+  }
+
+  private parsePairedElse(): ElseNode {
+    const head = this.next(); // 'Else'
+    this.next(); // ':'
+    this.finishLine();
+    const children: TemplateNode[] = [];
+    this.parseBlockChildren(() => {
+      const node = this.parseTemplateNode();
+      if (node) children.push(node);
+    });
+    return {
+      kind: "ElseBlock",
+      children,
+      range: spanRanges(head.range, this.lastRange),
+    };
+  }
+
+  /** A non-built-in identifier header in template-node position is a call. */
+  private parseTemplateCall(): TemplateCallNode {
+    const nameTok = this.next() as Token & { kind: "identifier" };
+    const template: NameRef = { name: nameTok.text, range: nameTok.range };
+    this.next(); // ':'
+    this.finishLine();
+    const call: TemplateCallNode = {
+      kind: "TemplateCall",
+      template,
+      range: spanRanges(nameTok.range, this.lastRange),
+    };
+    if (this.peek().kind === "indent") {
+      this.error(
+        `Template call '${template.name}:' cannot have indented children or arguments`,
+        this.peek().range,
+      );
+      this.sync(0);
+    }
+    return call;
+  }
+
   // -- card items (§3.2) ----------------------------------------------------
 
   private parseCardItem(items: CardItem[]): void {
     const t = this.peek();
+    if (this.isElseHeader()) {
+      this.recoverOrphanElse();
+      return;
+    }
     if (
       t.kind === "identifier" &&
       this.peekAt(1).kind === "op" &&

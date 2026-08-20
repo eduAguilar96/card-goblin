@@ -87,6 +87,8 @@ the section that elaborates it:
 | ◆43 | Rotation (§3.4) | **`rotate:` as an optional Number property on every drawable element** — degrees, clockwise, any expression (data-driven allowed), default 0 — rotating the element **around its `pivot:` point**, which is exactly the card-space point `x`/`y` name | The pivot is the element's own handle (◆36†), so it is the one rotation center that needs no new vocabulary — `pivot: center_center` + `rotate:` spins a shape in place, the default `top_left` swings it around its corner, and `Repeat` + `rotate: [i] * step` makes fans and dials from index math (⚑9). Paint-time only: wrap, generation, caps, and PDF layout are geometry-in-card-units and never see the transform (the rasterizer serializes the same SVG markup, so PDF inherits rotation for free). An ordinary Number property needs zero new grammar — the ◆33 argument — and a non-numeric value is the usual E003, non-finite the usual D008 |
 | ◆44 | Inline icons (§7.5) | **Brace markers in resolved text**: `{CODE}` (Dicier) and `{asset:name}` (uploaded art) inside any `text:`, parsed at EVAL time AFTER interpolation; lines become **runs** with compiler-computed x-offsets; every icon occupies a square **1-em slot** (`size` × `size`); `{{` escapes a literal `{` | Braces because ◆30's "`[brackets]` always mean data refs" stays absolute — no new bracket grammar, no lexer change. Post-resolution parsing because a sheet CELL containing a marker must work (data-driven icons come free, the product's whole point). Runs because the compiler is the layout authority (◆37) and it cannot know Dicier ligature advances or an SVG's aspect ratio — absolute run placement plus a fixed slot makes the compiler's width assumption TRUE BY CONSTRUCTION for both renderers, instead of approximately right in one. True aspect ratios and non-default Dicier faces are explicitly deferred (§8) |
 | ◆45 | Cross-device sync (§7.6) | **Object storage + one password, no database and no accounts**: Cloudflare R2 holds a per-project folder (small JSON + one object per asset), a single admin password mints an HMAC-signed cookie, asset bytes move browser↔R2 via short-lived presigned URLs, and a `revision` guard rejects stale writes | The project already serialises to one small JSON payload with discrete asset files (§7.1/§7.4), so a database would add a schema to maintain for data that is fundamentally two blobs. R2 over Vercel Blob for 10 GB and zero egress; over Supabase because free projects pause after 7 idle days, which is exactly wrong for bursty personal use. Presigning is not an optimisation but a requirement — Vercel caps request bodies at ~4.5 MB, below one asset. Local-first is preserved: the cloud mirrors localStorage/IndexedDB, so signed-out and offline sessions are unchanged |
+| ◆46 | Bindings, structural conditionals, composition (§3.1–§3.8) | Contextual `let`, `If:`/`Else:`, and no-argument `TemplateName:` calls; immutable lexical bindings, lazy selected branches, noncapturing calls, cycle errors, and composition-only caps | The three forms replace off-card conditional hacks while preserving the flat RenderModel and existing scripts; contextual recognition keeps `column let: Text`, `Template: If`, and `Front: If` legal |
+| ◆47 | Additive color styling (§3.3.2–§3.3.5) | Optional Image `color:` is an RGB **multiply** tint (white/default = identity); resolved text gains nested `{color:red}…{/color}` scopes for text, Dicier markers, and inline asset markers | Multiplication recolors white artwork while preserving black detail and source alpha, and makes white an exact compatibility default. Scoped tags extend ◆44's post-interpolation marker pass without changing wrap widths: color is paint-only run data, not content geometry. Malformed or unbalanced scopes remain raw text with no diagnostic, preserving the marker grammar's gentle failure posture |
 
 ---
 
@@ -98,12 +100,14 @@ Working name: **Goblin script**, file extension `.goblin` (cosmetic, revisit fre
 
 - **Indentation-significant** (like Python/YAML). One block = deeper indent. Spaces or
   tabs, consistent within a file; the lexer emits INDENT/DEDENT tokens.
-- **Continuation rule (◆23†):** only a **property line** (a lowercase key + `:`) may
+- **Continuation rule (◆23†, ◆46):** only a **property line** (a lowercase key + `:`)
+  or `let name:` may
   continue: its expression extends across subsequent lines while they are indented
   deeper than the key. Block headers (`Enum:`, `Sheet:`, `Template:`, `Card:`,
   `Rectangle:`, `Text:`, `TextBox:`, `Icon:`, `Image:`, `Qr:`, `Repeat:`, `Front:`,
-  `Back:`) never continue — their deeper-indented lines are children. Consequently a
-  `Repeat:` count expression must fit on one line. Continuation is a parser-level
+  `Back:`, `If:`, `Else:`, and Template-call headers) never continue — their
+  deeper-indented lines are children. Consequently `Repeat:` and `If:` expressions
+  must fit on one line. Continuation is a parser-level
   rule; the lexer only reports indent levels.
 - **Comments (◆22):** `#` to end of line.
 - **Identifiers:** `[A-Za-z][A-Za-z0-9_]*` — used for all declared names (⚑11).
@@ -125,11 +129,16 @@ Working name: **Goblin script**, file extension `.goblin` (cosmetic, revisit fre
   **declared names** (declaration names, column names, enum cases, loop/repeat
   variables) — E001; block-opener words remain usable in value positions (that is
   how `column name: Text` names the `Text` type).
+  `let`, `If`, and `Else` are deliberately **contextual**, not additions to this
+  reserved list: only `let <name>:` at program/template-node indentation and
+  `If:`/`Else:` in template-node position are structural. Thus `column let: Text`,
+  `Template: If`, `Template: Else`, and `Front: If` retain their old meanings.
 
 ### 3.2 Top-level declarations
 
-A program is a sequence of four declaration kinds, in any order (forward references
-allowed — the checker resolves after parsing):
+A program is a sequence of the four named declaration kinds plus program-scope
+`let` bindings, in any order (forward references allowed — the checker resolves
+after parsing):
 
 ```goblin
 Enum: Suit
@@ -169,8 +178,35 @@ Card: Monster
   inline (◆ the README's indented form is reserved for possible future inline
   templates). `Back:` optional → plain white (◆16). Missing `sheet:`, `size:`, or
   `Front:`, or an unknown size preset, is E008.
+- **`let name: expression`** — an immutable, type-inferred value. Program lets may
+  read other globals, the current Card's columns/loops, and `[row]`/`[card]`.
+  Initializers are lazy and checked only for Cards that reach them from `count:` or a
+  face; forward references work, same-scope duplicates are E005, and dependency
+  cycles are E009. Without an expected type, write self-typing values such as
+  `#cc0000` and qualified `Suit.Rock`.
 
-### 3.3 Elements and `Repeat`
+### 3.3 Template nodes, conditionals, composition, and elements
+
+A Template body, an `If`/`Else` branch, or a `Repeat` body may contain drawable
+elements, local `let` bindings, nested `If`/`Repeat`, and Template calls.
+
+- **Structural conditionals:** `If: <Bool expression>` has an optional `Else:` as
+  its next nonblank sibling at the same indentation. Both branches are parsed and
+  statically checked in their own lexical scopes; only the selected branch evaluates,
+  so the other emits no shapes or data diagnostics and does not read `[card]`.
+  Conditions are single-line; else-if is a nested `If:` inside `Else:`.
+- **Template calls:** any otherwise-unclaimed `<identifier>:` in template-node
+  position calls that Template, with no label, children, or arguments. Calls flatten
+  at that source position, preserving z-order. A callee does **not** capture caller
+  local lets or caller `Repeat` variables; it sees its own locals, program globals,
+  Card loops, columns, and `[row]`/`[card]`. Templates named `If` or `Else` remain
+  valid direct `Front:`/`Back:` targets, but cannot use nested-call shorthand.
+- **Safety:** direct/indirect let and Template cycles are E009 with the dependency
+  path. Per Card face, checking and evaluation independently allow at most **64 active
+  Template calls** and **10,000 template-node visits reached through call edges**;
+  E010/D010 occurs at the crossing call. These are composition-only budgets: the
+  directly selected face and call-free descendants are not charged, and `Repeat`'s
+  separate 500-expansion limit is unchanged.
 
 Elements render in declaration order; later elements draw on top (◆15). All elements
 accept an optional quoted display label (`Rectangle: "Banner"`) — purely descriptive,
@@ -183,7 +219,7 @@ own subsection below.
 | `Text` | `x y size color text pivot font rotate` | One line of text — §3.3.2. |
 | `TextBox` | `x y width height text size color align line_height overflow pivot font rotate` | Wrapped, multi-line text in a box — §3.3.3. |
 | `Icon` | `x y size color code pivot style rotate` | A Dicier glyph, one of ten style faces — §3.3.4. |
-| `Image` | `x y width height src fit pivot rotate` | Raster art from a URL or uploaded asset — §3.3.5. |
+| `Image` | `x y width height src fit color pivot rotate` | Raster art from a URL or uploaded asset, optionally color-multiplied — §3.3.5. |
 | `Qr` | `x y size data color background level pivot rotate` | A scannable QR code — §3.3.6. |
 | `Repeat` | `Repeat: <Number expr> as <var>` (single line) | Draws its children N times — §3.3.7. |
 
@@ -222,6 +258,15 @@ colors. Diagnostics reuse the icon/asset codes: unknown LITERAL Dicier
 marker → W004, unknown literal asset name → W005, computed unknown code →
 D005 at data time (renders as the raw marker text — its own indicator).
 
+**Scoped color (◆47):** `{color:red}attack{/color}` changes the paint color of
+only the enclosed resolved text. A six-digit hex color works too; scopes nest,
+and the closing tag restores the enclosing color (ultimately the element's
+`color:`). Dicier markers use the scoped color as their fill; inline asset
+markers use it as the same RGB multiply tint as Image. Tags are parsed after
+interpolation, occupy no width, and never create a wrap boundary. A malformed,
+unknown-color, unmatched, or unclosed scope is ordinary raw text with no
+diagnostic, consistent with the existing marker grammar.
+
 #### 3.3.3 TextBox
 
 (M3, agreed 2026-08-10 — §7.2) Wrapped, multi-line text in a box; ◆24 stays intact
@@ -258,6 +303,8 @@ placeholder (⚑8).
 **Inline icons (◆44, §7.5):** `TextBox` honors the same `{...}` markers as
 `Text` (§3.3.2); a marker is one **unbreakable token** that wraps like a
 word, occupying its square 1-em slot within the line.
+Nested `{color:…}…{/color}` scopes work identically and do not alter line
+measurement, wrapping, alignment, line height, or overflow decisions.
 
 #### 3.3.4 Icon
 
@@ -274,10 +321,18 @@ like `pivot:`; an unknown value is E008. All ten faces are declared as
 
 #### 3.3.5 Image
 
-(M2, agreed 2026-08-09) `x y width height src` required; `fit` and `pivot`
+(M2, agreed 2026-08-09) `x y width height src` required; `fit`, `color`, and `pivot`
 optional. Raster art from a URL. `src:` is a Text expression (URLs may come from
 a sheet column); `fit:` is an optional bare identifier — `contain` (default) |
 `cover` | `stretch` — realized via SVG `preserveAspectRatio`.
+
+`color:` (◆47) is an optional Color expression whose default is `white`. It
+multiplies the loaded image's RGB channels: white is an exact identity, a white
+source pixel becomes the chosen color, black remains black, and intermediate
+source tones retain their shading. The source pixel's alpha is preserved; this
+does not add alpha-bearing Color syntax (`#RRGGBB` and the existing CSS names
+remain the Color surface). Omission keeps the legacy Image model/render/hash
+path free of a tint field; loading and failed placeholders are never tinted.
 
 **`auto` dimension (2026-08-10):** exactly one of `width:`/`height:` may be the
 bare keyword `auto` — that dimension derives from the other × the art's
@@ -445,10 +500,11 @@ useful total order on Text or enum cases a game designer should rely on.
 
 `[name]` resolves, innermost first:
 
-1. enclosing `Repeat` variables,
+1. local `let` and enclosing `Repeat` bindings, nearest lexical scope first,
 2. the Card's `loop` variables,
 3. the bound sheet's columns,
-4. the **built-in position bindings** (M3, 2026-08-13 — ◆42):
+4. program-scope `let` bindings,
+5. the **built-in position bindings** (M3, 2026-08-13 — ◆42):
    - `[row]` — the row's **1-based position in its sheet**, i.e. exactly the
      number shown (and edited) in the grid's row gutter. Every card generated
      from one row shares it.
@@ -495,6 +551,21 @@ Shadowing produces a warning. Because templates are checked **per using Card**, 
 `[ref]` in a template is statically known-good or squiggled — the README's "error
 prevention" promise, delivered by ⚑3 + ⚑5.
 
+Bindings in one lexical block are hoisted and visible throughout that block and its
+descendants. Local lets are cached once per activation of their Template call,
+selected branch, or `Repeat` iteration; globals are cached once per evaluation root
+(`count:`, each face, and each `[card]`-divergent copy). Values are lazy: unused lets
+read no cells and an untaken branch evaluates nothing. References in either branch
+still count for static use checks. A called Template starts its own lexical frame and
+does not capture caller locals or caller Repeat indices.
+
+Same-scope duplicate lets are E005. A narrower local let, Repeat variable, or Card
+loop hiding an outer binding is W001; when an existing sheet column hides a new global,
+the warning is anchored once at the global declaration so untouched sheet code does
+not gain a new warning range. W002 applies to lets with no syntactic reference in
+their permitted scope; global use and Template use are followed transitively through
+calls.
+
 ### 3.7 Card generation (⚑1)
 
 For each `Card` block, in declaration order:
@@ -531,6 +602,8 @@ grid keeps last good schema — §4.2):
 | E005 | duplicate declaration (or duplicate column/case) |
 | E007 | keyword in invalid position (e.g. `middle` as a width or as `y`) |
 | E008 | missing or invalid required property (`sheet:`, `size:`, `Front:`, unknown preset) † |
+| E009 | cyclic `let` dependency or Template-call dependency (full path, one primary error per cycle) |
+| E010 | Template composition exceeds 64 active calls or 10,000 call-reached node visits per Card face |
 | W001 | shadowed binding |
 | W002 | unused declaration |
 | W003 | explicit `y_units` makes units non-square (suppressed when the value exactly equals the square `auto` value) |
@@ -541,7 +614,7 @@ grid keeps last good schema — §4.2):
 W004 in Revision A because the code list is provably incomplete.)*
 
 **Data-time** (⚑8, ◆19). D001–D003 flag the offending cell red **and** render the
-affected card(s) as error placeholders; D004–D009 arise from computed values with no
+affected card(s) as error placeholders; D004–D010 arise from computed values with no
 single source cell (◆†), so they mark the placeholder card / problems strip only:
 
 | Code | Meaning |
@@ -549,12 +622,13 @@ single source cell (◆†), so they mark the placeholder card / problems strip 
 | D001 | cell value not a case of the column's enum |
 | D002 | cell not numeric in a Number column |
 | D003 | empty Number/Enum cell referenced by a template (edited rows only, ◆29) |
-| D004 | repeat count negative or > 500 |
+| D004 | repeat count negative/non-integer, or cumulative Repeat expansion budget > 500 → affected card placeholder (every nested iteration counts; never partial truncation) |
 | D005 | computed icon code not in the known list (Icon `code:` or an inline marker, ◆44) — the icon/marker still renders (the failed ligature or raw marker text is its own visible indicator); diagnostic only, not a placeholder |
 | D006 | `count:` non-integer, negative, or unevaluable → one placeholder per row×case combination † |
 | D007 | per-Card instance cap (2,000) exceeded — generation truncated † |
 | D008 | non-finite numeric result during evaluation (division by zero) → placeholder card |
 | D009 | QR data is too long for one code (exceeds the `level:`'s capacity, even at the largest QR version) → placeholder card (§7.3) |
+| D010 | Template composition exceeds 64 active calls or 10,000 call-reached node visits while evaluating one face/copy → placeholder card |
 
 ### 3.9 The demo project (slice acceptance fixture)
 
@@ -877,12 +951,14 @@ warning has been enough in practice — §9.)
   `lastGoodSchema`, so suggestions track every keystroke without re-registration.
 - **No clean compile required:** the cursor's *context* comes from a cheap textual
   scan of the document — indentation + nearest block headers walking upward,
-  `Repeat`/`loop` `as`-variables, and a whole-document Template→using-Card scan
+  hoisted global/local lets, `If`/`Else`, `Repeat`/`loop` `as`-variables, and a
+  transitive whole-document Template-call→using-Card scan
   (completions follow §3.6's per-using-Card rule). Unrecognizable ancestors are
   stepped over; when the scan cannot place the cursor at all, bracket completions
   degrade to the union of all sheets' columns rather than to silence.
-- **What completes where:** `[` → the enclosing Card's (or the using Cards' union)
-  sheet columns + loop/Repeat variables in scope, inside string interpolation too
+- **What completes where:** `[` → local lets/Repeat variables, the enclosing Card's
+  (or the using Cards' union) loops and sheet columns, globals, then built-ins, inside
+  string interpolation too
   (◆30); property-key positions → the block kind's key set with type-hint details
   (the tables mirror check.ts's private CARD_PROPERTY_KEYS/ELEMENT_SPECS — the test
   suite pins them to the checker with E008 probes); value positions by expected
@@ -893,7 +969,10 @@ warning has been enough in practice — §9.)
   with each code's source-list section header as detail (`DICIER_CODE_CATEGORIES`,
   generated alongside `DICIER_CODES`); `Enum.` → that enum's cases; bare cases where
   ◆14 makes them legal (expected type first, otherwise globally-unique only);
-  expression keywords at low priority. Comments complete nothing.
+  expression keywords at low priority. Template-node indentation offers `let`,
+  `If:`, a pairing `Else:`, built-in nodes, and lowercase-or-uppercase Template calls;
+  call suggestions omit the compatibility-only names `If` and `Else`. Comments
+  complete nothing.
 - **Ranking and ranges:** four sort tiers — context-primary, secondary (enum names,
   unique bare cases), keywords, hints — so context-relevant names surface first.
   Replace ranges span the word under the cursor (or the whole `code:` string
@@ -936,9 +1015,10 @@ uploaded assets, sharing, docs site.
   model carries resolved lines, preview/PDF agree by construction, and overflow
   is detected at generate time (preview badge on affected cards; NOT an error
   placeholder).
-- v1 wraps plain text (one font/size/color per box; interpolation substitutes
-  before wrapping; breaks on spaces). Inline icons/bold (run-based layout) are
-  a deliberate later design round.
+- Interpolation substitutes before wrapping and breaks occur on spaces. The
+  run model now carries inline icons (◆44) and nested scoped colors (◆47);
+  neither changes wrap measurement. Bold/italic spans remain a later design
+  round.
 - **Float boundary note (review):** the vertical-fit formula
   `lines × line_height × size ≤ height` is evaluated in IEEE floats exactly as
   written, so a box authored to the exact product (e.g. `height: 3.9` for
@@ -1309,14 +1389,14 @@ Items are removed from this list once they ship — §10 and the milestone specs
 instance, left this list for §7.2).
 
 - Auto-layout containers (`Row`/`Stack`) as sugar over `Repeat` (⚑9).
-- Template composition (templates using templates) and inline templates under `Front:`.
+- Inline templates under `Front:` (named Template composition shipped in ◆46).
 - Per-project UPLOADED fonts for `Text`/`TextBox` (◆41 shipped a closed,
   repo-bundled nine-face set instead — real future work, deferred because it
   needs a generated metrics table per uploaded face, §7.1b's asset library
   shape but bigger).
-- Rich-text RUNS beyond icons — bold/italic spans inside `Text`/`TextBox`
-  (◆44 shipped the run MODEL and inline icons; styled text runs are the
-  remaining half of the original "rich text" item).
+- Rich-text RUNS beyond icons and scoped color — bold/italic spans inside
+  `Text`/`TextBox` (◆44 shipped the run model/icons and ◆47 shipped color;
+  emphasis is the remaining half of the original "rich text" item).
 - TRUE ASPECT RATIOS for inline icons (◆44 ships the square 1-em slot): an
   `assetDimensions` compile input (decoded at upload, the `assetNames`
   precedent) plus a Dicier ligature-advance table (GSUB extraction, §9's

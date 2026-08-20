@@ -59,8 +59,14 @@ a `0` simply produces no cards for that row.
 ## Limits
 
 A single Card block generates at most **2,000 physical cards**. A typo'd count of
-`999999` truncates with a note in the status bar instead of freezing the editor. (The
-matching per-card limit is 500 drawn shapes from `Repeat`.)
+`999999` triggers D007 and truncates that Card block with a note in the status bar
+instead of freezing the editor.
+
+Separately, each card instance has a budget of **500 Repeat expansions per card**.
+Every iteration of every `Repeat` counts, including the outer and inner iterations
+of nested repeats. Crossing that budget is D004: the affected card becomes an error
+placeholder rather than keeping a partially truncated face. Other cards continue to
+generate normally.
 
 ## Several Card blocks
 

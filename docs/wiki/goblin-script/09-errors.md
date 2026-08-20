@@ -48,6 +48,15 @@ Some things are suspicious rather than wrong, and warn instead of erroring:
 - an `asset:` reference to an upload that isn't in your library — in an `Image`
   `src:` or an inline `{asset:name}` marker — you might be about to add it.
 
+## Composition problems
+
+Cyclic `let` references and recursive Template calls are E009 errors; the message
+shows the dependency path. Template composition is also bounded per Card face: at
+most **64 active Template calls** and **10,000 Template-node visits reached through
+calls**. Crossing either limit is E010 while checking or D010 while building a card.
+These limits charge composition only: a large call-free legacy Template cannot hit
+them, and `Repeat` keeps its separate 500-expansion limit.
+
 ## Recovering
 
 - **Broken code?** Undo. The preview comes back live the moment the code parses again.

@@ -579,6 +579,88 @@ describe("CardFaceSvg: Image shapes (§3.3 M2)", () => {
     }
   });
 
+  it("non-white color applies one sRGB arithmetic-multiply filter and preserves image geometry", () => {
+    const shape = { ...imageShape("cover"), color: "hotpink" } as ImageShape;
+    const markup = render(
+      shape,
+      new Map([
+        [
+          shape.src,
+          { href: "data:image/png;base64,AAA", naturalWidth: 4, naturalHeight: 4 },
+        ],
+      ]),
+    );
+    const filter = parseAttrs(/<filter\b([^>]*)>/.exec(markup)![1]);
+    const flood = parseAttrs(/<feFlood\b([^>]*)\/?>/.exec(markup)![1]);
+    const composite = parseAttrs(/<feComposite\b([^>]*)\/?>/.exec(markup)![1]);
+    const image = parseAttrs(/<image\b([^>]*)\/?>/.exec(markup)![1]);
+    expect(filter["color-interpolation-filters"]).toBe("sRGB");
+    expect(flood).toMatchObject({ "flood-color": "hotpink", "flood-opacity": "1", result: "tint" });
+    expect(composite).toMatchObject({
+      in: "SourceGraphic",
+      in2: "tint",
+      operator: "arithmetic",
+      k1: "1",
+      k2: "0",
+      k3: "0",
+      k4: "0",
+    });
+    expect(image.filter).toBe(`url(#${filter.id})`);
+    expect(image).toMatchObject({
+      x: "1",
+      y: "2",
+      width: "10",
+      height: "8",
+      preserveAspectRatio: "xMidYMid slice",
+    });
+  });
+
+  it("absent and resolved-white colors stay on the exact legacy image path", () => {
+    const images: ResolvedImages = new Map([
+      [
+        "https://example.com/a.png",
+        { href: "data:image/png;base64,AAA", naturalWidth: 4, naturalHeight: 4 },
+      ],
+    ]);
+    for (const shape of [
+      imageShape("contain"),
+      { ...imageShape("contain"), color: "white" } as ImageShape,
+      { ...imageShape("contain"), color: "#ffffff" } as ImageShape,
+    ]) {
+      const markup = render(shape, images);
+      expect(markup).not.toContain("<filter");
+      expect(parseAttrs(/<image\b([^>]*)\/?>/.exec(markup)![1]).filter).toBeUndefined();
+    }
+  });
+
+  it("filter IDs are scoped across sibling card SVGs with different colors", () => {
+    const src = "https://example.com/a.png";
+    const images: ResolvedImages = new Map([
+      [src, { href: "data:image/png;base64,AAA", naturalWidth: 4, naturalHeight: 4 }],
+    ]);
+    const markup = renderToStaticMarkup(
+      <>
+        <CardFaceSvg
+          xUnits={20}
+          yUnits={28}
+          face={[{ ...imageShape("contain"), color: "red" } as ImageShape]}
+          images={images}
+        />
+        <CardFaceSvg
+          xUnits={20}
+          yUnits={28}
+          face={[{ ...imageShape("contain"), color: "blue" } as ImageShape]}
+          images={images}
+        />
+      </>,
+    );
+    const ids = [...markup.matchAll(/<filter\b[^>]*id="([^"]+)"/g)].map((m) => m[1]);
+    const refs = [...markup.matchAll(/<image\b[^>]*filter="url\(#([^\)]+)\)"/g)].map((m) => m[1]);
+    expect(ids).toHaveLength(2);
+    expect(new Set(ids).size).toBe(2);
+    expect(refs).toEqual(ids);
+  });
+
   it("static rendering WITHOUT resolutions is the loading placeholder (SSR default; the live swap is browser-only)", () => {
     const markup = render(imageShape("contain"));
     expect(markup).not.toContain("<image");
@@ -598,10 +680,11 @@ describe("CardFaceSvg: Image shapes (§3.3 M2)", () => {
 
   it("a failed (null) resolution renders the marked warning box", () => {
     const markup = render(
-      imageShape("contain"),
+      { ...imageShape("contain"), color: "red" } as ImageShape,
       new Map([["https://example.com/a.png", null]]),
     );
     expect(markup).not.toContain("<image");
+    expect(markup).not.toContain("<filter");
     expect(markup).toContain('data-image-placeholder="failed"');
     expect(markup).toContain("Image failed to load: https://example.com/a.png");
     const rect = rectTags(markup)[0];
@@ -1395,18 +1478,93 @@ describe("CardFaceSvg: inline icon runs (◆44)", () => {
     expect(render([legacy])).not.toContain("xml:space");
   });
 
-  it("each run is a tspan at its ABSOLUTE offset; the parent text carries fill, size, family", () => {
+  it("icon boundaries are compiler-positioned; the parent text carries fill, size, family", () => {
     const markup = render([iconText()]);
     const textTag = parseAttrs(/<text\b([^>]*)>/.exec(markup)![1]);
     expect(textTag.fill).toBe("maroon");
     expect(textTag["font-size"]).toBe("1.5");
     expect(textTag["font-family"]).toContain("--font-geist-sans");
-    // Run markup positions absolutely — no anchor-based alignment.
+    // Icon-containing markup uses compiler positions — no SVG text anchor.
     expect(textTag["text-anchor"]).toBeUndefined();
     const spans = tspansOf(markup);
     expect(spans.map((t) => t.content)).toEqual(["A ", "HEARTS", " B"]);
     // Left pivot: line start is shape.x — offsets add directly.
     expect(spans.map((t) => Number(t.attrs.x))).toEqual([5, 5.9, 7.4]);
+  });
+
+  it("text and Dicier runs use their own color overrides while unstyled runs inherit", () => {
+    const shape = iconText({
+      runs: [
+        { kind: "text", text: "A ", x: 0, color: "red" } as TextRun,
+        {
+          kind: "icon",
+          x: 0.9,
+          icon: { kind: "dicier", code: "HEARTS" },
+          color: "gold",
+        } as TextRun,
+        { kind: "text", text: " B", x: 2.4 },
+      ],
+    });
+    const markup = render([shape]);
+    expect(parseAttrs(/<text\b([^>]*)>/.exec(markup)![1]).fill).toBe("maroon");
+    expect(tspansOf(markup).map((span) => span.attrs.fill)).toEqual([
+      "red",
+      "gold",
+      undefined,
+    ]);
+  });
+
+  it("icon-free color boundaries stay paint-only under center/right anchoring", () => {
+    for (const [pivot, anchor] of [
+      ["center", "middle"],
+      ["right", "end"],
+    ] as const) {
+      const colored = iconText({
+        text: "AB",
+        pivot: { h: pivot, v: "top" },
+        // The exaggerated second offset proves this path does not turn a
+        // compiler measurement/safety margin into an explicit prefix gap.
+        runs: [
+          { kind: "text", text: "A", x: 0, color: "red" },
+          { kind: "text", text: "B", x: 999, color: "blue" },
+        ],
+      });
+      const markup = render([colored]);
+      const text = parseAttrs(/<text\b([^>]*)>/.exec(markup)![1]);
+      const spans = tspansOf(markup);
+      expect(text).toMatchObject({ x: "5", "text-anchor": anchor });
+      expect(spans.map((span) => span.content)).toEqual(["A", "B"]);
+      expect(spans.map((span) => span.attrs.fill)).toEqual(["red", "blue"]);
+      expect(spans.every((span) => span.attrs.x === undefined && span.attrs.y === undefined)).toBe(true);
+      expect(markup).toMatch(/>A<\/tspan><tspan fill="blue">B<\/tspan>/);
+      expect(markup).not.toContain("xml:space");
+      expect(markup).not.toContain("<g");
+    }
+  });
+
+  it("an uncolored icon-free run keeps legacy markup", () => {
+
+    const legacy = iconText({
+      text: "hello",
+      runs: [{ kind: "text", text: "hello", x: 0 }],
+    });
+    expect(render([legacy])).not.toContain("<tspan");
+  });
+
+  it("color boundaries around an icon flow until the icon slot requires a new anchor", () => {
+    const shape = iconText({
+      runs: [
+        { kind: "text", text: "A", x: 0, color: "red" },
+        { kind: "text", text: "B", x: 999, color: "blue" },
+        { kind: "icon", x: 1.2, icon: { kind: "dicier", code: "HEARTS" } },
+        { kind: "text", text: "C", x: 2.7, color: "green" },
+        { kind: "text", text: "D", x: 999, color: "purple" },
+      ],
+    });
+    const spans = tspansOf(render([shape]));
+    expect(spans.map((span) => span.content)).toEqual(["A", "B", "HEARTS", "C", "D"]);
+    expect(spans.map((span) => span.attrs.x)).toEqual(["5", undefined, "6.2", "7.7", undefined]);
+    expect(spans.map((span) => span.attrs.y !== undefined)).toEqual([true, false, true, true, false]);
   });
 
   it("text runs sit on the font's baseline; the Dicier run on ICON_ASCENT — both from the em top", () => {
@@ -1465,12 +1623,68 @@ describe("CardFaceSvg: inline icon runs (◆44)", () => {
     });
   });
 
+  it("a colored asset run uses the same alpha-preserving multiply filter as Image", () => {
+    const shape = iconText({
+      runs: [
+        {
+          kind: "icon",
+          x: 0.9,
+          icon: { kind: "asset", name: "skull" },
+          color: "blue",
+        } as TextRun,
+      ],
+    });
+    const images: ResolvedImages = new Map([
+      ["asset:skull", { href: "data:image/png;base64,xyz", naturalWidth: 4, naturalHeight: 2 }],
+    ]);
+    const markup = render([shape], images);
+    const filter = parseAttrs(/<filter\b([^>]*)>/.exec(markup)![1]);
+    const flood = parseAttrs(/<feFlood\b([^>]*)\/?>/.exec(markup)![1]);
+    const image = parseAttrs(/<image\b([^>]*)\/?>/.exec(markup)![1]);
+    expect(flood["flood-color"]).toBe("blue");
+    expect(image.filter).toBe(`url(#${filter.id})`);
+    expect(markup).toContain('operator="arithmetic"');
+    expect(markup).toContain('color-interpolation-filters="sRGB"');
+  });
+
+  it("colored asset runs in separate text shapes receive distinct filter IDs", () => {
+    const assetRun = (color: string): TextRun => ({
+      kind: "icon",
+      x: 0,
+      icon: { kind: "asset", name: "skull" },
+      color,
+    });
+    const images: ResolvedImages = new Map([
+      ["asset:skull", { href: "data:image/png;base64,xyz", naturalWidth: 1, naturalHeight: 1 }],
+    ]);
+    const markup = render(
+      [
+        iconText({ runs: [assetRun("red")] }),
+        iconText({ y: 4, runs: [assetRun("blue")] }),
+      ],
+      images,
+    );
+    const ids = [...markup.matchAll(/<filter\b[^>]*id="([^"]+)"/g)].map((m) => m[1]);
+    const refs = [...markup.matchAll(/<image\b[^>]*filter="url\(#([^\)]+)\)"/g)].map((m) => m[1]);
+    expect(ids).toHaveLength(2);
+    expect(new Set(ids).size).toBe(2);
+    expect(refs).toEqual(ids);
+  });
+
   it("an asset missing from the static resolutions renders the failed slot placeholder", () => {
     const shape = iconText({
-      runs: [{ kind: "icon", x: 0, icon: { kind: "asset", name: "ghost" } }],
+      runs: [
+        {
+          kind: "icon",
+          x: 0,
+          icon: { kind: "asset", name: "ghost" },
+          color: "blue",
+        } as TextRun,
+      ],
     });
     const markup = render([shape], new Map());
     expect(markup).toContain('data-inline-icon-placeholder="failed"');
+    expect(markup).not.toContain("<filter");
     const rect = rectTags(markup)[0];
     expect(rect).toMatchObject({ x: "5", y: "2", width: "1.5", height: "1.5" });
   });
@@ -1595,6 +1809,39 @@ describe("CardFaceSvg: TextBox inline icon runs (◆44)", () => {
     expect(g).not.toBeNull();
     const img = parseAttrs(/<image\b([^>]*)\/?>/.exec(g![1])![1]);
     expect(img).toMatchObject({ x: "2.5", y: "3", width: "1.5", height: "1.5" });
+  });
+
+  it("colored icon-free lines keep native middle/right anchoring and sequential advance", () => {
+    for (const [align, anchor, x] of [
+      ["middle", "middle", "7"],
+      ["right", "end", "12"],
+    ] as const) {
+      const markup = render(
+        box({
+          align,
+          lines: [
+            {
+              runs: [
+                { kind: "text", text: "A", x: 0, color: "red" },
+                { kind: "text", text: "B", x: 999, color: "blue" },
+              ],
+              // Deliberately absurd: paint-only color must not use carried
+              // width to shift a line whose SVG anchor can measure itself.
+              width: 999,
+            },
+          ],
+        }),
+      );
+      const text = parseAttrs(/<text\b([^>]*)>/.exec(markup)![1]);
+      const openings = [...markup.matchAll(/<tspan\b([^>]*)>/g)].map((m) => parseAttrs(m[1]));
+      expect(text["text-anchor"]).toBe(anchor);
+      expect(openings[0].x).toBe(x); // one line-positioning tspan
+      expect(openings[0].y).toBeDefined();
+      expect(openings.slice(1).map((attrs) => attrs.fill)).toEqual(["red", "blue"]);
+      expect(openings.slice(1).every((attrs) => attrs.x === undefined && attrs.y === undefined)).toBe(true);
+      expect(markup).toMatch(/>A<\/tspan><tspan fill="blue">B<\/tspan>/);
+      expect(markup).not.toContain("xml:space");
+    }
   });
 
   it("icon-free boxes keep the legacy anchor markup (text-anchor, one tspan per line)", () => {

@@ -26,7 +26,7 @@ export interface Program {
   range: Range;
 }
 
-export type Declaration = EnumDecl | SheetDecl | TemplateDecl | CardDecl;
+export type Declaration = EnumDecl | SheetDecl | TemplateDecl | CardDecl | LetNode;
 
 export interface EnumDecl {
   kind: "EnumDecl";
@@ -87,7 +87,43 @@ export interface FaceNode {
 // Template contents (§3.3)
 // ---------------------------------------------------------------------------
 
-export type TemplateNode = ElementNode | RepeatNode;
+export type TemplateNode =
+  | ElementNode
+  | RepeatNode
+  | LetNode
+  | IfNode
+  | TemplateCallNode;
+
+/** `let name: <expr>` at program or template-node scope. */
+export interface LetNode {
+  kind: "Let";
+  name: NameRef;
+  initializer: Expr;
+  range: Range;
+}
+
+/** Structural `If: <expr>` with an optional paired `Else:` sibling. */
+export interface IfNode {
+  kind: "IfBlock";
+  condition: Expr;
+  thenChildren: TemplateNode[];
+  elseBranch: ElseNode | null;
+  range: Range;
+}
+
+/** The paired `Else:` portion of an {@link IfNode}. */
+export interface ElseNode {
+  kind: "ElseBlock";
+  children: TemplateNode[];
+  range: Range;
+}
+
+/** `<identifier>:` in template-node position invokes that Template. */
+export interface TemplateCallNode {
+  kind: "TemplateCall";
+  template: NameRef;
+  range: Range;
+}
 
 export type ElementKind = "Rectangle" | "Text" | "TextBox" | "Icon" | "Image" | "Qr";
 

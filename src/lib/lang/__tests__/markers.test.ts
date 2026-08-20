@@ -103,6 +103,52 @@ describe("parseInlineMarkers: escapes and literals", () => {
   });
 });
 
+describe("parseInlineMarkers: scoped colors", () => {
+  it("colors text and inline icons, then restores the inherited color", () => {
+    expect(parseInlineMarkers("a {color:Red}b {HEARTS}{/color} c")).toEqual([
+      { kind: "text", text: "a " },
+      { kind: "text", text: "b ", color: "red" },
+      { kind: "icon", icon: { kind: "dicier", code: "HEARTS" }, color: "red" },
+      { kind: "text", text: " c" },
+    ]);
+  });
+
+  it("accepts #RRGGBB and nests by restoring the enclosing override", () => {
+    expect(
+      parseInlineMarkers("{color:#Aa00fF}a{color:blue}b{/color}c{/color}"),
+    ).toEqual([
+      { kind: "text", text: "a", color: "#Aa00fF" },
+      { kind: "text", text: "b", color: "blue" },
+      { kind: "text", text: "c", color: "#Aa00fF" },
+    ]);
+  });
+
+  it("escaped controls, invalid colors, and unmatched controls stay raw", () => {
+    expect(parseInlineMarkers("{{color:red}x{{/color}")).toEqual([
+      { kind: "text", text: "{color:red}x{/color}" },
+    ]);
+    expect(parseInlineMarkers("{color:not-a-color}x{/color}")).toEqual([
+      { kind: "text", text: "{color:not-a-color}x{/color}" },
+    ]);
+    expect(parseInlineMarkers("{color:red}x")).toEqual([
+      { kind: "text", text: "{color:red}x" },
+    ]);
+    expect(parseInlineMarkers("x{/color}")).toEqual([
+      { kind: "text", text: "x{/color}" },
+    ]);
+  });
+
+  it("a color boundary cannot bisect an astral Unicode scalar", () => {
+    const astral = "𝄞";
+    const source = `${astral[0]}{color:red}${astral[1]}x{/color}`;
+    expect(parseInlineMarkers(source)).toEqual([
+      // Deterministic policy: the leading code unit owns the whole scalar.
+      { kind: "text", text: astral },
+      { kind: "text", text: "x", color: "red" },
+    ]);
+  });
+});
+
 describe("rawMarkerText / mergeTextSegments (the D005 downgrade helpers)", () => {
   it("rawMarkerText restores the source spelling of both forms", () => {
     expect(rawMarkerText({ kind: "dicier", code: "HEARTZ" })).toBe("{HEARTZ}");
@@ -117,5 +163,18 @@ describe("rawMarkerText / mergeTextSegments (the D005 downgrade helpers)", () =>
         { kind: "text", text: "y" },
       ]),
     ).toEqual([{ kind: "text", text: "x{BAD}y" }]);
+  });
+
+  it("mergeTextSegments preserves color boundaries", () => {
+    expect(
+      mergeTextSegments([
+        { kind: "text", text: "a", color: "red" },
+        { kind: "text", text: "b", color: "red" },
+        { kind: "text", text: "c" },
+      ]),
+    ).toEqual([
+      { kind: "text", text: "ab", color: "red" },
+      { kind: "text", text: "c" },
+    ]);
   });
 });

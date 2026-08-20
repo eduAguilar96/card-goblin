@@ -64,6 +64,12 @@ uploaded art right inside `Text` and `TextBox` text — including markers that
 arrive from cell data — each in a one-em slot that wraps like a word. See
 [Inline icons](../goblin-script/04-text.md#inline-icons).
 
+**Additive color styling.** Image `color:` multiply-tints artwork (white is the
+unchanged default), while nested `{color:red}…{/color}` scopes recolor words,
+Dicier glyphs, and inline asset art without changing TextBox wrapping. See
+[Images](../goblin-script/05-images.md#recolor-white-artwork) and
+[Scoped colors](../goblin-script/04-text.md#scoped-colors).
+
 **Cloud sync.** An optional, site-operator-configured "Sign in" that mirrors your
 project — code, sheet rows, and uploaded images — to a server, so any other
 computer signed in with the same password picks up where you left off. One
@@ -81,9 +87,9 @@ password, one project, guarded last-write-wins (never a silent overwrite). See
 - **Uploaded fonts** — `font:` currently picks from a small bundled set (see
   [Text & TextBox](text.md)); bringing your OWN font file, the way uploaded
   assets already work for images, is a separate, later piece.
-- **Rich text in boxes** — inline icons shipped (see
-  [Inline icons](../goblin-script/04-text.md#inline-icons)); **bold and italic
-  runs** are the remaining piece, still a later design round.
+- **Rich text in boxes** — inline icons and scoped colors shipped (see
+  [Text & TextBox](../goblin-script/04-text.md)); **bold and italic runs** are
+  the remaining piece, still a later design round.
 - **A browsable icon picker** — search and preview the [888 Dicier
   codes](../reference/icons.md) visually instead of typing them from memory.
 

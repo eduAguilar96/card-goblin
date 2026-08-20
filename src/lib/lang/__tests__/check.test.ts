@@ -1806,6 +1806,22 @@ describe("W005 unknown asset", () => {
       compileSource(source, new Set(["dragon"])).diagnostics.map((d) => d.code),
     ).not.toContain("W005");
   });
+
+  it("Image accepts optional Color-typed tint", () => {
+    const tinted = (color: string): string =>
+      withElement("Image:", [
+        "x: 1",
+        "y: 1",
+        "width: 1",
+        "height: 1",
+        'src: "https://example.com/a.png"',
+        `color: ${color}`,
+      ]);
+    expect(codesOf(tinted("red"))).toEqual([]);
+    expect(
+      codesOf(tinted('"red"')),
+    ).toContain("E003");
+  });
 });
 
 // -- W004/W005 on inline markers in text: (◆44, §7.5) ------------------------
@@ -1860,6 +1876,20 @@ describe("inline markers in literal text: (◆44)", () => {
 
   it("several unknown markers in one literal each warn", () => {
     expect(codesOf(textEl('"{HEARTZ} {ZORPS}"'))).toEqual(["W004", "W004"]);
+  });
+
+  it("icons inside valid color scopes keep W004/W005 checking", () => {
+    expect(codesOf(textEl('"{color:red}{HEARTZ}{/color}"'))).toEqual(["W004"]);
+    expect(
+      diagsOfWithAssets(textEl('"{color:#cc0000}{asset:nope}{/color}"'), new Set()).map(
+        (d) => d.code,
+      ),
+    ).toEqual(["W005"]);
+  });
+
+  it("invalid or unbalanced color scopes stay raw and add no diagnostics", () => {
+    expect(codesOf(textEl('"{color:not-a-color}x{/color}"'))).toEqual([]);
+    expect(codesOf(textEl('"{color:red}x"'))).toEqual([]);
   });
 });
 

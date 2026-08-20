@@ -14,10 +14,11 @@ to read them now than to discover them three hours into a deck.
 - **`Text` is one line by design** — long text runs off the card rather than
   flowing. Wrapped, multi-line text is what
   [`TextBox`](text.md) is for.
-- **One look per box.** A `TextBox` wraps plain text in a single font, size, and
-  color — no bold runs or inline icons inside the flow yet.
-- **One font.** Text renders in the app's built-in font. Custom fonts aren't
-  supported yet ([icons](icons.md) are their own font and do work).
+- **No bold/italic spans yet.** A `TextBox` can mix scoped colors and inline
+  Dicier/uploaded-asset icons, but font face and size still apply to the whole
+  element.
+- **Bundled fonts only.** `Text` and `TextBox` offer nine bundled faces through
+  `font:`. Uploading an arbitrary font file is not supported yet.
 
 ## Images
 
@@ -50,11 +51,14 @@ to read them now than to discover them three hours into a deck.
 
 ## Size caps
 
-- **500 drawn shapes per card** from `Repeat`.
+- **500 Repeat expansions per card.** Every iteration of every `Repeat` counts,
+  including nested outer and inner iterations.
 - **2,000 physical cards per `Card:` block.**
 
-Both exist so a typo in a data cell can't hang the editor. Hitting either truncates
-with a note rather than failing.
+Both exist so a typo in a data cell can't hang the editor, but their failure posture
+differs. Crossing the Repeat budget is D004 and makes the affected card an error
+placeholder — no partially truncated face is kept. Crossing the physical-card cap is
+D007 and truncates that Card block with a note.
 
 ## Printing
 

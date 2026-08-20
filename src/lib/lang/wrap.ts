@@ -136,54 +136,100 @@ export function measureText(text: string, size: number, metrics: FontMetrics): n
 // Tokens and line pieces (◆44)
 // ---------------------------------------------------------------------------
 
-/** One wrap token: a run of spaces, a word, or an atomic icon slot. */
-type WrapToken =
-  | { kind: "spaces"; text: string }
-  | { kind: "word"; text: string }
-  | { kind: "icon"; icon: InlineIcon };
+interface StyledTextPiece {
+  text: string;
+  color?: string;
+}
+
+/** One wrap token: a run of spaces, a word, or an atomic icon slot. Text
+ * tokens retain style boundaries internally; those boundaries are paint-only
+ * and must never become wrapping opportunities. */
+type TextWrapToken = { kind: "spaces" | "word"; pieces: StyledTextPiece[] };
+type WrapToken = TextWrapToken | { kind: "icon"; icon: InlineIcon; color?: string };
 
 /** A line being built: contiguous text is kept MERGED into one piece so
  * every fit decision can measure it as one string — the arithmetic
  * pre-◆44 wraps used, preserved exactly for marker-free input. */
-type LinePiece = { kind: "text"; text: string } | { kind: "icon"; icon: InlineIcon };
+type LinePiece =
+  | { kind: "text"; text: string; color?: string }
+  | { kind: "icon"; icon: InlineIcon; color?: string };
+
+function appendStyledText(out: StyledTextPiece[], text: string, color?: string): void {
+  if (text === "") return;
+  let last = out[out.length - 1];
+  // A paint-only style boundary can occur between the UTF-16 halves of one
+  // astral scalar. Keep the pair in the leading (left-colored) piece so no
+  // TextRun ever receives an invalid surrogate fragment.
+  if (
+    last &&
+    last.text.length > 0 &&
+    text.length > 0 &&
+    /[\uD800-\uDBFF]$/.test(last.text) &&
+    /^[\uDC00-\uDFFF]/.test(text)
+  ) {
+    last.text += text[0];
+    text = text.slice(1);
+    if (text === "") return;
+  }
+  last = out[out.length - 1];
+  if (last && last.color === color) last.text += text;
+  else out.push({ text, ...(color ? { color } : {}) });
+}
+
+function styledText(pieces: readonly StyledTextPiece[]): string {
+  return pieces.map((piece) => piece.text).join("");
+}
 
 /** Marker segments → one token array per HARD line (semantics rule 1:
  * every real `\n` ends a line, unconditionally). Always ≥ 1 line. */
 function hardLineTokens(segments: readonly MarkerSegment[]): WrapToken[][] {
   const lines: WrapToken[][] = [[]];
+  let pending: TextWrapToken | null = null;
+  const flush = (): void => {
+    if (pending) lines[lines.length - 1].push(pending);
+    pending = null;
+  };
+  const append = (kind: "spaces" | "word", text: string, color?: string): void => {
+    if (pending?.kind === kind) {
+      appendStyledText(pending.pieces, text, color);
+      return;
+    }
+    flush();
+    const next: TextWrapToken = { kind, pieces: [] };
+    pending = next;
+    appendStyledText(next.pieces, text, color);
+  };
   for (const segment of segments) {
     if (segment.kind === "icon") {
-      lines[lines.length - 1].push({ kind: "icon", icon: segment.icon });
+      flush();
+      lines[lines.length - 1].push({
+        kind: "icon",
+        icon: segment.icon,
+        ...(segment.color ? { color: segment.color } : {}),
+      });
       continue;
     }
-    const parts = segment.text.split("\n");
-    for (let p = 0; p < parts.length; p++) {
-      if (p > 0) lines.push([]);
-      // Alternating space runs and words; both are tokens, so interior
-      // spacing survives verbatim and only the run AT a break collapses.
-      for (const token of parts[p].match(/ +|[^ ]+/g) ?? []) {
-        lines[lines.length - 1].push(
-          token[0] === " " ? { kind: "spaces", text: token } : { kind: "word", text: token },
-        );
+    // Alternating space runs and words, continued ACROSS segment/style
+    // boundaries. A real newline is the only unconditional hard-line split.
+    for (const token of segment.text.match(/\n| +|[^ \n]+/g) ?? []) {
+      if (token === "\n") {
+        flush();
+        lines.push([]);
+      } else {
+        append(token[0] === " " ? "spaces" : "word", token, segment.color);
       }
     }
   }
+  flush();
   return lines;
 }
 
 /**
- * Width of `pieces` + `extraText` appended after them + `extraIcons` slots,
- * with all contiguous text measured as ONE string per stretch (exact-
+ * Width of `pieces`, with all contiguous text measured as ONE string per stretch (exact-
  * arithmetic parity with the pre-◆44 engine for text-only lines) and each
  * icon contributing exactly `size` (the 1-em slot, ◆44).
  */
-function widthWith(
-  pieces: readonly LinePiece[],
-  extraText: string,
-  extraIcons: number,
-  size: number,
-  metrics: FontMetrics,
-): number {
+function piecesWidth(pieces: readonly LinePiece[], size: number, metrics: FontMetrics): number {
   let width = 0;
   let text = "";
   for (const piece of pieces) {
@@ -197,9 +243,8 @@ function widthWith(
       width += size;
     }
   }
-  text += extraText;
   if (text !== "") width += measureText(text, size, metrics);
-  return width + extraIcons * size;
+  return width;
 }
 
 /** Finalize one built line into runs with absolute x-offsets (◆44): text
@@ -212,15 +257,29 @@ function piecesToLine(
 ): TextBoxLine {
   const runs: TextRun[] = [];
   let x = 0;
+  let textPrefix = "";
   for (const piece of pieces) {
     if (piece.kind === "text") {
-      runs.push({ kind: "text", text: piece.text, x });
-      x += measureText(piece.text, size, metrics);
+      runs.push({
+        kind: "text",
+        text: piece.text,
+        x: x + measureText(textPrefix, size, metrics),
+        ...(piece.color ? { color: piece.color } : {}),
+      });
+      textPrefix += piece.text;
     } else {
-      runs.push({ kind: "icon", x, icon: piece.icon });
+      x += measureText(textPrefix, size, metrics);
+      textPrefix = "";
+      runs.push({
+        kind: "icon",
+        x,
+        icon: piece.icon,
+        ...(piece.color ? { color: piece.color } : {}),
+      });
       x += size;
     }
   }
+  x += measureText(textPrefix, size, metrics);
   return { runs, width: x };
 }
 
@@ -289,41 +348,60 @@ function wrapSegment(
   /** Space run seen since the last word/icon — pending: it joins the line
    * only if more content follows on the SAME line, and collapses if a break
    * lands. */
-  let pendingSpaces = "";
+  let pendingSpaces: StyledTextPiece[] = [];
   let lineHasContent = false;
   let pushedAny = false;
 
-  const appendText = (text: string): void => {
-    if (text === "") return;
-    const last = pieces[pieces.length - 1];
-    if (last?.kind === "text") last.text += text;
-    else pieces.push({ kind: "text", text });
+  const appendText = (textPieces: readonly StyledTextPiece[]): void => {
+    for (const textPiece of textPieces) {
+      if (textPiece.text === "") continue;
+      const last = pieces[pieces.length - 1];
+      if (last?.kind === "text" && last.color === textPiece.color) {
+        last.text += textPiece.text;
+      } else {
+        pieces.push({
+          kind: "text",
+          text: textPiece.text,
+          ...(textPiece.color ? { color: textPiece.color } : {}),
+        });
+      }
+    }
   };
 
   const flush = (): void => {
     out.push(pieces);
     pushedAny = true;
     pieces = [];
-    pendingSpaces = "";
+    pendingSpaces = [];
     lineHasContent = false;
   };
 
   for (const token of tokens) {
     if (token.kind === "spaces") {
       if (!lineHasContent) {
-        appendText(token.text); // leading spaces: preserved indentation, never a break
+        appendText(token.pieces); // leading spaces: preserved indentation, never a break
       } else {
-        pendingSpaces += token.text;
+        for (const piece of token.pieces) appendStyledText(pendingSpaces, piece.text, piece.color);
       }
       continue;
     }
 
     if (token.kind === "icon") {
       // ◆44: one atomic token, advance exactly `size` — wraps like a word.
-      if (widthWith(pieces, pendingSpaces, 1, size, metrics) <= boxWidth) {
+      const iconPiece: LinePiece = {
+        kind: "icon",
+        icon: token.icon,
+        ...(token.color ? { color: token.color } : {}),
+      };
+      const pendingLinePieces: LinePiece[] = pendingSpaces.map((piece) => ({
+        kind: "text",
+        text: piece.text,
+        ...(piece.color ? { color: piece.color } : {}),
+      }));
+      if (piecesWidth([...pieces, ...pendingLinePieces, iconPiece], size, metrics) <= boxWidth) {
         appendText(pendingSpaces);
-        pendingSpaces = "";
-        pieces.push({ kind: "icon", icon: token.icon });
+        pendingSpaces = [];
+        pieces.push(iconPiece);
         lineHasContent = true;
         continue;
       }
@@ -334,15 +412,21 @@ function wrapSegment(
       // spaces). It NEVER breaks mid-slot: wider than the box, it simply
       // overflows — placing it is what guarantees progress (the icon
       // analogue of "at least one codepoint always ships").
-      pieces.push({ kind: "icon", icon: token.icon });
+      pieces.push(iconPiece);
       lineHasContent = true;
       continue;
     }
 
     // A word.
-    if (widthWith(pieces, pendingSpaces + token.text, 0, size, metrics) <= boxWidth) {
-      appendText(pendingSpaces + token.text);
-      pendingSpaces = "";
+    const candidateText = [...pendingSpaces, ...token.pieces];
+    const candidatePieces: LinePiece[] = candidateText.map((piece) => ({
+      kind: "text",
+      text: piece.text,
+      ...(piece.color ? { color: piece.color } : {}),
+    }));
+    if (piecesWidth([...pieces, ...candidatePieces], size, metrics) <= boxWidth) {
+      appendText(candidateText);
+      pendingSpaces = [];
       lineHasContent = true;
       continue;
     }
@@ -356,33 +440,56 @@ function wrapSegment(
     for (const piece of pieces) {
       if (piece.kind === "text") lineTextSoFar += piece.text;
     }
-    let word = token.text;
+    let word = [...token.pieces];
     // `word !== ""` guards negative box widths (a `width: -1` cell): with
     // boxWidth < 0 even the empty string "exceeds" the box, and widestPrefix
     // on an exhausted word would crash — degrade like width 0 instead (one
     // codepoint per line; ⚑8: one bad cell never blanks the deck).
-    while (word !== "" && measureText(lineTextSoFar + word, size, metrics) > boxWidth) {
-      const head = widestPrefix(lineTextSoFar, word, boxWidth, size, metrics);
-      lineTextSoFar += word.slice(0, head);
-      word = word.slice(head);
-      pieces = lineTextSoFar === "" ? [] : [{ kind: "text", text: lineTextSoFar }];
+    while (word.length > 0 && measureText(lineTextSoFar + styledText(word), size, metrics) > boxWidth) {
+      const head = widestPrefix(lineTextSoFar, styledText(word), boxWidth, size, metrics);
+      const [headPieces, tailPieces] = splitStyledPrefix(word, head);
+      appendText(headPieces);
+      word = tailPieces;
       flush();
       lineTextSoFar = "";
     }
     appendText(word);
     // A word fully consumed by mid-word flushes leaves NO open line — the
     // next token starts fresh (and no spurious trailing "" is pushed below).
-    if (word !== "") lineHasContent = true;
+    if (word.length > 0) lineHasContent = true;
   }
   // Close the segment's open line. Trailing pending spaces sit after the
   // last word — interior to no break, so they are preserved (invisible, but
   // honest). Skipped only when mid-word flushes already emitted everything
   // AND the segment produced at least one line (an empty segment yields one
   // empty line).
-  if (!pushedAny || pieces.length > 0 || pendingSpaces !== "" || lineHasContent) {
+  if (!pushedAny || pieces.length > 0 || pendingSpaces.length > 0 || lineHasContent) {
     appendText(pendingSpaces);
     out.push(pieces);
   }
+}
+
+/** Split styled text at a UTF-16 offset while retaining every color boundary. */
+function splitStyledPrefix(
+  pieces: readonly StyledTextPiece[],
+  offset: number,
+): [StyledTextPiece[], StyledTextPiece[]] {
+  const head: StyledTextPiece[] = [];
+  const tail: StyledTextPiece[] = [];
+  let remaining = offset;
+  for (const piece of pieces) {
+    if (remaining <= 0) {
+      appendStyledText(tail, piece.text, piece.color);
+    } else if (remaining >= piece.text.length) {
+      appendStyledText(head, piece.text, piece.color);
+      remaining -= piece.text.length;
+    } else {
+      appendStyledText(head, piece.text.slice(0, remaining), piece.color);
+      appendStyledText(tail, piece.text.slice(remaining), piece.color);
+      remaining = 0;
+    }
+  }
+  return [head, tail];
 }
 
 /** Longest prefix of `word` (≥ 1 codepoint) that fits after `prefix` — the
@@ -422,11 +529,31 @@ export function layoutSingleLine(
   size: number,
   metrics: FontMetrics,
 ): TextBoxLine {
-  const pieces: LinePiece[] = segments.map((segment) =>
-    segment.kind === "text"
-      ? { kind: "text", text: segment.text }
-      : { kind: "icon", icon: segment.icon },
-  );
+  const pieces: LinePiece[] = [];
+  const pendingText: StyledTextPiece[] = [];
+  const flushText = (): void => {
+    for (const piece of pendingText) {
+      pieces.push({
+        kind: "text",
+        text: piece.text,
+        ...(piece.color ? { color: piece.color } : {}),
+      });
+    }
+    pendingText.length = 0;
+  };
+  for (const segment of segments) {
+    if (segment.kind === "text") {
+      appendStyledText(pendingText, segment.text, segment.color);
+    } else {
+      flushText();
+      pieces.push({
+        kind: "icon",
+        icon: segment.icon,
+        ...(segment.color ? { color: segment.color } : {}),
+      });
+    }
+  }
+  flushText();
   return piecesToLine(pieces, size, metrics);
 }
 

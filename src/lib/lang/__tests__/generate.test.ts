@@ -681,6 +681,20 @@ describe("Image flows to the shape (§3.3 M2)", () => {
     expect(image.fit).toBe("stretch");
   });
 
+  it("Image color is additive: absent/white omit it, non-white tint is serialized", () => {
+    const omitted = imageProject([]).model.decks[0].cards[0];
+    const white = imageProject(["color: white"]).model.decks[0].cards[0];
+    const whiteHex = imageProject(["color: #FFFFFF"]).model.decks[0].cards[0];
+    const red = imageProject(["color: red"]).model.decks[0].cards[0];
+    expect((omitted.front[0] as ImageShape).color).toBeUndefined();
+    expect((white.front[0] as ImageShape).color).toBeUndefined();
+    expect((whiteHex.front[0] as ImageShape).color).toBeUndefined();
+    expect((red.front[0] as ImageShape).color).toBe("red");
+    expect(white.contentHash).toBe(omitted.contentHash);
+    expect(whiteHex.contentHash).toBe(omitted.contentHash);
+    expect(red.contentHash).not.toBe(omitted.contentHash);
+  });
+
   it("src and fit changes change the contentHash (both are visible content)", () => {
     const base = imageProject([]).model.decks[0].cards[0];
     const otherSrc = imageProject([], { t: "y" }).model.decks[0].cards[0];
@@ -1857,6 +1871,7 @@ describe("never throws (⚑8)", () => {
       enums: new Map(),
       sheets: new Map(),
       templates: new Map(),
+      globals: new Map(),
       cards: [],
       templateUsage: new Map(),
     };
@@ -2418,6 +2433,33 @@ describe("inline icons in Text (◆44): markers parse AFTER interpolation into r
     });
   });
 
+  it("color scopes reach text, Dicier, and asset runs, then restore inheritance", () => {
+    const p = textProject(
+      '"a {color:Red}b {HEARTS}{asset:skull}{/color} c"',
+      ["t: Text"],
+      [{ t: "x" }],
+    );
+    const runs = textShapeOf(p).runs;
+    expect(runs.map((run) => run.color)).toEqual([undefined, "red", "red", "red", undefined]);
+    expect(runs[2]).toMatchObject({
+      kind: "icon",
+      icon: { kind: "dicier", code: "HEARTS" },
+      color: "red",
+    });
+    expect(runs[3]).toMatchObject({
+      kind: "icon",
+      icon: { kind: "asset", name: "skull" },
+      color: "red",
+    });
+  });
+
+  it("a color scope arriving from a cell parses after interpolation", () => {
+    const p = textProject("[t]", ["t: Text"], [{ t: "{color:#Aa00fF}hot{/color}" }]);
+    expect(textShapeOf(p).runs).toEqual([
+      { kind: "text", text: "hot", x: 0, color: "#Aa00fF" },
+    ]);
+  });
+
   it("computed UNKNOWN dicier code → D005, and the raw marker text renders as ONE text run", () => {
     const p = textProject("[t]", ["t: Text"], [{ t: "x{HEARTZ}y" }, { t: "{HEARTS}" }]);
     const d005 = p.dataDiagnostics.filter((d) => d.code === "D005");
@@ -2430,6 +2472,16 @@ describe("inline icons in Text (◆44): markers parse AFTER interpolation into r
     ]);
     // The known-code row on the same deck still gets its icon run.
     expect(textShapeOf(p, 1).runs[0].kind).toBe("icon");
+  });
+
+  it("D005 raw-marker downgrade preserves the active color and word integrity", () => {
+    const p = textProject("[t]", ["t: Text"], [
+      { t: "{color:red}x{HEARTZ}y{/color}" },
+    ]);
+    expect(p.dataDiagnostics.map((d) => d.code)).toContain("D005");
+    expect(textShapeOf(p).runs).toEqual([
+      { kind: "text", text: "x{HEARTZ}y", x: 0, color: "red" },
+    ]);
   });
 
   it("a LITERAL unknown code stays an icon run (W004 territory — the glyph may exist; no D005)", () => {

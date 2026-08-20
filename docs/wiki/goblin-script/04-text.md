@@ -106,11 +106,45 @@ its top-right corner, so an overflowing box can't slip through to print
 unnoticed. Fixing it is a design choice: a bigger box, a smaller `size:`, a
 tighter `line_height:`, `overflow: shrink`, or shorter text.
 
-One box is one look: a single font, size, and color for the whole box.
-Interpolation (`text: "[name]: [rules]"`) substitutes before wrapping, so mixed
-cell data wraps as one paragraph. Icons can sit inline in the text — see
-[Inline icons](#inline-icons) below; bold and italic runs are still a
+The element's `color:` sets the whole box at once. For differently colored words
+inside it, use a scoped color below. Interpolation (`text: "[name]: [rules]"`)
+substitutes before wrapping, so mixed cell data wraps as one paragraph. Icons can
+sit inline in the text too; bold and italic runs are still a
 [roadmap](roadmap.md) topic.
+
+## Scoped colors
+
+Both `Text` and `TextBox` can recolor part of their resolved text:
+
+```goblin
+TextBox: "Rules"
+  x: 2
+  y: 14
+  width: 16
+  height: 8
+  size: 1.1
+  color: black
+  text: "Gain {color:gold}2 treasure{/color}, then take {color:crimson}1 damage{/color}."
+```
+
+`{color:red}` starts a scope and `{/color}` ends it. Use any CSS color name or a
+six-digit hex value such as `{color:#cc0000}`. Scopes nest; closing an inner scope
+restores the outer color, and closing the outermost restores the element's own
+`color:`. The tags are paint-only: they occupy no width, do not cause a wrap boundary,
+and do not change alignment, `line_height:`, or overflow calculations.
+
+Scopes apply after interpolation, including when the tags arrive from a spreadsheet
+cell. They also color Dicier markers and multiply-tint inline asset markers:
+
+```goblin
+text: "Pay {color:teal}{HEARTS} {asset:energy}{/color} to activate."
+```
+
+Outside a scope, Dicier markers inherit the element's whole-text color and asset art
+keeps its original colors. Inside one, a white asset becomes the scoped color while
+its transparency and dark detail are preserved. Malformed, unknown-color,
+unbalanced, or unclosed tags stay visible as raw text and produce no diagnostic — the
+same gentle behavior as other unrecognized brace markers.
 
 ## Inline icons
 
@@ -133,9 +167,9 @@ Text: "Cost"
   warning.
 
 **Every icon occupies a square one-em slot**: as wide and tall as the text's
-`size`, sitting on the line. Dicier icons draw in the text's own `color`;
-asset art keeps its own colors and letterboxes into the slot if it isn't
-square. For now inline Dicier icons always use the default `flat_dark` face —
+`size`, sitting on the line. Dicier icons draw in the current element/scoped
+color; asset art keeps its own colors unless enclosed by a color scope, and
+letterboxes into the slot if it isn't square. For now inline Dicier icons always use the default `flat_dark` face —
 the `style:` choice that [`Icon`](icons.md) has doesn't reach inline markers
 yet.
 

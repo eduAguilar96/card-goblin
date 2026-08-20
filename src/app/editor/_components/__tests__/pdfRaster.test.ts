@@ -340,6 +340,35 @@ describe("auto dimension in the rasterized markup (§3.3, 2026-08-10)", () => {
     expect(markup).toContain('width="16"');
     expect(markup).toContain('height="16"');
   });
+
+  it("the static/PDF SVG carries the same sRGB multiply tint filter as preview", () => {
+    const tinted = { ...banner, color: "red" } as ImageShape;
+    const markup = renderToStaticMarkup(
+      createElement(CardFaceSvg, {
+        xUnits: 20,
+        yUnits: 28,
+        face: [tinted],
+        images: new Map([
+          [
+            banner.src,
+            {
+              href: "data:image/png;base64,AAA",
+              naturalWidth: 200,
+              naturalHeight: 100,
+            },
+          ],
+        ]),
+        svgAttributes: { xmlns: "http://www.w3.org/2000/svg", width: 750, height: 1050 },
+      }),
+    );
+    const filterId = /<filter\b[^>]*id="([^"]+)"/.exec(markup)?.[1];
+    expect(filterId).toBeDefined();
+    expect(markup).toContain('color-interpolation-filters="sRGB"');
+    expect(markup).toContain('flood-color="red"');
+    expect(markup).toContain('operator="arithmetic"');
+    expect(markup).toContain('k1="1"');
+    expect(markup).toContain(`filter="url(#${filterId})"`);
+  });
 });
 
 describe("asset-data cache eviction on asset-store events (§7.1b — stale art in exports)", () => {

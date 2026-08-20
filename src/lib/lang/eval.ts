@@ -28,8 +28,11 @@
 import type {
   ElementNode,
   Expr,
+  IfNode,
+  LetNode,
   RepeatNode,
   StringLit,
+  TemplateCallNode,
   TemplateDecl,
   TemplateNode,
 } from "./ast";
@@ -93,6 +96,32 @@ export class DataError extends Error {
  * against the same total. */
 export const REPEAT_CAP = 500;
 
+/** Structural and composition guards (§3.3 composition plan). The parser
+ * already rejects blocks deeper than 500; the evaluator mirrors that limit
+ * so poisoned ASTs still degrade instead of overflowing. Composition work is
+ * charged only after crossing a TemplateCall edge, preserving call-free
+ * legacy behavior exactly. */
+export const TEMPLATE_CALL_DEPTH_CAP = 64;
+export const TEMPLATE_COMPOSITION_NODE_CAP = 10_000;
+const TEMPLATE_NODE_DEPTH_CAP = 500;
+
+interface BindingSlot {
+  state: "uninitialized" | "evaluating" | "value";
+  value?: Value;
+}
+
+interface EvalFrame {
+  slots: Map<LetNode, BindingSlot>;
+}
+
+interface EvalSession {
+  globals: Map<LetNode, BindingSlot>;
+  frames: EvalFrame[];
+  templateStack: TemplateDecl[];
+  callDepth: number;
+  compositionVisits: number;
+}
+
 /** Evaluation context for one row × loop-case combination (§3.6, §3.7).
  * Built by generate.ts; the cell accessors close over that sheet's
  * validation results so invalid-cell diagnostics are REUSED, not duplicated. */
@@ -132,6 +161,11 @@ export interface EvalContext {
    * code, so one combination reports each unknown code ONCE no matter how
    * many Repeat iterations draw it (mirrors the D001–D003 sharing rule). */
   iconIssues: Map<string, DataDiagnostic>;
+  /** Fresh for each root expression/face evaluation, while every existing
+   * per-instance field above retains its lifetime (especially Repeat budget
+   * and cardPosition). Internal evaluator state; generate.ts initializes it
+   * to null and root entry points restore it on exit. */
+  session: EvalSession | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -204,6 +238,13 @@ export function evalExpr(expr: Expr, ctx: EvalContext, axisUnits: number | null)
   } finally {
     evalDepth--;
   }
+}
+
+/** Evaluate one Card-level expression (`count:` today) in an isolated
+ * binding session. A later Front/Back evaluation gets its own caches, so a
+ * cached global containing [card] can never hide that face's actual read. */
+export function evalRootExpr(expr: Expr, ctx: EvalContext, axisUnits: number | null): Value {
+  return withSession(ctx, () => evalExpr(expr, ctx, axisUnits));
 }
 
 function evalExprInner(expr: Expr, ctx: EvalContext, axisUnits: number | null): Value {
@@ -376,6 +417,8 @@ function resolveName(name: string, node: ResolvableNode, ctx: EvalContext): Valu
     }
     case "column":
       return readCell(res, ctx);
+    case "let":
+      return resolveLet(res.binding, res.scope, ctx);
     case "position": {
       // §3.6, ◆42: [row] is fixed for the whole combination; [card] flags
       // `.used` so generate.ts knows this combination's copies must each
@@ -386,6 +429,38 @@ function resolveName(name: string, node: ResolvableNode, ctx: EvalContext): Valu
     }
     default:
       return poisoned();
+  }
+}
+
+function resolveLet(binding: LetNode, scope: "global" | "local", ctx: EvalContext): Value {
+  const session = ctx.session;
+  if (!session) return poisoned();
+  let slot: BindingSlot | undefined;
+  if (scope === "global") {
+    slot = session.globals.get(binding);
+    if (!slot) {
+      slot = { state: "uninitialized" };
+      session.globals.set(binding, slot);
+    }
+  } else {
+    for (let i = session.frames.length - 1; i >= 0; i--) {
+      slot = session.frames[i].slots.get(binding);
+      if (slot) break;
+    }
+    if (!slot) return poisoned();
+  }
+  if (slot.state === "value") return slot.value as Value;
+  if (slot.state === "evaluating") return poisoned(); // E009 owns the source surface
+  slot.state = "evaluating";
+  try {
+    const value = evalExpr(binding.initializer, ctx, null);
+    slot.value = value;
+    slot.state = "value";
+    return value;
+  } catch (error) {
+    slot.state = "uninitialized";
+    delete slot.value;
+    throw error;
   }
 }
 
@@ -447,17 +522,94 @@ function resolveIdentifier(
  * (z-order ◆15). Throws DataError on any data problem — the caller turns
  * the whole instance into a placeholder (⚑8). */
 export function evalFace(template: TemplateDecl, ctx: EvalContext): Shape[] {
-  const shapes: Shape[] = [];
-  for (const node of template.children) emitNode(node, ctx, shapes);
-  return shapes;
+  return withSession(ctx, () => {
+    const session = requireSession(ctx);
+    session.templateStack.push(template);
+    try {
+      const shapes: Shape[] = [];
+      emitChildren(template.children, ctx, shapes, 1);
+      return shapes;
+    } finally {
+      session.templateStack.pop();
+    }
+  });
 }
 
-function emitNode(node: TemplateNode, ctx: EvalContext, out: Shape[]): void {
-  if (node.kind === "Repeat") emitRepeat(node, ctx, out);
-  else out.push(evalElement(node, ctx));
+function emitChildren(
+  children: readonly TemplateNode[],
+  ctx: EvalContext,
+  out: Shape[],
+  depth: number,
+): void {
+  const session = requireSession(ctx);
+  const slots = new Map<LetNode, BindingSlot>();
+  for (const child of children) {
+    if (child.kind === "Let") slots.set(child, { state: "uninitialized" });
+  }
+  session.frames.push({ slots });
+  try {
+    for (const node of children) emitNode(node, ctx, out, depth);
+  } finally {
+    session.frames.pop();
+  }
 }
 
-function emitRepeat(node: RepeatNode, ctx: EvalContext, out: Shape[]): void {
+function emitNode(node: TemplateNode, ctx: EvalContext, out: Shape[], depth: number): void {
+  if (depth > TEMPLATE_NODE_DEPTH_CAP) return poisoned();
+  const session = requireSession(ctx);
+  if (session.callDepth > 0) chargeComposition(session);
+  switch (node.kind) {
+    case "Let":
+      return; // hoisted into the current activation frame; evaluated lazily
+    case "Repeat":
+      emitRepeat(node, ctx, out, depth);
+      return;
+    case "IfBlock":
+      emitIf(node, ctx, out, depth);
+      return;
+    case "TemplateCall":
+      emitTemplateCall(node, ctx, out, depth);
+      return;
+    case "Element":
+      out.push(evalElement(node, ctx));
+      return;
+  }
+}
+
+function emitIf(node: IfNode, ctx: EvalContext, out: Shape[], depth: number): void {
+  const condition = evalExpr(node.condition, ctx, null);
+  if (condition.kind !== "bool") return poisoned();
+  const children = condition.value ? node.thenChildren : node.elseBranch?.children;
+  if (children) emitChildren(children, ctx, out, depth + 1);
+}
+
+function emitTemplateCall(
+  node: TemplateCallNode,
+  ctx: EvalContext,
+  out: Shape[],
+  depth: number,
+): void {
+  const session = requireSession(ctx);
+  const template = ctx.card.templateCalls.get(node);
+  if (!template) return poisoned();
+  // The root call node itself is the first composition work item; nested
+  // calls were already charged by emitNode because callDepth > 0.
+  if (session.callDepth === 0) chargeComposition(session);
+  if (session.callDepth >= TEMPLATE_CALL_DEPTH_CAP) {
+    throw compositionLimitError();
+  }
+  if (session.templateStack.includes(template)) return poisoned(); // E009
+  session.callDepth++;
+  session.templateStack.push(template);
+  try {
+    emitChildren(template.children, ctx, out, depth + 1);
+  } finally {
+    session.templateStack.pop();
+    session.callDepth--;
+  }
+}
+
+function emitRepeat(node: RepeatNode, ctx: EvalContext, out: Shape[], depth: number): void {
   const v = evalExpr(node.count, ctx, null);
   if (v.kind !== "number") return poisoned();
   const n = v.value;
@@ -477,10 +629,50 @@ function emitRepeat(node: RepeatNode, ctx: EvalContext, out: Shape[]): void {
     }
     if (node.variable) ctx.repeatStack.push({ name: node.variable.name, value: i });
     try {
-      for (const child of node.children) emitNode(child, ctx, out);
+      // One activation per iteration: lets depending on [i] never reuse a
+      // sibling iteration's memoized value.
+      emitChildren(node.children, ctx, out, depth + 1);
     } finally {
       if (node.variable) ctx.repeatStack.pop();
     }
+  }
+}
+
+function chargeComposition(session: EvalSession): void {
+  session.compositionVisits++;
+  if (session.compositionVisits > TEMPLATE_COMPOSITION_NODE_CAP) {
+    throw compositionLimitError();
+  }
+}
+
+function compositionLimitError(): DataError {
+  return new DataError([
+    {
+      code: "D010",
+      message: `Template composition exceeded ${TEMPLATE_COMPOSITION_NODE_CAP.toLocaleString(
+        "en-US",
+      )} expanded nodes or ${TEMPLATE_CALL_DEPTH_CAP} active calls`,
+    },
+  ]);
+}
+
+function requireSession(ctx: EvalContext): EvalSession {
+  return ctx.session ?? poisoned();
+}
+
+function withSession<T>(ctx: EvalContext, run: () => T): T {
+  const previous = ctx.session;
+  ctx.session = {
+    globals: new Map(),
+    frames: [],
+    templateStack: [],
+    callDepth: 0,
+    compositionVisits: 0,
+  };
+  try {
+    return run();
+  } finally {
+    ctx.session = previous;
   }
 }
 
@@ -606,11 +798,13 @@ function evalElement(el: ElementNode, ctx: EvalContext): Shape {
         rotate: rotateOf(el, ctx),
       };
     }
-    case "Image":
+    case "Image": {
       // §3.3 (M2): src resolves like text (Text coercions apply); fit is
       // materialized to its default like style — the shape (and therefore
       // the contentHash) always carries concrete values. Whether the URL
       // loads is the RENDERER's state, never the model's (no D-code).
+      const imageColor = colorProp(el, ctx, "white");
+      const carriesTint = !["white", "#ffffff"].includes(imageColor.toLowerCase());
       return {
         kind: "image",
         x: numberProp(el, "x", ctx, ctx.xUnits),
@@ -618,10 +812,12 @@ function evalElement(el: ElementNode, ctx: EvalContext): Shape {
         width: imageDimProp(el, "width", ctx, ctx.xUnits),
         height: imageDimProp(el, "height", ctx, ctx.yUnits),
         src: toText(evalExpr(requireProp(el, "src"), ctx, null)),
+        ...(carriesTint ? { color: imageColor } : {}),
         fit: fitOf(el, ctx),
         pivot: pivotOf(el, ctx), // §3.4: applied to the RESOLVED box at render time
         rotate: rotateOf(el, ctx), // center is (x, y) — no load-time knowledge needed
       };
+    }
     case "Qr": {
       // §7.1a: data resolves like text (Text coercions apply, same as
       // Image's src); level materializes to its default like fit/style.
@@ -875,7 +1071,11 @@ function markerSegments(expr: Expr, resolved: string, ctx: EvalContext): MarkerS
       });
     }
     downgraded = true;
-    return { kind: "text", text: rawMarkerText(segment.icon) };
+    return {
+      kind: "text",
+      text: rawMarkerText(segment.icon),
+      ...(segment.color ? { color: segment.color } : {}),
+    };
   });
   // Fuse the downgraded raw text with its neighbors so wrapping sees
   // `x{BAD}y` as one word, never three break-separable tokens.

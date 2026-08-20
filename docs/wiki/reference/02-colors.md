@@ -36,6 +36,17 @@ color: if [current_suit] == Suit.Rock then grey
        else mediumpurple
 ```
 
+## Images and part of a text
+
+On an [`Image`](images.md), `color:` is a multiply tint rather than a flat fill:
+`white` (the default) leaves the art unchanged, white source pixels become the chosen
+color, and darker source detail stays darker. Source transparency is preserved.
+
+Inside `Text` or `TextBox`, nested `{color:red}…{/color}` tags can override the
+element's whole-text `color:` for selected words and inline icons without affecting
+wrapping. See [Scoped colors](text.md#scoped-colors) for the syntax and its raw-text
+failure behavior.
+
 ## Names only mean colors in color positions
 
 A bare word is read against the type expected in that position. In a `color:` property

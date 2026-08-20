@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { lex } from "../lexer";
+import { KEYWORDS, lex } from "../lexer";
 import type { Token } from "../lexer";
 
 const kinds = (source: string): string[] => lex(source).tokens.map((t) => t.kind);
@@ -9,6 +9,24 @@ const firstString = (source: string): Token & { kind: "string" } => {
   if (!t || t.kind !== "string") throw new Error("no string token");
   return t;
 };
+
+describe("composition words stay contextual", () => {
+  it("does not globally reserve let, If, or Else", () => {
+    expect(KEYWORDS.has("let")).toBe(false);
+    expect(KEYWORDS.has("If")).toBe(false);
+    expect(KEYWORDS.has("Else")).toBe(false);
+    expect(
+      lex("let If Else").tokens
+        .filter((token) => token.kind !== "newline" && token.kind !== "eof")
+        .map((token) => token.kind),
+    ).toEqual(["identifier", "identifier", "identifier"]);
+  });
+
+  it("keeps lowercase expression else reserved for targeted parser recovery", () => {
+    const token = lex("else:").tokens[0];
+    expect(token).toMatchObject({ kind: "keyword", word: "else" });
+  });
+});
 
 describe("string literals and interpolation (§3.5 ◆)", () => {
   it('lexes "Cost: [cost]" into text + ref parts with sub-ranges', () => {

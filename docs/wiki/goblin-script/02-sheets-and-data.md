@@ -63,9 +63,11 @@ makes it unambiguous — comparing against an enum-typed reference, for instance
 Inside a template, `[name]` is looked up in this order, innermost first:
 
 1. the nearest enclosing **`Repeat` variable**,
+   together with local **`let` values**, nearest scope first,
 2. the Card's **`loop` variables**,
 3. the bound **sheet's columns**,
-4. the built-in **`[row]`** and **`[card]`** position bindings (below).
+4. global **`let` values**,
+5. the built-in **`[row]`** and **`[card]`** position bindings (below).
 
 ```goblin
 Card: Monster
@@ -79,7 +81,8 @@ Template: MonsterFront
       x: 1.5 + [i] * 2
 ```
 
-Templates are checked **per Card that uses them**, so a template referencing
+Templates are checked **per Card that reaches them**, including through Template
+calls, so a template referencing
 `[health]` is valid when used by a Card whose sheet has a `health` column, and
 squiggled when used by one that doesn't. A shadowed name (a `Repeat` variable with the
 same name as a column) still works, innermost-first, but warns.

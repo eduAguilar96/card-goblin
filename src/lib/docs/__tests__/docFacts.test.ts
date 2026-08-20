@@ -172,7 +172,7 @@ const NUMERIC_CLAIMS: {
   },
   {
     label: "Repeat expansion cap",
-    patterns: [/(\d[\d,]*)\s+drawn (?:copies|shapes)/g],
+    patterns: [/(\d[\d,]*)\s+Repeat (?:expansions|iterations) per card/g],
     expected: REPEAT_CAP,
   },
   {
@@ -248,6 +248,28 @@ describe("numeric claims match their constants", () => {
       }
     });
   }
+});
+
+describe("generation-limit prose distinguishes placeholder from truncation", () => {
+  const repeatPages = [
+    pageText("templates-and-shapes"),
+    pageText("cards-and-generation"),
+    pageText("limits"),
+  ];
+
+  it("describes a Repeat-cap breach as D004 plus an affected-card placeholder", () => {
+    for (const text of repeatPages) {
+      expect(text).toMatch(/D004/);
+      expect(text).toMatch(/affected card[^.]*placeholder|affected card becomes an error\s+placeholder/i);
+    }
+  });
+
+  it("reserves truncation for the 2,000-card D007 cap", () => {
+    for (const slug of ["cards-and-generation", "limits"]) {
+      const text = pageText(slug);
+      expect(text).toMatch(/D007[^.]*truncat/i);
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------

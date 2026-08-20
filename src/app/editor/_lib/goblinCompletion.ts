@@ -153,6 +153,9 @@ export type SuggestionKind =
 export interface CompletionSuggestion {
   label: string;
   insertText: string;
+  /** Monaco interprets `insertText` as a snippet when true. Kept as a pure
+   * boolean here so the completion engine remains independent of Monaco. */
+  snippet?: boolean;
   kind: SuggestionKind;
   detail?: string;
   /** Sort tier: 0 context-primary · 1 secondary (enum names, unique bare
@@ -178,7 +181,8 @@ export interface CompletionResult {
 const EXPRESSION_KEYWORDS = ["if", "then", "else", "and", "or", "not"] as const;
 
 type ElementKind = "Rectangle" | "Text" | "TextBox" | "Icon" | "Image" | "Qr";
-type BlockKind = ElementKind | "Repeat" | "Card" | "Template" | "Sheet" | "Enum";
+type StructuralKind = "Template" | "Repeat" | "If" | "Else";
+type BlockKind = ElementKind | StructuralKind | "Card" | "Sheet" | "Enum";
 
 /** §3.3 property tables — mirrors check.ts's private ELEMENT_SPECS (pinned by
  * a compiler-probe test). Order here is the suggestion order. */
@@ -247,6 +251,7 @@ const ELEMENT_KEYS: Record<ElementKind, { key: string; detail: string }[]> = {
     { key: "height", detail: "Number — units (or auto)" },
     { key: "src", detail: "Text — image URL" },
     { key: "fit", detail: `${IMAGE_FITS.join(" | ")} (optional, default ${DEFAULT_IMAGE_FIT})` },
+    { key: "color", detail: "Color multiplier (optional, default white / unchanged)" },
     PIVOT_KEY,
     ROTATE_KEY,
   ],
@@ -283,9 +288,10 @@ const ELEMENT_OPENERS: { key: string; detail: string }[] = [
   { key: "Text", detail: "x y size text (color pivot)" },
   { key: "TextBox", detail: "x y width height text size (color align line_height overflow)" },
   { key: "Icon", detail: "x y size code (color pivot)" },
-  { key: "Image", detail: "x y width height src (fit)" },
+  { key: "Image", detail: "x y width height src (fit color pivot rotate)" },
   { key: "Qr", detail: "x y size data (color background level pivot)" },
   { key: "Repeat", detail: "<count expr> as <variable>" },
+  { key: "If", detail: "<Bool expr> — draw only the selected branch" },
 ];
 
 const TOP_LEVEL_OPENERS: { key: string; detail: string }[] = [
@@ -296,7 +302,7 @@ const TOP_LEVEL_OPENERS: { key: string; detail: string }[] = [
 ];
 
 const BLOCK_HEADER_RE =
-  /^(Enum|Sheet|Template|Card|Rectangle|TextBox|Text|Icon|Image|Qr|Repeat|Front|Back)[ \t]*:[ \t]*(.*)$/;
+  /^(Enum|Sheet|Template|Card|Rectangle|TextBox|Text|Icon|Image|Qr|Repeat|If|Else|Front|Back)[ \t]*:[ \t]*(.*)$/;
 const WORD_CHAR = /[A-Za-z0-9_]/;
 
 // ---------------------------------------------------------------------------
@@ -366,6 +372,8 @@ interface Ancestors {
   elementKind: ElementKind | null;
   /** `Repeat … as v` variables in scope, innermost first. */
   repeatVars: string[];
+  /** Lexical node frames, innermost first. Lets are hoisted within each. */
+  lexicalFrames: { kind: StructuralKind; line: number; repeatVar: string | null }[];
   /** Set when the cursor hangs below a property line (value continuation). */
   continuationKey: string | null;
 }
@@ -385,6 +393,7 @@ function scanAncestors(lines: string[], lineIndex: number, startIndent: number):
     topLine: -1,
     elementKind: null,
     repeatVars: [],
+    lexicalFrames: [],
     continuationKey: null,
   };
   let minIndent = startIndent;
@@ -405,6 +414,11 @@ function scanAncestors(lines: string[], lineIndex: number, startIndent: number):
       if (kind === "Repeat") {
         const asMatch = /\bas[ \t]+([A-Za-z_][A-Za-z0-9_]*)/.exec(header[2]);
         if (asMatch) out.repeatVars.push(asMatch[1]);
+        out.lexicalFrames.push({ kind, line: i, repeatVar: asMatch?.[1] ?? null });
+        continue;
+      }
+      if (kind === "If" || kind === "Else") {
+        out.lexicalFrames.push({ kind, line: i, repeatVar: null });
         continue;
       }
       if (
@@ -423,11 +437,18 @@ function scanAncestors(lines: string[], lineIndex: number, startIndent: number):
       out.topLine = i;
       const nameMatch = /^([A-Za-z_][A-Za-z0-9_]*)/.exec(header[2]);
       out.topName = nameMatch ? nameMatch[1] : null;
+      if (kind === "Template") {
+        out.lexicalFrames.push({ kind, line: i, repeatVar: null });
+      }
       break;
     }
     // Property-ish line (lowercase key, incl. `column name: …`): the cursor is
     // in its value continuation ONLY while no block header sits between them.
+    const letDecl = /^let[ \t]+[A-Za-z][A-Za-z0-9_]*[ \t]*:/.test(body);
     const prop = /^(?:column[ \t]+)?([a-z_][A-Za-z0-9_]*)[ \t]*:/.exec(body);
+    if (letDecl && !sawHeader && out.continuationKey === null) {
+      out.continuationKey = "let";
+    }
     if (prop && !sawHeader && out.continuationKey === null) {
       out.continuationKey = prop[1];
     }
@@ -464,8 +485,55 @@ function scanCardBlock(lines: string[], headerLine: number): CardScope {
 /** All Card blocks whose Front:/Back: reference `templateName` (whole-document
  * textual scan — templates are checked per using Card, §3.6, and completions
  * follow the same rule). */
+function scanDeclaredTemplates(lines: string[]): string[] {
+  const out: string[] = [];
+  for (const line of lines) {
+    if (indentOf(line) !== 0) continue;
+    const match = /^Template[ \t]*:[ \t]*([A-Za-z_][A-Za-z0-9_]*)/.exec(line.trim());
+    if (match && !out.includes(match[1])) out.push(match[1]);
+  }
+  return out;
+}
+
+/** Textual Template call graph. A lowercase `name:` at node indentation is a
+ * call, while the same spelling below an element remains a property. */
+function scanTemplateCallGraph(lines: string[]): Map<string, Set<string>> {
+  const graph = new Map<string, Set<string>>();
+  for (let i = 0; i < lines.length; i++) {
+    const raw = lines[i];
+    if (isBlankOrComment(raw)) continue;
+    const indent = indentOf(raw);
+    const call = /^([A-Za-z][A-Za-z0-9_]*)[ \t]*:[ \t]*(?:#.*)?$/.exec(raw.trim());
+    if (!call || indent === 0) continue;
+    const ancestors = scanAncestors(lines, i, indent);
+    if (ancestors.topKind !== "Template" || !ancestors.topName) continue;
+    if (!["Template", "Repeat", "If", "Else"].includes(ancestors.innermost ?? "")) continue;
+    const name = call[1];
+    if (["Rectangle", "Text", "TextBox", "Icon", "Image", "Qr", "Repeat", "If", "Else"].includes(name)) {
+      continue;
+    }
+    const calls = graph.get(ancestors.topName) ?? new Set<string>();
+    calls.add(name);
+    graph.set(ancestors.topName, calls);
+  }
+  return graph;
+}
+
 function scanUsingCards(lines: string[], templateName: string): CardScope[] {
   const scopes: CardScope[] = [];
+  const graph = scanTemplateCallGraph(lines);
+  const reaches = (root: string): boolean => {
+    const pending = [root];
+    const seen = new Set<string>();
+    while (pending.length > 0) {
+      const name = pending.pop()!;
+      if (name === templateName) return true;
+      if (seen.has(name)) continue;
+      seen.add(name);
+      for (const called of graph.get(name) ?? []) pending.push(called);
+    }
+    return false;
+  };
   for (let i = 0; i < lines.length; i++) {
     if (indentOf(lines[i]) !== 0) continue;
     if (!/^Card[ \t]*:/.test(lines[i].trim())) continue;
@@ -475,9 +543,20 @@ function scanUsingCards(lines: string[], templateName: string): CardScope[] {
       if (isBlankOrComment(raw)) continue;
       if (indentOf(raw) === 0) break;
       const face = /^(?:Front|Back)[ \t]*:[ \t]*([A-Za-z_][A-Za-z0-9_]*)/.exec(raw.trim());
-      if (face && face[1] === templateName) uses = true;
+      if (face && reaches(face[1])) uses = true;
     }
     if (uses) scopes.push(scanCardBlock(lines, i));
+  }
+  return scopes;
+}
+
+/** Every textual Card context. Global lets are checked per reachable Card and
+ * can legally reference that Card's loop variables and sheet columns. */
+function scanAllCards(lines: string[]): CardScope[] {
+  const scopes: CardScope[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (indentOf(lines[i]) !== 0 || !/^Card[ \t]*:/.test(lines[i].trim())) continue;
+    scopes.push(scanCardBlock(lines, i));
   }
   return scopes;
 }
@@ -520,21 +599,61 @@ function keySuggestions(
  * vars, plus enclosing Repeat vars. `certain` is false when the scan could
  * not place the cursor — brackets then union ALL sheets' columns. */
 interface RefScope {
+  lexical: { name: string; detail: string }[];
   columns: SnapshotColumn[];
   columnSheets: Map<string, string>; // column name → owning sheet (detail text)
   loopVars: { name: string; enumName: string }[];
   repeatVars: string[];
+  /** Global initializers resolve globals before ambient sheet columns. */
+  globalsBeforeColumns: boolean;
   certain: boolean;
+}
+
+function scanDirectLets(lines: string[], headerLine: number): string[] {
+  const headerIndent = indentOf(lines[headerLine]);
+  let childIndent = Number.POSITIVE_INFINITY;
+  let end = lines.length;
+  for (let i = headerLine + 1; i < lines.length; i++) {
+    if (isBlankOrComment(lines[i])) continue;
+    const indent = indentOf(lines[i]);
+    if (indent <= headerIndent) {
+      end = i;
+      break;
+    }
+    childIndent = Math.min(childIndent, indent);
+  }
+  if (!Number.isFinite(childIndent)) return [];
+  const names: string[] = [];
+  for (let i = headerLine + 1; i < end; i++) {
+    if (indentOf(lines[i]) !== childIndent) continue;
+    const match = /^let[ \t]+([A-Za-z][A-Za-z0-9_]*)[ \t]*:/.exec(lines[i].trim());
+    if (match && !names.includes(match[1])) names.push(match[1]);
+  }
+  return names;
+}
+
+function scanGlobalLets(lines: string[]): string[] {
+  const names: string[] = [];
+  for (const line of lines) {
+    if (indentOf(line) !== 0) continue;
+    const match = /^let[ \t]+([A-Za-z][A-Za-z0-9_]*)[ \t]*:/.exec(line.trim());
+    if (match && !names.includes(match[1])) names.push(match[1]);
+  }
+  return names;
 }
 
 function resolveRefScope(
   lines: string[],
   ancestors: Ancestors,
   snapshot: CompletionSnapshot,
+  globalInitializer = false,
 ): RefScope {
   const scopes: CardScope[] = [];
   let certain = false;
-  if (ancestors.topKind === "Card" && ancestors.topLine >= 0) {
+  if (globalInitializer) {
+    scopes.push(...scanAllCards(lines));
+    certain = scopes.length > 0;
+  } else if (ancestors.topKind === "Card" && ancestors.topLine >= 0) {
     scopes.push(scanCardBlock(lines, ancestors.topLine));
     certain = true;
   } else if (ancestors.topKind === "Template" && ancestors.topName) {
@@ -574,12 +693,45 @@ function resolveRefScope(
       if (!loopVars.some((l) => l.name === v.name)) loopVars.push(v);
     }
   }
-  return { columns, columnSheets, loopVars, repeatVars: ancestors.repeatVars, certain };
+  const lexical: { name: string; detail: string }[] = [];
+  for (const frame of ancestors.lexicalFrames) {
+    for (const name of scanDirectLets(lines, frame.line)) {
+      lexical.push({ name, detail: "local let — immutable, type inferred" });
+    }
+    if (frame.repeatVar) {
+      lexical.push({ name: frame.repeatVar, detail: "repeat index (0-based)" });
+    }
+  }
+  for (const name of scanGlobalLets(lines)) {
+    lexical.push({ name, detail: "global let — immutable, type inferred" });
+  }
+  return {
+    lexical,
+    columns,
+    columnSheets,
+    loopVars,
+    repeatVars: ancestors.repeatVars,
+    globalsBeforeColumns: globalInitializer,
+    certain,
+  };
 }
 
 function bracketSuggestions(scope: RefScope): CompletionSuggestion[] {
   const out: CompletionSuggestion[] = [];
+  const globals: CompletionSuggestion[] = [];
+  for (const binding of scope.lexical) {
+    const suggestion = {
+      label: binding.name,
+      insertText: binding.name,
+      kind: "variable" as const,
+      detail: binding.detail,
+      group: 0 as const,
+    };
+    if (binding.detail.startsWith("global")) globals.push(suggestion);
+    else out.push(suggestion);
+  }
   for (const name of scope.repeatVars) {
+    if (out.some((s) => s.label === name)) continue;
     out.push({
       label: name,
       insertText: name,
@@ -597,6 +749,7 @@ function bracketSuggestions(scope: RefScope): CompletionSuggestion[] {
       group: 0,
     });
   }
+  if (scope.globalsBeforeColumns) out.push(...globals);
   for (const col of scope.columns) {
     out.push({
       label: col.name,
@@ -606,6 +759,10 @@ function bracketSuggestions(scope: RefScope): CompletionSuggestion[] {
       group: 0,
     });
   }
+  // Ordinary expressions preserve compatibility by ranking columns before
+  // globals. Inside a global initializer the checker deliberately reverses
+  // those two so global dependency graphs are stable.
+  if (!scope.globalsBeforeColumns) out.push(...globals);
   // Built-in position bindings (§3.6, ◆42): offered LAST, after every real
   // column — matching their resolution order, and (since sortText combines
   // group with array position, goblinLanguage.ts) sorting after them in the
@@ -729,6 +886,20 @@ function iconCodeSuggestions(): CompletionSuggestion[] {
   return out;
 }
 
+/** A paired resolved-text color scope. The opening `{` is already present
+ * when this suggestion is offered; the snippet supplies both tags and puts
+ * the two tab stops on the color and content. */
+function colorScopeSuggestion(): CompletionSuggestion {
+  return {
+    label: "color scope",
+    insertText: "color:${1:red}}${2:text}{/color}",
+    snippet: true,
+    kind: "color",
+    detail: "{color:red}text{/color} — nested; does not affect wrapping",
+    group: 0,
+  };
+}
+
 function geometrySuggestions(includeMiddle: boolean): CompletionSuggestion[] {
   const out: CompletionSuggestion[] = [
     { label: "full", insertText: "full", kind: "value", detail: "the axis's unit count", group: 0 },
@@ -740,6 +911,59 @@ function geometrySuggestions(includeMiddle: boolean): CompletionSuggestion[] {
       insertText: "middle",
       kind: "value",
       detail: "horizontally centered (x of Text/Icon only)",
+      group: 0,
+    });
+  }
+  return out;
+}
+
+function previousSiblingIsIf(lines: string[], lineIndex: number, indent: number): boolean {
+  for (let i = lineIndex - 1; i >= 0; i--) {
+    if (isBlankOrComment(lines[i])) continue;
+    const siblingIndent = indentOf(lines[i]);
+    if (siblingIndent > indent) continue;
+    return siblingIndent === indent && /^If[ \t]*:/.test(lines[i].trim());
+  }
+  return false;
+}
+
+function nodeSuggestions(
+  lines: string[],
+  lineIndex: number,
+  indent: number,
+  colonFollows: boolean,
+  templates: string[],
+  enclosingTemplate: string | null,
+): CompletionSuggestion[] {
+  const out = keySuggestions(ELEMENT_OPENERS, colonFollows, true);
+  out.push({
+    label: "let",
+    insertText: "let ",
+    kind: "keyword",
+    detail: "let <name>: <expression> — immutable local binding",
+    group: 0,
+  });
+  if (previousSiblingIsIf(lines, lineIndex, indent)) {
+    out.push({
+      label: "Else",
+      insertText: colonFollows ? "Else" : "Else:",
+      kind: "keyword",
+      detail: "optional branch paired with the preceding If",
+      group: 0,
+    });
+  }
+  for (const name of templates) {
+    // `If:` and `Else:` are structural in node position. Templates carrying
+    // those names remain valid direct Front:/Back: values, but have no nested
+    // shorthand spelling.
+    if (name === "If" || name === "Else" || name === enclosingTemplate) continue;
+    out.push({
+      // Keep the contextual binding keyword and a Template named `let`
+      // independently selectable after label-based deduplication.
+      label: name === "let" ? "let:" : name,
+      insertText: colonFollows ? name : `${name}:`,
+      kind: "template",
+      detail: "Template call — no arguments; does not capture caller locals",
       group: 0,
     });
   }
@@ -796,28 +1020,58 @@ export function computeCompletions(
 
   const indent = indentOf(line);
   const ancestors = scanAncestors(lines, lineIndex, indent);
+  const currentTemplates = [
+    ...snapshot.templates,
+    ...scanDeclaredTemplates(lines).filter((name) => !snapshot.templates.includes(name)),
+  ];
+  const currentSnapshot = { ...snapshot, templates: currentTemplates };
+  const globalLetContext =
+    (indent === 0 && /^[ \t]*let[ \t]+[A-Za-z][A-Za-z0-9_]*[ \t]*:/.test(line)) ||
+    (ancestors.topKind === null && ancestors.continuationKey === "let");
 
   // -- inside [brackets] — data refs, in or out of strings (◆30) ------------
   // `[[` is the literal-`[` escape (§3.5): pairs cancel, so only an ODD run
   // of `[` leaves a real ref opener ("a [[[cost]" is escape + ref).
   const bracket = /(\[+)[A-Za-z0-9_]*$/.exec(before);
   if (bracket && bracket[1].length % 2 === 1) {
-    const scope = resolveRefScope(lines, ancestors, snapshot);
+    const scope = resolveRefScope(lines, ancestors, currentSnapshot, globalLetContext);
     return result(bracketSuggestions(scope));
   }
 
   // -- inside a string ------------------------------------------------------
   // Current line's `key:` (property or block header), when the cursor is past
   // the colon.
+  const letLine = /^[ \t]*let[ \t]+[A-Za-z][A-Za-z0-9_]*[ \t]*:/.exec(line);
   const propLine = /^[ \t]*(?:column[ \t]+([A-Za-z_][A-Za-z0-9_]*)|([A-Za-z_][A-Za-z0-9_]*))[ \t]*:/.exec(
     line,
   );
-  const colonIndex = propLine ? propLine[0].length : -1;
+  const colonIndex = letLine ? letLine[0].length : propLine ? propLine[0].length : -1;
   const currentKey =
-    propLine && col >= colonIndex ? (propLine[1] !== undefined ? "column" : propLine[2]) : null;
+    col >= colonIndex && colonIndex >= 0
+      ? letLine
+        ? "let"
+        : propLine![1] !== undefined
+          ? "column"
+          : propLine![2]
+      : null;
 
   if (state.inString) {
     const key = currentKey ?? ancestors.continuationKey;
+    if (key === "text") {
+      // Resolved-text color scopes are their own tiny language inside text:
+      // after the opening brace offer the paired scope, and after `color:`
+      // reuse the exact Color vocabulary used by element properties. The
+      // bracket-ref branch above still wins, including inside these scopes.
+      // An escaped `{{` must remain literal and therefore gets no scope menu.
+      const stringBefore = line.slice(state.stringOpenCol, col);
+      const braceRun = /\{+$/.exec(stringBefore)?.[0] ?? "";
+      if (braceRun.length % 2 === 1) {
+        return result([colorScopeSuggestion()]);
+      }
+      if (/(?:^|[^\{])\{color:[A-Za-z0-9_]*$/.test(stringBefore)) {
+        return result(colorSuggestions());
+      }
+    }
     if (key === "code") {
       // Replace the whole string content: codes may contain spaces. On an
       // unclosed string the range runs to end of line, minus any CRLF `\r`
@@ -836,7 +1090,7 @@ export function computeCompletions(
   // -- Enum.| case qualification (trigger ".") ------------------------------
   const dotted = /([A-Za-z_][A-Za-z0-9_]*)\.[A-Za-z0-9_]*$/.exec(before);
   if (dotted) {
-    const en = snapshot.enums.find((e) => e.name === dotted[1]);
+    const en = currentSnapshot.enums.find((e) => e.name === dotted[1]);
     if (!en) return empty();
     return result(
       en.cases.map((c) => ({
@@ -849,25 +1103,52 @@ export function computeCompletions(
     );
   }
 
-  const scope = () => resolveRefScope(lines, ancestors, snapshot);
+  const scope = () => resolveRefScope(lines, ancestors, currentSnapshot, globalLetContext);
   const beforeWord = before.slice(0, wordStart);
 
   // -- value position on the current line -----------------------------------
   if (currentKey !== null) {
+    if (
+      !["let", "If", "Else", "Repeat"].includes(currentKey) &&
+      (ancestors.innermost === "Template" ||
+        ancestors.innermost === "Repeat" ||
+        ancestors.innermost === "If" ||
+        ancestors.innermost === "Else")
+    ) {
+      // Any otherwise-unclaimed identifier header in template-node position
+      // is a no-argument Template call, including lowercase names.
+      return empty();
+    }
     return result(
-      valueSuggestions(currentKey, line.slice(colonIndex, col), beforeWord, ancestors, scope, snapshot),
+      valueSuggestions(
+        currentKey,
+        line.slice(colonIndex, col),
+        beforeWord,
+        ancestors,
+        scope,
+        currentSnapshot,
+      ),
     );
   }
 
   // -- value continuation (deeper-indented expression lines, ◆23†) ----------
   if (ancestors.continuationKey !== null) {
     return result(
-      valueSuggestions(ancestors.continuationKey, before, beforeWord, ancestors, scope, snapshot),
+      valueSuggestions(
+        ancestors.continuationKey,
+        before,
+        beforeWord,
+        ancestors,
+        scope,
+        currentSnapshot,
+      ),
     );
   }
 
   // -- property-key position (start of line, only indent + partial word) ----
   if (/^[ \t]*[A-Za-z_]?[A-Za-z0-9_]*$/.test(before)) {
+    // `let <name>` is a naming position, not a keyword/value position.
+    if (/^[ \t]*let(?:[ \t]+[A-Za-z][A-Za-z0-9_]*)?[ \t]*$/.test(before)) return empty();
     const colonFollows = /^[ \t]*:/.test(line.slice(wordEnd));
     switch (ancestors.innermost) {
       case "Rectangle":
@@ -889,7 +1170,18 @@ export function computeCompletions(
       }
       case "Template":
       case "Repeat":
-        return result(keySuggestions(ELEMENT_OPENERS, colonFollows, true));
+      case "If":
+      case "Else":
+        return result(
+          nodeSuggestions(
+            lines,
+            lineIndex,
+            indent,
+            colonFollows,
+            currentTemplates,
+            ancestors.topKind === "Template" ? ancestors.topName : null,
+          ),
+        );
       case "Sheet":
         return result([
           {
@@ -905,7 +1197,18 @@ export function computeCompletions(
           { label: "case", insertText: "case ", kind: "property", detail: "case <Name>", group: 0 },
         ]);
       case null:
-        if (indent === 0) return result(keySuggestions(TOP_LEVEL_OPENERS, colonFollows, true));
+        if (indent === 0) {
+          return result([
+            ...keySuggestions(TOP_LEVEL_OPENERS, colonFollows, true),
+            {
+              label: "let",
+              insertText: "let ",
+              kind: "keyword",
+              detail: "let <name>: <expression> — immutable global binding",
+              group: 0,
+            },
+          ]);
+        }
         return empty(); // unplaceable mid-indent position — silence beats noise
     }
   }
@@ -948,6 +1251,12 @@ function valueSuggestions(
       if (/\bas[ \t]+[A-Za-z0-9_]*$/.test(afterColon) || /\bas[ \t]*$/.test(afterColon)) {
         return NO_SUGGESTIONS;
       }
+      return expressionExtras(beforeWord, scope(), snapshot);
+    case "If":
+      return expressionExtras(beforeWord, scope(), snapshot);
+    case "Else":
+      return NO_SUGGESTIONS;
+    case "let":
       return expressionExtras(beforeWord, scope(), snapshot);
     case "Front":
     case "Back":

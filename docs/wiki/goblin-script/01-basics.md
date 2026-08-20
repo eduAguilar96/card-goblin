@@ -7,9 +7,9 @@ summary: Indentation, comments, names, labels — the shape of every Goblin file
 # Basics & syntax
 
 Goblin script is an outline language: what's indented under something belongs to it.
-There are only four kinds of top-level block — `Enum`, `Sheet`, `Template`, and
-`Card` — and they can appear in any order (a `Card` may refer to a `Template` declared
-further down).
+There are four kinds of named top-level block — `Enum`, `Sheet`, `Template`, and
+`Card` — plus global `let` values. They can appear in any order (forward references
+work).
 
 ## Indentation is structure
 
@@ -51,6 +51,11 @@ are ordinary identifiers — so `column count: Number` is perfectly legal, and `
 reads that column. Meaning comes from position, and `[brackets]` always mean a data
 reference.
 
+Three newer forms are contextual, not reserved names: `let` is special only in
+`let name: value`, and capitalized `If:`/`Else:` are special only where a Template
+node can appear. `column let: Text`, `Template: If`, and `Front: If` are therefore
+still legal.
+
 ## Labels
 
 The quoted string after a shape is an optional **label**, purely for your own
@@ -72,9 +77,9 @@ color: if [current_suit] == Suit.Rock then grey
        else mediumpurple
 ```
 
-This works for **property lines only** (a lowercase key followed by `:`). Block
-headers like `Repeat:` never continue — their indented lines are their children, so a
-`Repeat:` count has to fit on one line.
+This works for property lines and `let name:` initializers. Block headers like
+`Repeat:` and `If:` never continue — their indented lines are children, so their
+expressions have to fit on one line.
 
 ## Data references
 

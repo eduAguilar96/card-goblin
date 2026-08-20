@@ -31,6 +31,38 @@ color: if [current_suit] == Suit.Rock then grey
 Chain as many `else if`s as you like. Both branches must produce the same type — you
 can't return a color from one and a number from the other.
 
+To conditionally draw whole shapes, use capitalized structural `If:`/`Else:` instead:
+
+```goblin
+If: [is_rare]
+  Text:
+    text: "Rare"
+Else:
+  CommonBadge:
+```
+
+`Else:` is optional and must immediately follow its `If:` at the same indentation.
+Both branches are checked, but only the selected branch runs; the other produces no
+shapes or data errors. Put a nested `If:` inside `Else:` for else-if.
+
+## Named values with `let`
+
+```goblin
+let accent: #cc0000
+
+Template: Front
+  let title_size: 3.5
+  Text:
+    color: [accent]
+    size: [title_size]
+```
+
+A `let` is immutable and type-inferred. Global lets can use the current Card's data;
+local lets can use their lexical parents. Same-block lets may refer forward. Values
+are lazy, so an unused let and a let in an unselected branch do not read cells or
+produce data errors. Use a self-typing color (`#RRGGBB`) or qualified enum case
+(`Suit.Rock`) when no surrounding property supplies an expected type.
+
 ## Types
 
 There are `Number`, `Text`, `Bool`, `Color`, and one type per Enum you declare.

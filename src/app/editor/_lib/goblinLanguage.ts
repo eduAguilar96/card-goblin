@@ -8,7 +8,8 @@
  * - Strings are single-line with `[ref]` interpolation highlighted inside
  *   (`[[` is the literal-`[` escape, §3.5; `\n` and `\\` are the M3 §3.1
  *   escapes — anything else after `\` paints invalid, matching E001).
- * - Block openers (`Enum: … Repeat: Front: Back:`) and expression keywords
+ * - Block openers (`Enum: … Repeat: Front: Back:`), contextual node openers
+ *   (`If:`/`Else:`), contextual `let name:`, and expression keywords
  *   (`if then else and or not as case column`) are keywords; lowercase
  *   `key:` lines are property keys; other capitalized identifiers (enum
  *   names, templates, `Text`/`Number` column types, `Enum.Case` members)
@@ -17,7 +18,7 @@
 
 import type { Monaco } from "@monaco-editor/react";
 import type { languages } from "monaco-editor";
-import type { Bindings } from "@/lib/lang";
+import { CSS_COLOR_NAMES, type Bindings } from "@/lib/lang";
 import type { SchemaSnapshot } from "@/app/editor/_store/editorStore";
 import {
   buildCompletionSnapshot,
@@ -45,6 +46,25 @@ const BLOCK_OPENERS = [
 
 const EXPR_KEYWORDS = ["if", "then", "else", "and", "or", "not", "as", "case", "column"];
 
+/** Exported as pure regexes so contextual-keyword compatibility stays pinned
+ * without needing Monaco in the language tests. */
+export const GOBLIN_CONTEXTUAL_LET_RE = /^(\s*)(let)(?=\s+[A-Za-z][A-Za-z0-9_]*\s*:)/;
+export const GOBLIN_CONTEXTUAL_BRANCH_RE = /^(\s*)(If|Else)(?=\s*:)/;
+/** The open-tag highlighter uses the compiler's ACTUAL named-color
+ * vocabulary, case-insensitively, rather than painting any identifier as a
+ * valid color. Scope pairing is deliberately not claimed here: Monarch
+ * tokenizes one line lexically, so a recognized open or close tag highlights
+ * independently even when its partner is missing. The compiler remains the
+ * authority that makes an unbalanced scope raw text. */
+const CSS_COLOR_SCOPE_ALTERNATION = [...CSS_COLOR_NAMES]
+  .sort((a, b) => b.length - a.length || a.localeCompare(b))
+  .join("|");
+export const GOBLIN_COLOR_SCOPE_OPEN_RE = new RegExp(
+  `\\{color:(?:#[0-9a-fA-F]{6}|${CSS_COLOR_SCOPE_ALTERNATION})\\}`,
+  "i",
+);
+export const GOBLIN_COLOR_SCOPE_CLOSE_RE = /\{\/color\}/;
+
 /** Extra fields (keyword lists) are referenced from `cases` via `@name`. */
 const monarchLanguage: languages.IMonarchLanguage = {
   defaultToken: "",
@@ -64,6 +84,14 @@ const monarchLanguage: languages.IMonarchLanguage = {
       // `[ref]` outside strings (◆30: brackets always mean data refs).
       [/\[[A-Za-z][A-Za-z0-9_]*\]/, "variable"],
       [/\d+(\.\d+)?/, "number"],
+      // Contextual forms: do not put these in the global keyword tables.
+      // That keeps `column let: Text`, `Template: If`, and `Front: Else`
+      // highlighted according to their actual positions.
+      [
+        GOBLIN_CONTEXTUAL_LET_RE,
+        ["white", "keyword"],
+      ],
+      [GOBLIN_CONTEXTUAL_BRANCH_RE, ["white", "keyword"]],
       // Capitalized word before ':' — block opener (or a stray block-ish word).
       [
         /[A-Z][A-Za-z0-9_]*(?=\s*:)/,
@@ -83,15 +111,19 @@ const monarchLanguage: languages.IMonarchLanguage = {
     ],
     string: [
       [/\[\[/, "string.escape"],
+      [/\{\{/, "string.escape"],
       // `\n` and `\\` are the only backslash escapes (§3.1 M3); any other
       // `\`-sequence is E001 in the lexer, painted invalid here to match.
       [/\\[n\\]/, "string.escape"],
       [/\\./, "string.invalid"],
       [/\\/, "string.invalid"],
       [/\[[A-Za-z][A-Za-z0-9_]*\]/, "variable"],
-      [/[^"[\\]+/, "string"],
+      [GOBLIN_COLOR_SCOPE_OPEN_RE, "tag"],
+      [GOBLIN_COLOR_SCOPE_CLOSE_RE, "tag"],
+      [/[^"[\\{]+/, "string"],
       [/"/, { token: "string.quote", bracket: "@close", next: "@pop" }],
       [/\[/, "string"],
+      [/\{/, "string"],
     ],
   },
 };
@@ -179,7 +211,7 @@ export function registerGoblinCompletions(
   if (completionsRegistered.has(monaco)) return;
   completionsRegistered.add(monaco);
   monaco.languages.registerCompletionItemProvider(GOBLIN_LANGUAGE_ID, {
-    triggerCharacters: ["[", ".", '"', ":"],
+    triggerCharacters: ["[", ".", '"', ":", "{"],
     provideCompletionItems(model, position) {
       const { bindings, schema } = getSource();
       const snapshot = buildCompletionSnapshot(bindings, schema);
@@ -208,6 +240,9 @@ export function registerGoblinCompletions(
           insertText: s.insertText,
           detail: s.detail,
           kind: monacoKind(monaco, s.kind),
+          ...(s.snippet
+            ? { insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet }
+            : {}),
           // Tier first, then the pure module's deliberate ordering.
           sortText: `${s.group}_${String(i).padStart(4, "0")}`,
           range: { insert, replace },

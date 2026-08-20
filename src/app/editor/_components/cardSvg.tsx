@@ -21,7 +21,9 @@
  */
 
 import {
+  Fragment,
   memo,
+  useId,
   useSyncExternalStore,
   type CSSProperties,
   type ReactElement,
@@ -234,11 +236,19 @@ export const ERROR_MESSAGE_MAX = 40;
 // Inline-icon runs (§3.3.2/§3.3.3, M4 — ◆44, §7.5)
 // ---------------------------------------------------------------------------
 
-/** True when any run is an inline icon — the gate between the legacy
- * single-`<text>` markup (kept byte-identical for icon-free content) and
- * the run-positioned markup below. */
+/** True when any run is an inline icon — only actual icon slots require the
+ * run-positioned layout path. Color-only boundaries stay native text flow. */
 function runsHaveIcons(runs: readonly TextRun[]): boolean {
   return runs.some((run) => run.kind === "icon");
+}
+
+/** Per-run color is additive; the compiler omits it for inherited color. */
+function runColor(run: TextRun): string | undefined {
+  return run.color;
+}
+
+function runsHaveColors(runs: readonly TextRun[]): boolean {
+  return runs.some((run) => runColor(run) !== undefined);
 }
 
 /** The concatenated text of icon-free runs — for marker-free content this
@@ -250,6 +260,19 @@ function runsText(runs: readonly TextRun[]): string {
     if (run.kind === "text") out += run.text;
   }
   return out;
+}
+
+/** Paint-only spans for an icon-free colored line. No x/y/xml:space: the
+ * browser advances adjacent text exactly as the legacy single text node did,
+ * and the parent text-anchor still centers/rights the actual rendered run. */
+function renderPaintTspans(runs: readonly TextRun[], keyPrefix: string): ReactNode[] {
+  return runs.map((run, i) =>
+    run.kind === "text" ? (
+      <tspan key={`${keyPrefix}${i}`} fill={runColor(run)}>
+        {run.text}
+      </tspan>
+    ) : null,
+  );
 }
 
 /**
@@ -276,9 +299,9 @@ export function textRunsWidth(
  * run already carries its own x). Exported for the markup tests. */
 export const ALIGN_FRACTION: Record<TextAnchor, number> = { left: 0, middle: 0.5, right: 1 };
 
-/** One line of runs → tspans (text and Dicier runs; asset runs draw as
- * `<image>` SIBLINGS — see renderRunAssetIcons). `startX` is the line's left
- * edge in card units; `emTop` its em-box top. Text sits on the chosen
+/** One icon-containing line → tspans (text and Dicier runs; asset runs draw
+ * as `<image>` SIBLINGS — see renderRunAssetIcons). `startX` is the line's
+ * left edge in card units; `emTop` its em-box top. Text sits on the chosen
  * font's baseline; a Dicier run sits on Dicier's OWN baseline (ICON_ASCENT —
  * the same em-box realization the Icon element uses), so its glyph fills
  * the §7.5 size×size slot. Dicier tspans inherit the surrounding `fill`
@@ -296,8 +319,18 @@ function renderRunTspans(
   const iconBaseline = emTop + ICON_ASCENT * size;
   return runs.map((run, i) => {
     if (run.kind === "text") {
+      // A color boundary between adjacent text runs is paint-only: letting
+      // the second tspan flow avoids turning the wrap engine's measurement
+      // safety margin into a visible gap. Re-anchor only at line start or
+      // after an icon slot, whose compiler-defined advance must be enforced.
+      const anchored = i === 0 || runs[i - 1]?.kind === "icon";
       return (
-        <tspan key={`${keyPrefix}${i}`} x={startX + run.x} y={baseline}>
+        <tspan
+          key={`${keyPrefix}${i}`}
+          x={anchored ? startX + run.x : undefined}
+          y={anchored ? baseline : undefined}
+          fill={runColor(run)}
+        >
           {run.text}
         </tspan>
       );
@@ -310,6 +343,7 @@ function renderRunTspans(
           y={iconBaseline}
           fontFamily={ICON_FONT_FAMILIES.flat_dark}
           style={ICON_STYLE}
+          fill={runColor(run)}
         >
           {run.icon.code}
         </tspan>
@@ -331,6 +365,36 @@ export const IMAGE_PRESERVE_ASPECT: Record<ImageFit, string> = {
   cover: "xMidYMid slice",
   stretch: "none",
 };
+
+/** White is the identity for multiplicative tinting. The compiler normally
+ * omits resolved white, but accepting both spellings here keeps hand-built
+ * RenderModels and tests on the byte-identical legacy image path too. */
+function effectiveImageColor(color: string | undefined): string | undefined {
+  return color === undefined || color.toLowerCase() === "white" || /^#ffffff$/i.test(color)
+    ? undefined
+    : color;
+}
+
+/** SVG filter shared by full Image shapes and inline asset runs. Arithmetic
+ * composition evaluates `SourceGraphic * tint` component-wise. The flood's
+ * alpha is 1, so source alpha is preserved; sRGB makes the channel math match
+ * the documented white-source recoloring contract in preview and PDF. */
+function imageColorFilter(id: string, color: string): ReactElement {
+  return (
+    <filter id={id} colorInterpolationFilters="sRGB">
+      <feFlood floodColor={color} floodOpacity={1} result="tint" />
+      <feComposite
+        in="SourceGraphic"
+        in2="tint"
+        operator="arithmetic"
+        k1={1}
+        k2={0}
+        k3={0}
+        k4={0}
+      />
+    </filter>
+  );
+}
 
 /** Intrinsic pixel size of loaded art — what `auto` dimensions resolve
  * against (§3.3: intrinsic size is LOAD-time knowledge, so the model carries
@@ -722,21 +786,41 @@ function renderImageTag(
   index: number,
   href: string,
   box: { width: number; height: number },
+  filterScope: string,
 ): ReactElement {
   // §3.4: the pivot offsets the RESOLVED box — with an `auto` dimension the
   // offset can only be known here, at render time, natural size in hand.
   const origin = pivotedBoxOrigin(shape, box);
+  const color = effectiveImageColor(shape.color);
+  if (color === undefined) {
+    return (
+      <image
+        key={index}
+        href={href}
+        x={origin.x}
+        y={origin.y}
+        width={box.width}
+        height={box.height}
+        preserveAspectRatio={IMAGE_PRESERVE_ASPECT[shape.fit]}
+        transform={rotationTransform(shape)}
+      />
+    );
+  }
+  const filterId = `${filterScope}-image-${index}`;
   return (
-    <image
-      key={index}
-      href={href}
-      x={origin.x}
-      y={origin.y}
-      width={box.width}
-      height={box.height}
-      preserveAspectRatio={IMAGE_PRESERVE_ASPECT[shape.fit]}
-      transform={rotationTransform(shape)}
-    />
+    <Fragment key={index}>
+      <defs>{imageColorFilter(filterId, color)}</defs>
+      <image
+        href={href}
+        x={origin.x}
+        y={origin.y}
+        width={box.width}
+        height={box.height}
+        preserveAspectRatio={IMAGE_PRESERVE_ASPECT[shape.fit]}
+        transform={rotationTransform(shape)}
+        filter={`url(#${filterId})`}
+      />
+    </Fragment>
   );
 }
 
@@ -746,14 +830,22 @@ function renderImageTag(
  * placeholder) once the probe settles. An `auto` dimension resolves against
  * the natural size the probe captured; until it settles (and on failure) the
  * placeholder box is square. */
-function LiveImage({ shape, index }: { shape: ImageShape; index: number }): ReactElement {
+function LiveImage({
+  shape,
+  index,
+  filterScope,
+}: {
+  shape: ImageShape;
+  index: number;
+  filterScope: string;
+}): ReactElement {
   const status = useSyncExternalStore(
     (onChange) => subscribeImageStatus(shape.src, onChange),
     () => imageStatusOf(shape.src),
     () => LOADING_STATUS,
   );
   if (status.state === "loaded") {
-    return renderImageTag(shape, index, status.href, resolveImageBox(shape, status));
+    return renderImageTag(shape, index, status.href, resolveImageBox(shape, status), filterScope);
   }
   return renderImagePlaceholder(
     shape,
@@ -781,17 +873,40 @@ interface InlineIconSlot {
 /** The art, letterboxed in the slot (§7.5: the compiler asserted a square
  * advance, so non-square art `meet`s inside it — the `contain` semantics of
  * IMAGE_PRESERVE_ASPECT, fixed here rather than configurable). */
-function renderInlineAssetImage(key: string, slot: InlineIconSlot, href: string): ReactElement {
+function renderInlineAssetImage(
+  key: string,
+  slot: InlineIconSlot,
+  href: string,
+  color: string | undefined,
+  filterId: string,
+): ReactElement {
+  const tint = effectiveImageColor(color);
+  if (tint === undefined) {
+    return (
+      <image
+        key={key}
+        href={href}
+        x={slot.x}
+        y={slot.y}
+        width={slot.size}
+        height={slot.size}
+        preserveAspectRatio="xMidYMid meet"
+      />
+    );
+  }
   return (
-    <image
-      key={key}
-      href={href}
-      x={slot.x}
-      y={slot.y}
-      width={slot.size}
-      height={slot.size}
-      preserveAspectRatio="xMidYMid meet"
-    />
+    <Fragment key={key}>
+      <defs>{imageColorFilter(filterId, tint)}</defs>
+      <image
+        href={href}
+        x={slot.x}
+        y={slot.y}
+        width={slot.size}
+        height={slot.size}
+        preserveAspectRatio="xMidYMid meet"
+        filter={`url(#${filterId})`}
+      />
+    </Fragment>
   );
 }
 
@@ -819,14 +934,22 @@ function renderInlineIconPlaceholder(
 /** Live slot (no ResolvedImages supplied): placeholder on SSR/static output,
  * real art swapped in once the shared asset resolution settles — LiveImage's
  * exact contract, on the slot's geometry. */
-function LiveInlineAssetIcon({ slot }: { slot: InlineIconSlot }): ReactElement {
+function LiveInlineAssetIcon({
+  slot,
+  color,
+  filterId,
+}: {
+  slot: InlineIconSlot;
+  color: string | undefined;
+  filterId: string;
+}): ReactElement {
   const status = useSyncExternalStore(
     (onChange) => subscribeImageStatus(slot.src, onChange),
     () => imageStatusOf(slot.src),
     () => LOADING_STATUS,
   );
   if (status.state === "loaded") {
-    return renderInlineAssetImage("", slot, status.href);
+    return renderInlineAssetImage("", slot, status.href, color, filterId);
   }
   return renderInlineIconPlaceholder("", slot, status.state === "failed" ? "failed" : "loading");
 }
@@ -844,6 +967,7 @@ function renderRunAssetIcons(
   startX: number,
   emTop: number,
   size: number,
+  filterScope: string,
   images?: ResolvedImages,
 ): ReactNode[] {
   const out: ReactNode[] = [];
@@ -852,15 +976,19 @@ function renderRunAssetIcons(
     const src = ASSET_SRC_SCHEME + run.icon.name;
     const slot: InlineIconSlot = { src, x: startX + run.x, y: emTop, size };
     const key = `${keyPrefix}${i}`;
+    const color = runColor(run);
+    const filterId = `${filterScope}-inline-${key}`;
     if (images) {
       const resolved = images.get(src);
       out.push(
         resolved
-          ? renderInlineAssetImage(key, slot, resolved.href)
+          ? renderInlineAssetImage(key, slot, resolved.href, color, filterId)
           : renderInlineIconPlaceholder(key, slot, "failed"),
       );
     } else {
-      out.push(<LiveInlineAssetIcon key={key} slot={slot} />);
+      out.push(
+        <LiveInlineAssetIcon key={key} slot={slot} color={color} filterId={filterId} />,
+      );
     }
   });
   return out;
@@ -979,7 +1107,12 @@ export function cardSvgPropsEqual(
 // Shape → SVG
 // ---------------------------------------------------------------------------
 
-function renderShape(shape: Shape, index: number, images?: ResolvedImages): ReactElement {
+function renderShape(
+  shape: Shape,
+  index: number,
+  filterScope: string,
+  images?: ResolvedImages,
+): ReactElement {
   switch (shape.kind) {
     case "image": {
       if (images) {
@@ -992,10 +1125,16 @@ function renderShape(shape: Shape, index: number, images?: ResolvedImages): Reac
         // always exports.
         const resolved = images.get(shape.src);
         return resolved
-          ? renderImageTag(shape, index, resolved.href, resolveImageBox(shape, resolved))
+          ? renderImageTag(
+              shape,
+              index,
+              resolved.href,
+              resolveImageBox(shape, resolved),
+              filterScope,
+            )
           : renderImagePlaceholder(shape, index, "failed", resolveImageBox(shape, null));
       }
-      return <LiveImage key={index} shape={shape} index={index} />;
+      return <LiveImage key={index} shape={shape} index={index} filterScope={filterScope} />;
     }
     case "rect": {
       // Nine-point pivot (§3.4): x/y name the pivot point of the box.
@@ -1013,9 +1152,9 @@ function renderShape(shape: Shape, index: number, images?: ResolvedImages): Reac
       );
     }
     case "text":
-      return renderText(shape, index, images);
+      return renderText(shape, index, filterScope, images);
     case "textbox":
-      return renderTextBox(shape, index, images);
+      return renderTextBox(shape, index, filterScope, images);
     case "qr":
       return renderQr(shape, index);
     case "icon":
@@ -1046,18 +1185,20 @@ function renderShape(shape: Shape, index: number, images?: ResolvedImages): Reac
 // ---------------------------------------------------------------------------
 
 /**
- * One line of text (◆24). Icon-free shapes keep the EXACT pre-◆44 markup —
- * one `<text>` with SVG text-anchor for the horizontal pivot — so every
- * existing card's markup is byte-identical. A shape whose runs carry inline
- * icons (◆44) switches to run-positioned markup: one `<tspan>` per run at
- * its absolute compiler-computed offset (the whole line shifted by the
- * pivot's horizontal fraction of its measured width — the same alignment
- * the anchor realized), Dicier runs in the flat_dark face on Dicier's own
- * baseline, and asset runs as `<image>` siblings in their 1-em slots — all
- * inside ONE group that carries the ◆43 rotation, so icons turn with their
- * text.
+ * One line of text (◆24). Unstyled, icon-free shapes keep the EXACT pre-◆44
+ * markup. Color-only runs add sequential fill-only tspans under that same
+ * anchored `<text>` — paint cannot change native advance/alignment. A shape
+ * with actual inline icons switches to compiler-positioned markup: text
+ * re-anchors only at line start and after icon slots, Dicier runs use their
+ * own baseline, and asset runs are `<image>` siblings — all inside ONE group
+ * carrying the ◆43 rotation.
  */
-function renderText(shape: TextShape, index: number, images?: ResolvedImages): ReactElement {
+function renderText(
+  shape: TextShape,
+  index: number,
+  filterScope: string,
+  images?: ResolvedImages,
+): ReactElement {
   if (!runsHaveIcons(shape.runs)) {
     // §3.4: horizontal pivoting via SVG text-anchor, vertical via the
     // em-box formula in pivotedBaselineY (top row ≡ the pre-M3 markup).
@@ -1065,18 +1206,34 @@ function renderText(shape: TextShape, index: number, images?: ResolvedImages): R
     // ascent stays the tuned TEXT_ASCENT, the other eight use their own
     // generated ascent (ascentOf's doc comment). Content is the runs' text
     // (≡ shape.text for marker-free strings; a `{{` escape draws as `{`).
+    const attrs = {
+      x: shape.x,
+      y: pivotedBaselineY(shape, ascentOf(shape.font)),
+      fontSize: shape.size,
+      fill: shape.color,
+      textAnchor: SVG_PIVOT_H[shape.pivot.h],
+      fontFamily: TEXT_FONT_FAMILIES[shape.font],
+      transform: rotationTransform(shape),
+    } as const;
+    if (!runsHaveColors(shape.runs)) {
+      return (
+        <text
+          key={index}
+          x={shape.x}
+          y={pivotedBaselineY(shape, ascentOf(shape.font))}
+          fontSize={shape.size}
+          fill={shape.color}
+          textAnchor={SVG_PIVOT_H[shape.pivot.h]}
+          fontFamily={TEXT_FONT_FAMILIES[shape.font]}
+          transform={rotationTransform(shape)}
+        >
+          {runsText(shape.runs)}
+        </text>
+      );
+    }
     return (
-      <text
-        key={index}
-        x={shape.x}
-        y={pivotedBaselineY(shape, ascentOf(shape.font))}
-        fontSize={shape.size}
-        fill={shape.color}
-        textAnchor={SVG_PIVOT_H[shape.pivot.h]}
-        fontFamily={TEXT_FONT_FAMILIES[shape.font]}
-        transform={rotationTransform(shape)}
-      >
-        {runsText(shape.runs)}
+      <text key={index} {...attrs}>
+        {renderPaintTspans(shape.runs, "")}
       </text>
     );
   }
@@ -1098,7 +1255,15 @@ function renderText(shape: TextShape, index: number, images?: ResolvedImages): R
       >
         {renderRunTspans(shape.runs, "", startX, emTop, shape.size, shape.font)}
       </text>
-      {renderRunAssetIcons(shape.runs, "a", startX, emTop, shape.size, images)}
+      {renderRunAssetIcons(
+        shape.runs,
+        "a",
+        startX,
+        emTop,
+        shape.size,
+        `${filterScope}-shape-${index}`,
+        images,
+      )}
     </g>
   );
 }
@@ -1128,17 +1293,17 @@ export function textBoxLineX(box: { x: number; width: number }, align: TextAncho
  * font's ascent × final size, same realization as Text — ascentOf, ◆41) +
  * i × lineHeight × size of advance.
  *
- * Icon-free boxes keep the EXACT pre-◆44 markup (one tspan per line, SVG
- * text-anchor realizing `align:`). A box whose lines carry inline icons
- * (◆44) renders one `<tspan>` per RUN at its absolute compiler offset —
- * each line shifted by `align:`'s fraction of the free width, from the
- * line's CARRIED width, never a re-measure — with Dicier runs on Dicier's
- * baseline and asset runs as `<image>` siblings in their slots, all inside
- * one group carrying the ◆43 rotation.
+ * Unstyled, icon-free boxes keep the EXACT pre-◆44 markup. Color-only lines
+ * keep one positioning tspan per line with sequential fill-only children,
+ * so SVG text-anchor still realizes `align:` from actual glyph advances.
+ * A box with actual inline icons uses compiler-positioned runs — each line
+ * shifted by its carried width — with Dicier runs on their own baseline and
+ * asset runs as `<image>` siblings, all inside one rotated group.
  */
 function renderTextBox(
   shape: TextBoxShape,
   index: number,
+  filterScope: string,
   images?: ResolvedImages,
 ): ReactElement {
   // Nine-point pivot (§3.4): the WHOLE box moves — x/y name its pivot
@@ -1150,6 +1315,7 @@ function renderTextBox(
   const ascent = ascentOf(shape.font);
   if (!shape.lines.some((line) => runsHaveIcons(line.runs))) {
     const x = textBoxLineX({ x: origin.x, width: shape.width }, shape.align);
+    const colored = shape.lines.some((line) => runsHaveColors(line.runs));
     return (
       <text
         key={index}
@@ -1165,7 +1331,7 @@ function renderTextBox(
             x={x}
             y={origin.y + ascent * shape.size + i * shape.lineHeight * shape.size}
           >
-            {runsText(line.runs)}
+            {colored ? renderPaintTspans(line.runs, `${i}-`) : runsText(line.runs)}
           </tspan>
         ))}
       </text>
@@ -1190,7 +1356,15 @@ function renderTextBox(
         )}
       </text>
       {shape.lines.flatMap((line, i) =>
-        renderRunAssetIcons(line.runs, `${i}-a`, lineStart(line), lineTop(i), shape.size, images),
+        renderRunAssetIcons(
+          line.runs,
+          `${i}-a`,
+          lineStart(line),
+          lineTop(i),
+          shape.size,
+          `${filterScope}-shape-${index}`,
+          images,
+        ),
       )}
     </g>
   );
@@ -1303,6 +1477,9 @@ export function CardFaceSvg({
   images,
   children,
 }: CardFaceSvgProps): ReactElement {
+  // React scopes useId across sibling CardFaceSvg instances. Sanitize its
+  // punctuation so the value is safe inside an unquoted SVG url(#fragment).
+  const filterScope = `cg-${useId().replace(/[^A-Za-z0-9_-]/g, "_")}`;
   return (
     <svg
       viewBox={`0 0 ${xUnits} ${yUnits}`}
@@ -1312,7 +1489,7 @@ export function CardFaceSvg({
       {children}
       {error
         ? renderErrorFace(xUnits, yUnits, error)
-        : face.map((shape, index) => renderShape(shape, index, images))}
+        : face.map((shape, index) => renderShape(shape, index, filterScope, images))}
     </svg>
   );
 }

@@ -3,8 +3,11 @@ import { describe, expect, it } from "vitest";
 import type {
   CardDecl,
   ElementNode,
+  IfNode,
+  LetNode,
   RepeatNode,
   SheetDecl,
+  TemplateCallNode,
   TemplateDecl,
 } from "../ast";
 import { parse } from "../parser";
@@ -51,6 +54,28 @@ describe("contextual keywords (◆30†)", () => {
   it("openers are only special in header position: `size: Card` is an identifier value", () => {
     const p = parseClean("Card: C\n  size: Card\n");
     expect(asKind(firstProperty(p).value, "Identifier").name).toBe("Card");
+  });
+
+  it("preserves let/If/Else compatibility outside their contextual forms", () => {
+    const p = parseClean(
+      [
+        "Sheet: S",
+        "  column let: Text",
+        "Template: If",
+        "Template: Else",
+        "Card: C",
+        "  Front: If",
+        "  Back: Else",
+        "",
+      ].join("\n"),
+    );
+    const sheet = p.declarations[0] as SheetDecl;
+    expect(sheet.columns[0].name.name).toBe("let");
+    expect((p.declarations[1] as TemplateDecl).name.name).toBe("If");
+    expect((p.declarations[2] as TemplateDecl).name.name).toBe("Else");
+    const card = p.declarations[3] as CardDecl;
+    expect(card.items.flatMap((item) => item.kind === "Face" ? [item.template?.name] : []))
+      .toEqual(["If", "Else"]);
   });
 });
 
@@ -218,11 +243,6 @@ describe("elements and Repeat (§3.3)", () => {
     expect(el.properties[0].key.name).toBe("text");
   });
 
-  it("the unknown-element hint lists TextBox among the openers", () => {
-    const ds = diags("Template: T\n  Circle:\n    x: 1\n");
-    expect(ds[0].message).toContain("TextBox:");
-  });
-
   it("nested Repeats with children parse", () => {
     const p = parseClean(
       [
@@ -361,9 +381,89 @@ describe("elements and Repeat (§3.3)", () => {
     expect((rep.children[0] as ElementNode).element).toBe("Qr");
   });
 
-  it("the unknown-element hint lists Qr among the openers", () => {
-    const ds = diags("Template: T\n  Circle:\n    x: 1\n");
-    expect(ds[0].message).toContain("Qr:");
+});
+
+describe("bindings, structural conditionals, and Template calls", () => {
+  it("parses global and local lets, including initializer continuation", () => {
+    const p = parseClean(
+      [
+        "let equipment: [armor] or",
+        "  [charm]",
+        "Template: T",
+        "  let title_size: 3.7",
+        "  Text:",
+        "    size: [title_size]",
+        "",
+      ].join("\n"),
+    );
+    const global = p.declarations[0] as LetNode;
+    expect(global.kind).toBe("Let");
+    expect(global.name.name).toBe("equipment");
+    expect(global.initializer).toMatchObject({ kind: "Binary", op: "or" });
+    expect(global.range.endLine).toBe(1);
+    const local = (p.declarations[1] as TemplateDecl).children[0] as LetNode;
+    expect(local).toMatchObject({ kind: "Let", name: { name: "title_size" } });
+  });
+
+  it("pairs the next same-indent Else with its If and permits empty branches", () => {
+    const p = parseClean(
+      [
+        "Template: T",
+        "  If: [show]",
+        "    Upper:",
+        "  # pairing ignores comments and blank lines",
+        "",
+        "  Else:",
+        "    lower:",
+        "  If: [empty]",
+        "  Else:",
+        "",
+      ].join("\n"),
+    );
+    const [first, empty] = (p.declarations[0] as TemplateDecl).children as IfNode[];
+    expect(first.kind).toBe("IfBlock");
+    expect((first.thenChildren[0] as TemplateCallNode).template.name).toBe("Upper");
+    expect((first.elseBranch?.children[0] as TemplateCallNode).template.name).toBe("lower");
+    expect(empty.thenChildren).toEqual([]);
+    expect(empty.elseBranch?.children).toEqual([]);
+  });
+
+  it("allows lets, nested Ifs, and calls inside Repeat and branch bodies", () => {
+    const p = parseClean(
+      [
+        "Template: T",
+        "  Repeat: 2 as i",
+        "    let visible: [i] == 1",
+        "    If: [visible]",
+        "      If: [other]",
+        "        badge:",
+        "      Else:",
+        "        Badge:",
+        "",
+      ].join("\n"),
+    );
+    const repeat = (p.declarations[0] as TemplateDecl).children[0] as RepeatNode;
+    expect(repeat.children.map((node) => node.kind)).toEqual(["Let", "IfBlock"]);
+    const outer = repeat.children[1] as IfNode;
+    expect(outer.thenChildren[0].kind).toBe("IfBlock");
+  });
+
+  it("parses uppercase and lowercase identifier headers as calls", () => {
+    const p = parseClean("Template: T\n  EquipmentFront:\n  equipmentFront:\n");
+    const children = (p.declarations[0] as TemplateDecl).children as TemplateCallNode[];
+    expect(children.map((node) => [node.kind, node.template.name])).toEqual([
+      ["TemplateCall", "EquipmentFront"],
+      ["TemplateCall", "equipmentFront"],
+    ]);
+  });
+
+  it("keeps built-ins ahead of calls", () => {
+    const p = parseClean("Template: T\n  Rectangle:\n  Repeat: 1 as i\n  If: [x]\n");
+    expect((p.declarations[0] as TemplateDecl).children.map((node) => node.kind)).toEqual([
+      "Element",
+      "Repeat",
+      "IfBlock",
+    ]);
   });
 });
 

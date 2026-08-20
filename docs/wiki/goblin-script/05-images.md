@@ -14,11 +14,38 @@ Image: "Portrait"
   height: 12
   src: "https://example.com/art/[name].png"
   fit: cover
+  color: teal
 ```
 
 `src:` is a text [expression](expressions.md), so the URL can come straight from a
 sheet column (`src: [art_url]`) or be built with interpolation, and different rows get
 different art.
+
+## Recolor white artwork
+
+Add an optional `color:` to multiply the artwork by a color:
+
+```goblin
+Image: "Faction mark"
+  x: 2
+  y: 2
+  width: 4
+  height: 4
+  src: "asset:faction_mark"
+  color: if [faction] == Faction.Sea then teal else crimson
+```
+
+The default is `white`, which leaves every pixel unchanged. Multiplication is
+especially useful for white PNG/SVG-style artwork: white pixels become the chosen
+color, black pixels stay black, and gray pixels keep their shading. Transparent and
+partly transparent edges keep their original alpha. This uses the same Color values
+as every other `color:` — CSS names or six-digit `#RRGGBB`, including expressions —
+and does not add `rgba()` or eight-digit hex.
+
+Tinting happens only after the art loads. Loading and failed-image placeholders keep
+their normal gray/amber appearance. Both URL art and uploaded `asset:` art behave the
+same way, and the exported PDF uses the exact same multiplied rendering as the
+preview.
 
 ## The box and the art are two different shapes
 

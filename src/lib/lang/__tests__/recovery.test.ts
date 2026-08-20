@@ -72,6 +72,62 @@ describe("multi-error recovery", () => {
     expect(diagnostics).toHaveLength(1);
     expect(program.declarations).toHaveLength(1);
   });
+
+  it("malformed global and local lets each recover at the next sibling", () => {
+    const { program, diagnostics } = parse(
+      "let global 1\nlet good: 2\nTemplate: T\n  let local 3\n  Fine:\n",
+    );
+    expect(diagnostics).toHaveLength(2);
+    expect(diagnostics.every((d) => d.message.includes("Expected ':'"))).toBe(true);
+    expect(program.declarations.map((node) => node.kind)).toEqual([
+      "Let",
+      "TemplateDecl",
+    ]);
+    const template = program.declarations[1] as TemplateDecl;
+    expect(template.children.map((node) => node.kind)).toEqual(["TemplateCall"]);
+  });
+
+  it("orphan, duplicate, misindented, and lowercase Else each get one targeted E001", () => {
+    const sources = [
+      "Template: T\n  Else:\n  Fine:\n",
+      "Template: T\n  If: [x]\n  Else:\n  Else:\n  Fine:\n",
+      "Template: T\n  Rectangle:\n    Else:\n      Bad:\n    x: 1\n  Fine:\n",
+      "Template: T\n  else:\n    Bad:\n  Fine:\n",
+    ];
+    for (const source of sources) {
+      const { program: parsed, diagnostics: ds } = parse(source);
+      expect(ds).toHaveLength(1);
+      expect(ds[0]).toMatchObject({ code: "E001", severity: "error" });
+      expect(ds[0].message).toMatch(/Else|else/);
+      const template = parsed.declarations[0] as TemplateDecl;
+      expect(template.children.at(-1)).toMatchObject({
+        kind: "TemplateCall",
+        template: { name: "Fine" },
+      });
+    }
+  });
+
+  it("a call child block is one error and does not swallow the next valid sibling", () => {
+    const { program, diagnostics } = parse(
+      "Template: T\n  Child:\n    Rectangle:\n      x: 1\n  Text:\n    text: \"alive\"\n",
+    );
+    expect(diagnostics).toHaveLength(1);
+    expect(diagnostics[0].message).toContain("cannot have indented children");
+    const template = program.declarations[0] as TemplateDecl;
+    expect(template.children.map((node) => node.kind)).toEqual([
+      "TemplateCall",
+      "Element",
+    ]);
+  });
+
+  it("attempted shorthand calls to templates named If and Else are targeted", () => {
+    const ifResult = parse("Template: T\n  If:\n  Fine:\n");
+    expect(ifResult.diagnostics).toHaveLength(1);
+    expect(ifResult.diagnostics[0].message).toContain("expression");
+    const elseResult = parse("Template: T\n  Else:\n  Fine:\n");
+    expect(elseResult.diagnostics).toHaveLength(1);
+    expect(elseResult.diagnostics[0].message).toContain("immediately follow");
+  });
 });
 
 describe("a parse never throws (⚑8)", () => {
@@ -101,6 +157,9 @@ describe("a parse never throws (⚑8)", () => {
     "Card: C\n  p: Suit..Rock\n",
     "Card: C\n  p: -\n",
     "Card: C\n  p: 1 +\n\t\tbroken tab continuation\n",
+    "let x " + "(".repeat(2000),
+    "Template: T\n  If: " + "not ".repeat(2000) + "1\n",
+    "Template: T\n  Else:\n" + "  ".repeat(1000) + "Bad:\n",
   ];
 
   for (const [i, source] of nasty.entries()) {
@@ -144,6 +203,25 @@ describe("a parse never throws (⚑8)", () => {
     expect(diagnostics).toHaveLength(1);
     expect(diagnostics[0].code).toBe("E001");
     expect(diagnostics[0].message).toContain("nested");
+  });
+
+  it("2,000 nested structural If blocks degrade to one E001, not a stack overflow", () => {
+    let src = "Template: T\n";
+    for (let i = 0; i < 2000; i++) {
+      src += "  ".repeat(i + 1) + `If: [v${i}]\n`;
+    }
+    const { diagnostics } = parse(src);
+    expect(diagnostics).toHaveLength(1);
+    expect(diagnostics[0].code).toBe("E001");
+    expect(diagnostics[0].message).toContain("nested");
+  });
+
+  it("explains that an empty nested `If:` is structural, not a Template call", () => {
+    const { diagnostics } = parse("Template: If\nTemplate: Root\n  If:\n");
+    expect(diagnostics).toHaveLength(1);
+    expect(diagnostics[0].code).toBe("E001");
+    expect(diagnostics[0].message).toContain("requires a condition");
+    expect(diagnostics[0].message).toContain("Front: or Back:");
   });
 });
 

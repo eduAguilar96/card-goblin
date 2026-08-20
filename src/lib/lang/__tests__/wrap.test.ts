@@ -352,6 +352,7 @@ const I = (code = "HEARTS"): MarkerSegment => ({
   kind: "icon",
   icon: { kind: "dicier", code },
 });
+const C = (text: string, color: string): MarkerSegment => ({ kind: "text", text, color });
 
 describe("layoutSingleLine (Text, ◆44): runs with absolute offsets", () => {
   it("an icon slot advances by EXACTLY size — no safety margin on the slot", () => {
@@ -374,6 +375,15 @@ describe("layoutSingleLine (Text, ◆44): runs with absolute offsets", () => {
 
   it("empty input is zero runs, zero width", () => {
     expect(layoutSingleLine([], 1, FAKE)).toEqual({ runs: [], width: 0 });
+  });
+
+  it("a style boundary between surrogate halves keeps one scalar and one advance", () => {
+    const astral = "𝄞";
+    const styled = layoutSingleLine([T(astral[0]), C(astral[1], "red")], 1, FAKE);
+    const plain = layoutSingleLine([T(astral)], 1, FAKE);
+    expect(lineText(styled)).toBe(astral);
+    expect(styled.width).toBe(plain.width);
+    expect(styled.runs).toEqual([{ kind: "text", text: astral, x: 0 }]);
   });
 });
 
@@ -434,6 +444,44 @@ describe("wrapRuns (◆44): icons wrap like words, never mid-slot", () => {
     const text = "aa bb  ccc\n  dd eeeeeeee";
     const viaRuns = wrapRuns([T(text)], exactWidth("aaaa"), 1, FAKE).map(lineText);
     expect(viaRuns).toEqual(wrapText(text, exactWidth("aaaa"), 1, FAKE));
+  });
+
+  it("a color boundary inside a word is not a wrapping opportunity", () => {
+    const styled = wrapRuns([C("ab", "red"), T("cd ef")], exactWidth("abc"), 1, FAKE);
+    const plain = wrapRuns([T("abcd ef")], exactWidth("abc"), 1, FAKE);
+    expect(styled.map(lineText)).toEqual(plain.map(lineText));
+    expect(styled.map((line) => line.width)).toEqual(plain.map((line) => line.width));
+    expect(styled.map(lineText)).toEqual(["abc", "d", "ef"]);
+    expect(styled[0].runs).toEqual([
+      { kind: "text", text: "ab", x: 0, color: "red" },
+      { kind: "text", text: "c", x: measureText("ab", 1, FAKE) },
+    ]);
+    expect(styled[1].runs).toEqual([
+      { kind: "text", text: "d", x: 0 },
+    ]);
+  });
+
+  it("color boundaries preserve exact offsets and widths on a fitting line", () => {
+    const styled = layoutSingleLine([T("a"), C("bc", "blue"), T("d")], 1, FAKE);
+    const plain = layoutSingleLine([T("abcd")], 1, FAKE);
+    expect(styled.width).toBe(plain.width);
+    expect(styled.runs).toEqual([
+      { kind: "text", text: "a", x: 0 },
+      { kind: "text", text: "bc", x: measureText("a", 1, FAKE), color: "blue" },
+      { kind: "text", text: "d", x: measureText("abc", 1, FAKE) },
+    ]);
+  });
+
+  it("forced mid-word wrapping never recreates surrogate fragments", () => {
+    const astral = "𝄞";
+    const styled = wrapRuns([T(astral[0]), C(`${astral[1]}a`, "red")], 0.5, 1, FAKE);
+    const plain = wrapRuns([T(`${astral}a`)], 0.5, 1, FAKE);
+    expect(styled.map(lineText).join("")).toBe(astral + "a");
+    expect(styled.map((line) => line.width)).toEqual(plain.map((line) => line.width));
+    expect(styled.map((line) => line.runs)).toEqual([
+      [{ kind: "text", text: astral, x: 0 }],
+      [{ kind: "text", text: "a", x: 0, color: "red" }],
+    ]);
   });
 });
 

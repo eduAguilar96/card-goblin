@@ -2,7 +2,7 @@
  * Binder + type checker for Goblin script (DESIGN.md §3.2–§3.8, §4.1).
  *
  * `check(program)` resolves every name, types every expression, and emits the
- * compile-time diagnostics E002–E008 and W001–W004 (E001 is the parser's).
+ * compile-time diagnostics E002–E010 and W001–W005 (E001 is the parser's).
  * It also returns a `Bindings` artifact — resolution and typing keyed by AST
  * node — sufficient for the evaluator (task 3) to generate cards WITHOUT
  * re-implementing any resolution:
@@ -36,6 +36,8 @@ import type {
   Expr,
   FaceNode,
   IdentifierExpr,
+  IfNode,
+  LetNode,
   NumberLit,
   Program,
   PropertyNode,
@@ -45,6 +47,7 @@ import type {
   StringLit,
   StringRefPart,
   TemplateDecl,
+  TemplateCallNode,
   TemplateNode,
 } from "./ast";
 import type { Diagnostic, Range, Severity } from "./diagnostics";
@@ -96,6 +99,7 @@ export type Resolution =
   | { kind: "column"; sheet: string; column: string; type: ValueType }
   | { kind: "loopVar"; enumName: string | null }
   | { kind: "repeatVar" }
+  | { kind: "let"; binding: LetNode; scope: "global" | "local"; type: ValueType }
   | { kind: "enumCase"; enumName: string; caseName: string }
   | { kind: "colorName"; name: string }
   | { kind: "geometry"; keyword: "full" | "half" | "middle" }
@@ -199,6 +203,10 @@ export interface CardBindings {
   exprTypes: ReadonlyMap<Expr, ValueType>;
   /** Resolution of every ref/bare name/qualified name in this card's context. */
   resolutions: ReadonlyMap<ResolvableNode, Resolution>;
+  /** Contextual inferred type of each reachable global/local binding. */
+  letTypes: ReadonlyMap<LetNode, ValueType>;
+  /** Per-Card resolution of every reachable composition edge. */
+  templateCalls: ReadonlyMap<TemplateCallNode, TemplateDecl>;
 }
 
 export interface Bindings {
@@ -206,6 +214,8 @@ export interface Bindings {
   enums: ReadonlyMap<string, EnumDecl>;
   sheets: ReadonlyMap<string, SheetInfo>;
   templates: ReadonlyMap<string, TemplateDecl>;
+  /** Program-scope value bindings; separate from the declaration namespace. */
+  globals: ReadonlyMap<string, LetNode>;
   /** One entry per Card declaration, in source order (duplicates included —
    * the generator iterates declarations, not names). */
   cards: readonly CardBindings[];
@@ -260,6 +270,7 @@ export function check(program: Program, assetNames?: ReadonlySet<string>): Check
         enums: new Map(),
         sheets: new Map(),
         templates: new Map(),
+        globals: new Map(),
         cards: [],
         templateUsage: new Map(),
       },
@@ -331,7 +342,7 @@ interface ElementSpec {
 }
 
 /** §3.3 property tables. Text/Icon color defaults to black; Icon style
- * defaults to flat_dark, Image fit to contain (M2); TextBox align defaults
+ * defaults to flat_dark, Image fit to contain and tint to white (M2); TextBox align defaults
  * to left, line_height to 1.3 × size, overflow to clip (M3); Qr color
  * defaults to black, background to white, level to m (§7.1a); Text/TextBox
  * font defaults to geist (M3 — ◆41). EVERY drawable element takes an
@@ -356,7 +367,7 @@ const ELEMENT_SPECS: Record<ElementNode["element"], ElementSpec> = {
   },
   Image: {
     required: ["x", "y", "width", "height", "src"],
-    optional: ["fit", "pivot", "rotate"],
+    optional: ["fit", "color", "pivot", "rotate"],
   },
   Qr: {
     required: ["x", "y", "size", "data"],
@@ -369,6 +380,24 @@ const ELEMENT_SPECS: Record<ElementNode["element"], ElementSpec> = {
 interface Recorder {
   exprTypes: Map<Expr, ValueType>;
   resolutions: Map<ResolvableNode, Resolution>;
+  letTypes: Map<LetNode, ValueType>;
+  templateCalls: Map<TemplateCallNode, TemplateDecl>;
+}
+
+interface LetScope {
+  lets: ReadonlyMap<string, LetNode>;
+  /** Repeat introduced for this child block, if any. */
+  repeat: { name: string; range: Range } | null;
+}
+
+interface LetState {
+  state: "evaluating" | "done";
+  type: ValueType;
+}
+
+interface TemplateCallEdge {
+  target: TemplateDecl;
+  call: TemplateCallNode;
 }
 
 /** Name-resolution context for `[refs]` and bare identifiers (§3.6). A null
@@ -380,6 +409,12 @@ interface Ctx {
   loops: ReadonlyMap<string, LoopBinding>;
   /** Innermost-last stack of enclosing Repeat variables. */
   repeats: { name: string; range: Range }[];
+  /** Lexical scopes in the current template activation, outermost first. */
+  scopes: LetScope[];
+  /** Per-Card contextual binding state; declarations are AST-identity keys. */
+  letStates: Map<LetNode, LetState>;
+  letStack: LetNode[];
+  blockDepth: number;
   record: Recorder | null;
 }
 
@@ -393,10 +428,12 @@ class Checker {
   private exprDepth = 0;
   /** One budget-breach diagnostic per property value (reset in checkValue). */
   private depthReported = false;
+  private globalInitDepth = 0;
 
   private readonly enums = new Map<string, EnumDecl>();
   private readonly sheets = new Map<string, SheetInfo>();
   private readonly templates = new Map<string, TemplateDecl>();
+  private readonly globals = new Map<string, LetNode>();
   private readonly globalKinds = new Map<string, string>(); // name → kind word
 
   private readonly usedEnums = new Set<EnumDecl>();
@@ -404,7 +441,23 @@ class Checker {
   private readonly usedTemplates = new Set<TemplateDecl>();
   /** Declarations whose name collided (E005): suppress their W002 — one
    * mistake, one diagnostic. */
-  private readonly collided = new Set<EnumDecl | SheetDecl | TemplateDecl | CardDecl>();
+  private readonly collided = new Set<EnumDecl | SheetDecl | TemplateDecl | CardDecl | LetNode>();
+  private readonly usedLets = new Set<LetNode>();
+  /** One primary cycle report per dependency SCC across contextual Card passes. */
+  private readonly cyclicLets = new Set<LetNode>();
+  private readonly cyclicTemplates = new Set<TemplateDecl>();
+
+  private callPath: TemplateDecl[] = [];
+  private activeCalls = 0;
+  private compositionVisits = 0;
+  private callNodes: TemplateCallNode[] = [];
+  private compositionBlocked = false;
+  private currentCard: CardDecl | null = null;
+  private readonly templateUsers = new Map<TemplateDecl, CardDecl[]>();
+
+  private static readonly MAX_TEMPLATE_CALL_DEPTH = 64;
+  private static readonly MAX_COMPOSITION_VISITS = 10_000;
+  private static readonly MAX_BLOCK_DEPTH = 500;
 
   /** §7.1b W005: undefined means "no asset library in scope" — the literal
    * `asset:` check in `case "src":` is skipped entirely, not run against an
@@ -415,18 +468,13 @@ class Checker {
     this.collectDeclarations(program);
 
     const cards: CardBindings[] = [];
-    const templateUsage = new Map<TemplateDecl, CardDecl[]>();
     for (const decl of program.declarations) {
       if (decl.kind !== "CardDecl") continue;
+      this.currentCard = decl;
       const bound = this.checkCard(decl);
       cards.push(bound);
-      for (const tpl of [bound.front, bound.back]) {
-        if (!tpl) continue;
-        const users = templateUsage.get(tpl) ?? [];
-        if (!users.includes(decl)) users.push(decl);
-        templateUsage.set(tpl, users);
-      }
     }
+    this.currentCard = null;
 
     // Unused templates: structural checks only (W002 §3.8) — property
     // presence/duplicates, literal types, geometry keywords, icon codes. No
@@ -434,11 +482,30 @@ class Checker {
     // context-dependent check is suppressed.
     for (const decl of program.declarations) {
       if (decl.kind !== "TemplateDecl" || this.usedTemplates.has(decl)) continue;
-      const ctx: Ctx = { sheet: null, loops: new Map(), repeats: [], record: null };
-      this.checkTemplateBody(decl, ctx);
+      const ctx: Ctx = {
+        sheet: null,
+        loops: new Map(),
+        repeats: [],
+        scopes: [],
+        letStates: new Map(),
+        letStack: [],
+        blockDepth: 0,
+        record: null,
+      };
+      this.checkFaceTemplate(decl, ctx);
       if (!this.collided.has(decl)) {
         this.warn("W002", `Template '${decl.name.name}' is never used`, decl.name.range);
       }
+    }
+
+    // Local lets are lexical declarations, so a syntactically referenced one
+    // counts even when its owning template has no Card context. Globals only
+    // become used through a reachable Card/count/face/call graph.
+    for (const decl of program.declarations) {
+      if (decl.kind === "Let" && !this.collided.has(decl) && !this.usedLets.has(decl)) {
+        this.warn("W002", `Binding '${decl.name.name}' is never used`, decl.name.range);
+      }
+      if (decl.kind === "TemplateDecl") this.warnUnusedLets(decl.children);
     }
 
     // W002 for enums and sheets.
@@ -459,8 +526,9 @@ class Checker {
         enums: this.enums,
         sheets: this.sheets,
         templates: this.templates,
+        globals: this.globals,
         cards,
-        templateUsage,
+        templateUsage: this.templateUsers,
       },
     };
   }
@@ -492,12 +560,43 @@ class Checker {
     if (this.silent === 0) this.usedEnums.add(decl);
   }
 
+  private markTemplateUsed(decl: TemplateDecl): void {
+    if (!this.currentCard) return;
+    this.usedTemplates.add(decl);
+    const users = this.templateUsers.get(decl) ?? [];
+    if (!users.includes(this.currentCard)) users.push(this.currentCard);
+    this.templateUsers.set(decl, users);
+  }
+
+  private warnUnusedLets(children: readonly TemplateNode[]): void {
+    for (const child of children) {
+      if (child.kind === "Let" && !this.collided.has(child) && !this.usedLets.has(child)) {
+        this.warn("W002", `Binding '${child.name.name}' is never used`, child.name.range);
+      } else if (child.kind === "Repeat") {
+        this.warnUnusedLets(child.children);
+      } else if (child.kind === "IfBlock") {
+        this.warnUnusedLets(child.thenChildren);
+        if (child.elseBranch) this.warnUnusedLets(child.elseBranch.children);
+      }
+    }
+  }
+
   // -- phase 1: declarations (§3.2) -----------------------------------------
 
   private collectDeclarations(program: Program): void {
     // One global namespace for all declared names (see header comment): first
     // declaration wins, later same-name declarations are E005.
     for (const decl of program.declarations) {
+      if (decl.kind === "Let") {
+        const previous = this.globals.get(decl.name.name);
+        if (previous) {
+          this.error("E005", `Duplicate global binding '${decl.name.name}'`, decl.name.range);
+          this.collided.add(decl);
+        } else {
+          this.globals.set(decl.name.name, decl);
+        }
+        continue;
+      }
       const name = decl.name.name;
       const existingKind = this.globalKinds.get(name);
       if (existingKind !== undefined) {
@@ -523,6 +622,19 @@ class Checker {
       const info = this.buildSheetInfo(decl);
       if (!this.sheets.has(decl.name.name) && !this.collided.has(decl)) {
         this.sheets.set(decl.name.name, info);
+      }
+    }
+
+    // Compatibility warning: columns keep precedence over program globals.
+    for (const global of this.globals.values()) {
+      for (const sheet of this.sheets.values()) {
+        if (sheet.columns.has(global.name.name)) {
+          this.warn(
+            "W001",
+            `Global binding '${global.name.name}' is hidden by column '${global.name.name}' of sheet '${sheet.decl.name.name}'`,
+            global.name.range,
+          );
+        }
       }
     }
   }
@@ -594,7 +706,12 @@ class Checker {
   // -- phase 2: cards (§3.2, §3.4, §3.7) ------------------------------------
 
   private checkCard(decl: CardDecl): CardBindings {
-    const recorder: Recorder = { exprTypes: new Map(), resolutions: new Map() };
+    const recorder: Recorder = {
+      exprTypes: new Map(),
+      resolutions: new Map(),
+      letTypes: new Map(),
+      templateCalls: new Map(),
+    };
     const seenKeys = new Map<string, Range>();
     const loops: LoopBinding[] = [];
     const loopProps: PropertyNode[] = [];
@@ -861,8 +978,8 @@ class Checker {
     }
 
     // Loop variables shadowing sheet columns → W001 at the declaration site.
-    if (sheet) {
-      for (const loop of loops) {
+    for (const loop of loops) {
+      if (sheet) {
         if (sheet.columns.has(loop.variable)) {
           this.warn(
             "W001",
@@ -871,11 +988,28 @@ class Checker {
           );
         }
       }
+      if (this.globals.has(loop.variable)) {
+        this.warn(
+          "W001",
+          `Loop variable '${loop.variable}' shadows a global binding`,
+          loop.varRange,
+        );
+      }
     }
 
     const loopMap = new Map<string, LoopBinding>();
     for (const loop of loops) loopMap.set(loop.variable, loop);
-    const ctx: Ctx = { sheet, loops: loopMap, repeats: [], record: recorder };
+    const ctx: Ctx = {
+      sheet,
+      loops: loopMap,
+      repeats: [],
+      scopes: [],
+      letStates: new Map(),
+      letStack: [],
+      blockDepth: 0,
+      record: recorder,
+    };
+    this.collectReachableTemplates([front, back], recorder);
 
     // `count:` is the Card's only expression property — evaluated per
     // row × loop combination (§3.7), so loop vars and columns are in scope,
@@ -884,8 +1018,8 @@ class Checker {
 
     // Faces: templates are checked in THIS card's context (⚑5, §3.6). A
     // template used as both faces is checked once — same context, same result.
-    if (front) this.checkTemplateBody(front, ctx);
-    if (back && back !== front) this.checkTemplateBody(back, ctx);
+    if (front) this.checkFaceTemplate(front, ctx);
+    if (back && back !== front) this.checkFaceTemplate(back, ctx);
 
     return {
       decl,
@@ -899,6 +1033,8 @@ class Checker {
       back,
       exprTypes: recorder.exprTypes,
       resolutions: recorder.resolutions,
+      letTypes: recorder.letTypes,
+      templateCalls: recorder.templateCalls,
     };
   }
 
@@ -907,6 +1043,7 @@ class Checker {
     const tpl = this.templates.get(face.template.name);
     if (tpl) {
       this.usedTemplates.add(tpl);
+      this.markTemplateUsed(tpl);
       return tpl;
     }
     const other = this.globalKinds.get(face.template.name);
@@ -922,13 +1059,269 @@ class Checker {
 
   // -- templates and elements (§3.3, §3.6) ----------------------------------
 
+  private checkFaceTemplate(tpl: TemplateDecl, ctx: Ctx): void {
+    this.callPath = [tpl];
+    this.activeCalls = 0;
+    this.callNodes = [];
+    this.compositionVisits = 0;
+    this.compositionBlocked = false;
+    ctx.scopes = [];
+    ctx.repeats = [];
+    ctx.letStates = new Map();
+    ctx.letStack = [];
+    ctx.blockDepth = 0;
+    this.markTemplateUsed(tpl);
+    this.checkTemplateBody(tpl, ctx);
+    this.callPath = [];
+  }
+
   private checkTemplateBody(tpl: TemplateDecl, ctx: Ctx): void {
-    for (const node of tpl.children) this.checkTemplateNode(node, ctx);
+    // Every invocation has its own lexical root. A call deliberately arrives
+    // with no caller scopes/repeats, preserving one resolution per AST node.
+    this.checkBlock(tpl.children, ctx, null);
   }
 
   private checkTemplateNode(node: TemplateNode, ctx: Ctx): void {
-    if (node.kind === "Repeat") this.checkRepeat(node, ctx);
-    else this.checkElement(node, ctx);
+    if (this.compositionBlocked) return;
+    if (
+      this.activeCalls > 0 &&
+      !this.chargeComposition(node.range, node.kind === "TemplateCall" ? node : undefined)
+    ) return;
+    if (ctx.blockDepth >= Checker.MAX_BLOCK_DEPTH) {
+      this.error("E010", "Template structure is too deeply nested to check", node.range);
+      return;
+    }
+    ctx.blockDepth++;
+    try {
+      switch (node.kind) {
+        case "Repeat":
+          this.checkRepeat(node, ctx);
+          return;
+        case "IfBlock":
+          this.checkIfBlock(node, ctx);
+          return;
+        case "TemplateCall":
+          this.checkTemplateCall(node, ctx);
+          return;
+        case "Let":
+          // Hoisted and lazily typed when referenced.
+          return;
+        case "Element":
+          this.checkElement(node, ctx);
+          return;
+      }
+    } finally {
+      ctx.blockDepth--;
+    }
+  }
+
+  private checkBlock(
+    children: readonly TemplateNode[],
+    ctx: Ctx,
+    repeat: { name: string; range: Range } | null,
+  ): void {
+    const lets = new Map<string, LetNode>();
+    for (const child of children) {
+      if (child.kind !== "Let") continue;
+      const previous = lets.get(child.name.name);
+      if (previous) {
+        this.error("E005", `Duplicate binding '${child.name.name}' in the same scope`, child.name.range);
+        this.collided.add(child);
+      } else {
+        lets.set(child.name.name, child);
+      }
+    }
+
+    const scope: LetScope = { lets, repeat };
+    ctx.scopes.push(scope);
+    if (repeat) ctx.repeats.push(repeat);
+    for (const binding of lets.values()) this.checkLetShadow(binding, ctx);
+    // Local declarations belong to a statically reachable template block, so
+    // type their initializers even when the value is runtime-lazy. This also
+    // builds the complete dependency graph for W002/E009; globals retain the
+    // stricter per-Card reachability exception and are inferred on reference.
+    for (const binding of lets.values()) {
+      this.inferLet(binding, "local", binding.name.range, ctx);
+    }
+    for (const child of children) this.checkTemplateNode(child, ctx);
+    if (repeat) ctx.repeats.pop();
+    ctx.scopes.pop();
+  }
+
+  /** Populate the complete transitive usage/target graph independently of
+   * expansion checking. A diamond is visited once, and cycles terminate by
+   * Template identity, so caps never leave Bindings only half-resolved. */
+  private collectReachableTemplates(
+    roots: readonly (TemplateDecl | null)[],
+    recorder: Recorder,
+  ): void {
+    const seen = new Set<TemplateDecl>();
+    const graph = new Map<TemplateDecl, TemplateCallEdge[]>();
+    const stack = roots.filter((tpl): tpl is TemplateDecl => tpl !== null).reverse();
+    while (stack.length > 0) {
+      const tpl = stack.pop()!;
+      if (seen.has(tpl)) continue;
+      seen.add(tpl);
+      const edges = graph.get(tpl) ?? [];
+      graph.set(tpl, edges);
+      this.markTemplateUsed(tpl);
+      const nodes = [...tpl.children].reverse();
+      while (nodes.length > 0) {
+        const node = nodes.pop()!;
+        if (node.kind === "TemplateCall") {
+          const target = this.templates.get(node.template.name);
+          if (target) {
+            edges.push({ target, call: node });
+            recorder.templateCalls.set(node, target);
+            this.usedTemplates.add(target);
+            this.markTemplateUsed(target);
+            if (!seen.has(target)) stack.push(target);
+          }
+        } else if (node.kind === "Repeat") {
+          for (let i = node.children.length - 1; i >= 0; i--) nodes.push(node.children[i]);
+        } else if (node.kind === "IfBlock") {
+          if (node.elseBranch) {
+            for (let i = node.elseBranch.children.length - 1; i >= 0; i--) {
+              nodes.push(node.elseBranch.children[i]);
+            }
+          }
+          for (let i = node.thenChildren.length - 1; i >= 0; i--) nodes.push(node.thenChildren[i]);
+        }
+      }
+    }
+    this.reportTemplateGraphCycles(graph);
+  }
+
+  /** Report cycles from the complete reachable graph before composition caps
+   * truncate the expansion walk. Kosaraju's two iterative passes keep very
+   * long cycles never-throw and yield one primary E009 per SCC. */
+  private reportTemplateGraphCycles(graph: ReadonlyMap<TemplateDecl, TemplateCallEdge[]>): void {
+    const order: TemplateDecl[] = [];
+    const visited = new Set<TemplateDecl>();
+    for (const start of graph.keys()) {
+      if (visited.has(start)) continue;
+      visited.add(start);
+      const stack: { template: TemplateDecl; next: number }[] = [{ template: start, next: 0 }];
+      while (stack.length > 0) {
+        const frame = stack[stack.length - 1];
+        const edges = graph.get(frame.template) ?? [];
+        if (frame.next < edges.length) {
+          const target = edges[frame.next++].target;
+          if (!visited.has(target)) {
+            visited.add(target);
+            stack.push({ template: target, next: 0 });
+          }
+        } else {
+          order.push(frame.template);
+          stack.pop();
+        }
+      }
+    }
+
+    const reverse = new Map<TemplateDecl, TemplateDecl[]>();
+    for (const template of graph.keys()) reverse.set(template, []);
+    for (const [from, edges] of graph) {
+      for (const { target } of edges) {
+        const incoming = reverse.get(target) ?? [];
+        incoming.push(from);
+        reverse.set(target, incoming);
+      }
+    }
+
+    const assigned = new Set<TemplateDecl>();
+    for (let i = order.length - 1; i >= 0; i--) {
+      const start = order[i];
+      if (assigned.has(start)) continue;
+      const component: TemplateDecl[] = [];
+      const pending = [start];
+      assigned.add(start);
+      while (pending.length > 0) {
+        const template = pending.pop()!;
+        component.push(template);
+        for (const source of reverse.get(template) ?? []) {
+          if (!assigned.has(source)) {
+            assigned.add(source);
+            pending.push(source);
+          }
+        }
+      }
+      const selfLoop =
+        component.length === 1 &&
+        (graph.get(component[0]) ?? []).some(({ target }) => target === component[0]);
+      if ((component.length === 1 && !selfLoop) || component.some((t) => this.cyclicTemplates.has(t))) {
+        continue;
+      }
+
+      const members = new Set(component);
+      const path: TemplateDecl[] = [];
+      const positions = new Map<TemplateDecl, number>();
+      const colors = new Map<TemplateDecl, 0 | 1 | 2>();
+      let found: { templates: TemplateDecl[]; closing: TemplateCallNode } | null = null;
+      for (const root of component) {
+        if (found || (colors.get(root) ?? 0) !== 0) continue;
+        colors.set(root, 1);
+        positions.set(root, path.length);
+        path.push(root);
+        const frames: { template: TemplateDecl; next: number }[] = [{ template: root, next: 0 }];
+        while (frames.length > 0 && !found) {
+          const frame = frames[frames.length - 1];
+          const edges = (graph.get(frame.template) ?? []).filter(({ target }) => members.has(target));
+          if (frame.next < edges.length) {
+            const edge = edges[frame.next++];
+            const color = colors.get(edge.target) ?? 0;
+            if (color === 0) {
+              colors.set(edge.target, 1);
+              positions.set(edge.target, path.length);
+              path.push(edge.target);
+              frames.push({ template: edge.target, next: 0 });
+            } else if (color === 1) {
+              const at = positions.get(edge.target) ?? 0;
+              found = { templates: [...path.slice(at), edge.target], closing: edge.call };
+            }
+          } else {
+            frames.pop();
+            const done = path.pop();
+            if (done) {
+              positions.delete(done);
+              colors.set(done, 2);
+            }
+          }
+        }
+      }
+      if (!found) continue;
+      for (const template of component) this.cyclicTemplates.add(template);
+      this.error(
+        "E009",
+        `Template call cycle: ${found.templates.map((t) => t.name.name).join(" -> ")}`,
+        found.closing.template.range,
+      );
+    }
+  }
+
+  private checkIfBlock(node: IfNode, ctx: Ctx): void {
+    this.checkValue(node.condition, EXP_BOOL, ctx, false);
+    this.checkBlock(node.thenChildren, ctx, null);
+    if (node.elseBranch) this.checkBlock(node.elseBranch.children, ctx, null);
+  }
+
+  private checkLetShadow(binding: LetNode, ctx: Ctx): void {
+    const name = binding.name.name;
+    let shadowed: string | null = null;
+    const current = ctx.scopes[ctx.scopes.length - 1];
+    if (current?.repeat?.name === name) shadowed = "an enclosing Repeat variable";
+    for (let i = ctx.scopes.length - 2; i >= 0 && !shadowed; i--) {
+      const scope = ctx.scopes[i];
+      if (scope.lets.has(name)) shadowed = "an outer binding";
+      else if (scope.repeat?.name === name) shadowed = "an enclosing Repeat variable";
+    }
+    if (!shadowed && ctx.loops.has(name)) shadowed = "a Card loop variable";
+    if (!shadowed && ctx.sheet?.columns.has(name)) {
+      shadowed = `column '${name}' of sheet '${ctx.sheet.decl.name.name}'`;
+    }
+    if (!shadowed && this.globals.has(name)) shadowed = "a global binding";
+    if (shadowed) {
+      this.warn("W001", `Binding '${name}' shadows ${shadowed}`, binding.name.range);
+    }
   }
 
   private checkRepeat(node: RepeatNode, ctx: Ctx): void {
@@ -937,13 +1330,17 @@ class Checker {
     this.checkValue(node.count, EXP_NUMBER, ctx, false);
     if (node.variable) {
       const name = node.variable.name;
-      const shadowed = ctx.repeats.some((r) => r.name === name)
-        ? "an enclosing Repeat variable"
-        : ctx.loops.has(name)
-          ? "a loop variable"
-          : ctx.sheet?.columns.has(name)
-            ? `column '${name}' of sheet '${ctx.sheet.decl.name.name}'`
-            : null;
+      let shadowed: string | null = null;
+      for (let i = ctx.scopes.length - 1; i >= 0 && !shadowed; i--) {
+        const scope = ctx.scopes[i];
+        if (scope.lets.has(name)) shadowed = "an enclosing binding";
+        else if (scope.repeat?.name === name) shadowed = "an enclosing Repeat variable";
+      }
+      if (!shadowed && ctx.loops.has(name)) shadowed = "a loop variable";
+      if (!shadowed && ctx.sheet?.columns.has(name)) {
+        shadowed = `column '${name}' of sheet '${ctx.sheet.decl.name.name}'`;
+      }
+      if (!shadowed && this.globals.has(name)) shadowed = "a global binding";
       if (shadowed) {
         this.warn(
           "W001",
@@ -951,13 +1348,80 @@ class Checker {
           node.variable.range,
         );
       }
-      ctx.repeats.push({ name, range: node.variable.range });
-      for (const child of node.children) this.checkTemplateNode(child, ctx);
-      ctx.repeats.pop();
+      this.checkBlock(node.children, ctx, { name, range: node.variable.range });
     } else {
       // Parser-null variable (E001 covered): children still get checked.
-      for (const child of node.children) this.checkTemplateNode(child, ctx);
+      this.checkBlock(node.children, ctx, null);
     }
+  }
+
+  private checkTemplateCall(node: TemplateCallNode, ctx: Ctx): void {
+    // A root-level call itself is the first composition-only visit. Nested
+    // calls were already charged by checkTemplateNode.
+    if (this.activeCalls === 0 && !this.chargeComposition(node.range, node)) return;
+    const tpl = this.templates.get(node.template.name);
+    if (!tpl) {
+      const other = this.globalKinds.get(node.template.name);
+      this.error(
+        "E002",
+        other && other !== "a Template"
+          ? `'${node.template.name}' is ${other}, not a Template`
+          : `Unknown template '${node.template.name}'`,
+        node.template.range,
+      );
+      return;
+    }
+    ctx.record?.templateCalls.set(node, tpl);
+    if (this.currentCard) {
+      this.usedTemplates.add(tpl);
+      this.markTemplateUsed(tpl);
+    }
+
+    const cycleAt = this.callPath.indexOf(tpl);
+    if (cycleAt >= 0) {
+      const members = this.callPath.slice(cycleAt);
+      if (!members.some((member) => this.cyclicTemplates.has(member))) {
+        for (const member of members) this.cyclicTemplates.add(member);
+        const path = [...members, tpl].map((t) => t.name.name).join(" -> ");
+        this.error("E009", `Template call cycle: ${path}`, node.template.range);
+      }
+      return;
+    }
+    if (this.activeCalls >= Checker.MAX_TEMPLATE_CALL_DEPTH) {
+      this.error(
+        "E010",
+        `Template composition exceeds ${Checker.MAX_TEMPLATE_CALL_DEPTH} active calls`,
+        node.template.range,
+      );
+      return;
+    }
+
+    this.activeCalls++;
+    this.callNodes.push(node);
+    this.callPath.push(tpl);
+    const callerScopes = ctx.scopes;
+    const callerRepeats = ctx.repeats;
+    ctx.scopes = [];
+    ctx.repeats = [];
+    this.checkTemplateBody(tpl, ctx);
+    ctx.scopes = callerScopes;
+    ctx.repeats = callerRepeats;
+    this.callPath.pop();
+    this.callNodes.pop();
+    this.activeCalls--;
+  }
+
+  private chargeComposition(range: Range, crossing?: TemplateCallNode): boolean {
+    this.compositionVisits++;
+    if (this.compositionVisits <= Checker.MAX_COMPOSITION_VISITS) return true;
+    const call = crossing ?? this.callNodes[this.callNodes.length - 1];
+    this.error(
+      "E010",
+      `Template composition exceeds ${Checker.MAX_COMPOSITION_VISITS.toLocaleString()} expanded node visits`,
+      call?.template.range ?? range,
+    );
+    this.compositionBlocked = true;
+    return false;
   }
 
   private checkElement(el: ElementNode, ctx: Ctx): void {
@@ -1382,11 +1846,17 @@ class Checker {
    * `silent === 0`, so trials never nest: the extra work is bounded to one
    * silent pass per subtree. */
   private trialType(expr: Expr, expected: Expected, ctx: Ctx, geometryOk: boolean): ValueType {
+    const states = ctx.letStates;
+    const stack = ctx.letStack;
+    ctx.letStates = new Map(states);
+    ctx.letStack = [...stack];
     this.silent++;
     try {
       return this.typeOf(expr, expected, ctx, geometryOk);
     } finally {
       this.silent--;
+      ctx.letStates = states;
+      ctx.letStack = stack;
     }
   }
 
@@ -1583,10 +2053,15 @@ class Checker {
    * built-ins still resolve: they never depend on sheet DATA, only on a
    * Card's generation position, so there is nothing to poison against. */
   private resolveRef(name: string, range: Range, ctx: Ctx, node: ResolvableNode): ValueType {
-    for (let i = ctx.repeats.length - 1; i >= 0; i--) {
-      if (ctx.repeats[i].name === name) {
-        this.recordResolution(ctx, node, { kind: "repeatVar" });
-        return NUMBER; // 0-based index (◆18)
+    if (this.globalInitDepth === 0) {
+      for (let i = ctx.scopes.length - 1; i >= 0; i--) {
+        const scope = ctx.scopes[i];
+        const binding = scope.lets.get(name);
+        if (binding) return this.resolveLet(binding, "local", range, ctx, node);
+        if (scope.repeat?.name === name) {
+          this.recordResolution(ctx, node, { kind: "repeatVar" });
+          return NUMBER;
+        }
       }
     }
     const loop = ctx.loops.get(name);
@@ -1596,6 +2071,14 @@ class Checker {
         enumName: loop.enumDecl ? loop.enumDecl.name.name : null,
       });
       return loop.enumDecl ? enumType(loop.enumDecl.name.name) : UNKNOWN;
+    }
+
+    // A global initializer gives program bindings precedence over ambient
+    // columns, keeping its dependency graph stable across Sheets. Ordinary
+    // expressions preserve the compatibility lookup (column before global).
+    if (this.globalInitDepth > 0) {
+      const global = this.globals.get(name);
+      if (global) return this.resolveLet(global, "global", range, ctx, node);
     }
     if (ctx.sheet) {
       const col = ctx.sheet.columns.get(name);
@@ -1609,19 +2092,76 @@ class Checker {
         return col.type;
       }
     }
-    // Built-in position bindings (§3.6, ◆42): resolved LAST — a sheet column
-    // named row/card already returned above, so reaching here means no such
-    // column shadows this reference.
+    if (this.globalInitDepth === 0 && ctx.record) {
+      const global = this.globals.get(name);
+      if (global) return this.resolveLet(global, "global", range, ctx, node);
+    }
+    // Built-in position bindings are last.
     if (name === "row" || name === "card") {
       this.recordResolution(ctx, node, { kind: "position", which: name });
       return NUMBER;
     }
-    if (ctx.sheet) {
-      // Message is deliberately context-free so a template used by several
-      // Cards dedupes to ONE diagnostic at the template's range (§3.6).
-      this.error("E002", `Unknown reference [${name}]`, range);
-    }
+    if (ctx.sheet) this.error("E002", `Unknown reference [${name}]`, range);
     return UNKNOWN;
+  }
+
+  private resolveLet(
+    binding: LetNode,
+    scope: "global" | "local",
+    range: Range,
+    ctx: Ctx,
+    node: ResolvableNode,
+  ): ValueType {
+    if (this.silent === 0 && (scope === "local" || ctx.record)) this.usedLets.add(binding);
+    const type = this.inferLet(binding, scope, range, ctx);
+    this.recordResolution(ctx, node, { kind: "let", binding, scope, type });
+    return type;
+  }
+
+  private inferLet(
+    binding: LetNode,
+    scope: "global" | "local",
+    range: Range,
+    ctx: Ctx,
+  ): ValueType {
+    const state = ctx.letStates.get(binding);
+    if (state?.state === "evaluating") {
+      const start = Math.max(0, ctx.letStack.indexOf(binding));
+      const cycle = [...ctx.letStack.slice(start), binding];
+      const members = cycle.slice(0, -1);
+      // Speculative typing suppresses diagnostics and must not permanently
+      // mark the SCC: the committed pass still needs to emit its one E009.
+      if (this.silent === 0 && !members.some((decl) => this.cyclicLets.has(decl))) {
+        for (const decl of members) this.cyclicLets.add(decl);
+        this.error(
+          "E009",
+          `Binding dependency cycle: ${cycle.map((decl) => decl.name.name).join(" -> ")}`,
+          range,
+        );
+      }
+      return UNKNOWN;
+    }
+    if (state?.state === "done") return state.type;
+
+    ctx.letStates.set(binding, { state: "evaluating", type: UNKNOWN });
+    ctx.letStack.push(binding);
+    if (scope === "global") this.globalInitDepth++;
+    // A dependency edge between bindings is not syntactic expression
+    // nesting. Give each initializer its own expression-depth budget so a
+    // long dependency cycle reaches the evaluating-slot E009 detector.
+    const callerExprDepth = this.exprDepth;
+    this.exprDepth = 0;
+    let type: ValueType;
+    try {
+      type = this.typeOf(binding.initializer, EXP_NONE, ctx, false);
+    } finally {
+      this.exprDepth = callerExprDepth;
+      if (scope === "global") this.globalInitDepth--;
+    }
+    ctx.letStack.pop();
+    ctx.letStates.set(binding, { state: "done", type });
+    if (this.silent === 0) ctx.record?.letTypes.set(binding, type);
+    return type;
   }
 
   /** Bare identifier: expected-type-driven resolution (◆14†, ◆21†, ◆30†). */

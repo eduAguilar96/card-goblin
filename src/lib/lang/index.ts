@@ -116,7 +116,7 @@ export type { BundledFontFace, GeneratedFontMetrics } from "./font-metrics";
 export interface CompileResult {
   program: Program;
   bindings: Bindings;
-  /** Parse (E001) and check (E002–E008, W001–W004) diagnostics, source-ordered.
+  /** Parse (E001) and check (E002–E010, W001–W005) diagnostics, source-ordered.
    * (Plus the synthetic E000 — internal checker error — which should never
    * occur in practice; see check().) */
   diagnostics: Diagnostic[];

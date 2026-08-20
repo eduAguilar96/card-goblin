@@ -61,8 +61,8 @@ import type { EvalContext } from "./eval";
 import {
   compileErrorDiagnostic,
   DataError,
-  evalExpr,
   evalFace,
+  evalRootExpr,
   parseNumberCell,
   REPEAT_CAP,
 } from "./eval";
@@ -376,7 +376,7 @@ class Generator {
         let countFailure: DataDiagnostic[] | null = null;
         if (card.countExpr) {
           try {
-            const v = evalExpr(card.countExpr, ctx, null);
+            const v = evalRootExpr(card.countExpr, ctx, null);
             if (v.kind !== "number") {
               // A statically mistyped count: was already E003-squiggled —
               // compile-poisoned path (D000), NOT D006: compile errors own
@@ -651,6 +651,7 @@ class Generator {
       repeatStack: [],
       budget: { remaining: REPEAT_CAP },
       iconIssues,
+      session: null,
     };
   }
 }
