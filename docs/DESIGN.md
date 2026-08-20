@@ -1274,11 +1274,11 @@ behaves exactly as it does today.
     isn't just the untouched demo seed — is now a COLLISION, not an
     unconditional `replaceProject`: signing in on a machine with a
     half-finished deck no longer silently overwrites it with whatever the
-    cloud happens to hold. The prompt reuses the existing Reload/Overwrite
-    SHAPE (two inline status-bar buttons, no new dialog) with its own copy
-    ("Keep cloud copy" / "Keep this device's work") — the latter is the same
-    adopt-and-push the empty-cloud case uses, just based at the revision this
-    device saw instead of 0.
+    cloud happens to hold. The blocking synchronization checkpoint presents
+    **Use cloud project** / **Use this device's project**; the latter is the
+    same adopt-and-push the empty-cloud case uses, just based at the revision
+    this device saw instead of 0. Ordinary mid-session 409 conflicts retain
+    the compact status-bar Reload/Overwrite prompt.
 
 - **A manifest must never claim an asset that isn't actually on R2**
   († 2026-08-19 — independent review, HIGH, same class of bug as the addendum
@@ -1305,11 +1305,11 @@ behaves exactly as it does today.
   DELETE fired while the prompt is still showing was reaching R2 anyway —
   destroying the cloud copy before the user had chosen to keep it, so
   picking "Keep cloud copy" afterward could name bytes that were already
-  gone. Asset add/delete/rename now checks a narrower gate than push does:
-  every status except signed-out AND conflict (not "every status except
-  signed-out," which pushing alone still is) — editing itself is still
-  never blocked (⚑8's spirit), only the REMOTE write that would undercut a
-  choice nobody's made yet.
+  gone. Asset add/delete/rename now checks unresolved choice state as well as
+  the visible status, including a retained conflict after a failed upload and
+  a 409/behind prompt. Editing itself is still available after an ordinary
+  mid-session conflict; only the REMOTE asset write that would undercut a
+  choice nobody's made yet is suppressed.
 - **A partial image pull no longer claims a clean, green sync**
   († 2026-08-19 — independent review, MEDIUM). Downloading the images a
   pull's manifest lists used to swallow a per-asset failure (a presign
@@ -1319,16 +1319,19 @@ behaves exactly as it does today.
   (that part IS true), but a nonzero failure count now holds status at
   "offline" with a message naming how many images didn't come down, rather
   than claiming completeness FIX 2 specifically promises not to fake.
-- **Collision detection is code+sheets only — deliberately, not fixed**
-  († 2026-08-19 — independent review, MEDIUM, "your call"). Two devices
-  whose code and sheets match but who each hold a DIFFERENT image under the
-  same name are not flagged as a collision; an ordinary sync's existing
-  hash-mismatch re-download just silently replaces the local image, same as
-  it always could outside any conflict. Extending the comparison would mean
-  hashing every local asset before every sign-in decision even in the
-  common, no-problem case, for a narrower risk than the code/sheets
-  divergence this prompt exists to catch — deferred, disclosed in the wiki's
-  Honest Limits rather than silently left inconsistent with it.
+- **Initial collision detection includes local asset work**
+  († 2026-08-19 — strengthened for the blocking sync checkpoint). Comparing
+  code+sheets alone is not enough to promise that the visible project is the
+  saved one: a local-only image or different bytes under a shared name could
+  otherwise be silently replaced, or be pushed into the cloud on the next
+  edit after a supposedly clean pull. Initial reconciliation therefore waits
+  for the asset cache, hashes each local asset, and treats a local-only or
+  locally-different asset as a collision. Cloud-only assets are not a
+  collision because downloading them discards no local work. Choosing the
+  cloud copy removes local-only assets and downloads missing/different ones;
+  **Synced** is reached only when the resulting local library matches the
+  cloud manifest. Choosing the device copy uploads its complete manifest as
+  before.
 - **The mount-restore adopt now waits for the local asset list to actually
   be current** († 2026-08-19 — independent review, LOW). `initAssetStore`'s
   own IndexedDB restore is itself async and usually — but not provably —
@@ -1384,10 +1387,52 @@ behaves exactly as it does today.
   fails closed as a diagnosable storage error, while a stale strong ETag still
   fails at R2 and follows the existing 409 path.
 
+- **Sign-in and remembered-session restore are a blocking synchronization
+  checkpoint** († 2026-08-19 — production data-safety bug). A valid session
+  must never make a browser look synchronized merely because it learned the
+  cloud revision. The old mount-restore path fetched `project.json`, recorded
+  its current revision, and left the browser's local project visible without
+  comparing or applying the cloud payload. A later local push could therefore
+  present that freshly learned revision and overwrite a different cloud
+  project without the 409 guard firing. Both explicit sign-in and automatic
+  restoration now use the SAME collision-safe reconciliation path: compare
+  code, sheets, and local asset work; apply the cloud copy when local is
+  disposable/equal, adopt local only when the cloud is empty, and otherwise
+  require an explicit choice. The
+  remembered-session path never records a found revision without also applying
+  or comparing its project. Initial reconciliation also awaits the asset
+  store's cold-start refresh. Concurrent refresh callers share one in-flight
+  adapter read, preventing an older IndexedDB list from landing after cloud
+  downloads and making a false **Synced** claim.
+  - Once credentials are accepted (or a remembered session is detected), a
+    modal blocks editor interaction and says **Syncing** for the entire
+    reconciliation. It cannot be dismissed with Escape or the backdrop.
+  - A confirmed pull or push changes the modal to **Synced** and states that
+    the project now visible in the editor matches the saved cloud project. The
+    user explicitly chooses **Continue** before editing resumes.
+  - A network, auth, storage, or image-transfer failure changes it to **Could
+    not sync** and states that local work is safe but NOT confirmed saved in
+    the cloud. The user may acknowledge **Continue locally**. A divergent-copy
+    conflict is not dismissible: the modal offers cloud/local choices, returns
+    to **Syncing**, and reaches **Synced** only after that choice completes.
+    A failed GET or partial pull leaves its revision non-authoritative; the
+    next local edit retries `pull(true)` and can surface a choice, never a
+    blind PUT using a project that was not fully applied. Immediate asset
+    upload/delete/rename calls are suppressed across that same boundary so
+    they cannot mutate objects still named by an unknown cloud manifest. Any
+    local mutation made while authority is unknown forces a choice on that
+    retry; this distinguishes an intentional local deletion from a merely
+    not-yet-downloaded cloud-only asset.
+  Ordinary background autosaves retain the compact status-bar behavior; the
+  blocking gate is specifically for establishing which project is authoritative
+  at session entry.
+
 - **Failure posture (⚑8's spirit).** Any cloud failure — offline, expired
-  session, R2 error — degrades to local-only editing with a quiet indicator,
-  never a lost edit and never a blocked editor. Sign-out clears the session
-  cookie and leaves local data intact.
+  session, R2 error — preserves the local project. During initial reconciliation
+  it first blocks behind the explicit **Could not sync** checkpoint above; after
+  the user acknowledges local-only mode, editing resumes with the quiet Offline
+  indicator. Ordinary mid-session failures never block the editor. Sign-out
+  clears the session cookie and leaves local data intact.
 
 - **Known gap (M3 implementation, independent security review M6, not yet
   fixed): a CORRUPTED stored `project.json` bricks sync with no in-app

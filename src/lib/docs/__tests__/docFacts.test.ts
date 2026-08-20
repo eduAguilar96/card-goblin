@@ -290,6 +290,7 @@ describe("the collision-prompt wiki text matches cloudStatusLabel's 'conflict' c
     behindRevision: null,
     conflictProject: null,
     notice: null,
+    syncGate: null,
   };
   const label = cloudStatusLabel(CONFLICT_SNAPSHOT, 0);
   const text = pageText("cloud-sync");

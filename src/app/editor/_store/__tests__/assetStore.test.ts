@@ -388,6 +388,30 @@ describe("refresh() notifies subscribers when the list actually changed (adversa
     await store.refresh();
     expect(events).toEqual([{ type: "replaceAll" }]);
   });
+
+  it("coalesces concurrent cold-start refreshes so an older list cannot land last", async () => {
+    const adapter = createInMemoryAssetAdapter([dragon]);
+    const list = adapter.list.bind(adapter);
+    let release!: () => void;
+    const blocked = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let listCalls = 0;
+    adapter.list = async () => {
+      listCalls++;
+      await blocked;
+      return list();
+    };
+    const store = createAssetStore(adapter);
+
+    const first = store.refresh();
+    const second = store.refresh();
+    expect(listCalls).toBe(1);
+
+    release();
+    await Promise.all([first, second]);
+    expect(store.getAssetNames()).toEqual(new Set(["dragon"]));
+  });
 });
 
 // ---------------------------------------------------------------------------

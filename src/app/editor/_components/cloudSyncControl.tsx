@@ -35,15 +35,13 @@
  * reads as "still wrong" even before the new attempt resolves), and Sign in
  * is disabled — with a pending label — for the whole round trip.
  *
- * FIX 3 (§7.6 dated addendum, owner nit: "the dialog just closes silently"):
- * the dialog itself still just closes on success — the confirmation lives in
- * the status control instead, which is ALREADY the thing that stays visible
- * afterward. `cloudStatusLabel` shows `snapshot.notice` verbatim in place of
- * the ordinary "Synced…" label whenever cloudSync.ts has just set one (idle
- * + non-null notice, cleared at the start of the next pull/push — see that
- * module's doc comment), so "Loaded your cloud project" / "No cloud project
- * yet — uploading this one" is readable without opening devtools, no timer
- * needed here.
+ * INITIAL SYNC GATE (§7.6 dated addendum): once authentication succeeds, a
+ * second, non-dismissible dialog owns the whole reconciliation round trip.
+ * It blocks the editor while local and cloud copies are compared, says
+ * "Synced" only after the visible project is cloud-confirmed, and makes a
+ * collision an explicit choice inside the same gate. A failed round trip is
+ * equally explicit: local work is safe, but is NOT claimed to be saved in the
+ * cloud. Remembered-session restoration uses this same UI and controller path.
  *
  * FIX 4 (§7.6 dated addendum): `status === "conflict"` is the sign-in
  * collision prompt — local carries real work that isn't in the cloud copy
@@ -356,6 +354,231 @@ function ChoiceButtons({
   );
 }
 
+export interface SyncGateModalProps {
+  snapshot: CloudSyncSnapshot;
+  onDismiss(): void;
+  onReload(): void;
+  onOverwrite(): void;
+}
+
+/**
+ * The initial synchronization checkpoint. It deliberately has no Escape or
+ * backdrop close path: the editor stays unavailable until reconciliation has
+ * either succeeded, failed explicitly, or the user has resolved two divergent
+ * projects. This is stronger than the compact status-bar indicator because it
+ * answers the safety-critical question "which project am I looking at?" before
+ * editing can resume.
+ */
+export function SyncGateModal({
+  snapshot,
+  onDismiss,
+  onReload,
+  onOverwrite,
+}: SyncGateModalProps): ReactElement {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const firstButtonRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    return () => {
+      if (opener !== null && opener !== document.body && opener.isConnected) {
+        opener.focus();
+        return;
+      }
+      document.querySelector<HTMLElement>("[data-cloud-sync-focus-return]")?.focus();
+    };
+  }, []);
+
+  useEffect(() => {
+    (firstButtonRef.current ?? dialogRef.current)?.focus();
+  }, [snapshot.syncGate, snapshot.status]);
+
+  const handleDialogKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
+    if (event.key !== "Tab" || dialogRef.current === null) return;
+    const focusable = focusableElementsIn(dialogRef.current);
+    if (focusable.length === 0) {
+      event.preventDefault();
+      dialogRef.current.focus();
+      return;
+    }
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    const active = document.activeElement;
+    if (event.shiftKey && (active === first || active === dialogRef.current)) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && active === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  };
+
+  // Keep the original choice available if "Use this device" failed before
+  // its project PUT (for example, while uploading an image). The controller
+  // intentionally retains conflictProject in that case even though the
+  // compact status becomes Offline; treating status alone as the choice
+  // identity would turn a retryable conflict into a dismissible failure.
+  const isBehind = snapshot.behindRevision !== null || snapshot.status === "behind";
+  const isConflict =
+    !isBehind && (snapshot.conflictProject !== null || snapshot.status === "conflict");
+  const title =
+    snapshot.syncGate === "syncing"
+      ? "Syncing"
+      : snapshot.syncGate === "synced"
+        ? "Synced"
+        : "Could not sync";
+
+  return (
+    <div
+      className="fixed inset-0 z-[60] flex items-center justify-center whitespace-normal bg-black/70 p-4"
+      role="presentation"
+    >
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="cloud-sync-gate-title"
+        aria-describedby="cloud-sync-gate-description"
+        tabIndex={-1}
+        onKeyDown={handleDialogKeyDown}
+        className="w-full max-w-md rounded-lg border border-gray-700 bg-gray-800 p-5 text-sm text-gray-200 shadow-xl outline-none"
+      >
+        <h2 id="cloud-sync-gate-title" className="text-lg font-semibold text-white">
+          {title}
+        </h2>
+
+        {snapshot.syncGate === "syncing" && (
+          <div
+            id="cloud-sync-gate-description"
+            className="mt-3"
+            role="status"
+            aria-live="polite"
+          >
+            <p>Checking this device against the saved cloud project. Keep this window open.</p>
+            {snapshot.pullProgress !== null && (
+              <p className="mt-2 text-gray-400">
+                Syncing images ({snapshot.pullProgress.done} of {snapshot.pullProgress.total})…
+              </p>
+            )}
+          </div>
+        )}
+
+        {snapshot.syncGate === "synced" && (
+          <>
+            <p id="cloud-sync-gate-description" className="mt-3">
+              The project now shown in the editor matches the saved cloud project. You can safely
+              continue editing.
+            </p>
+            <div className="mt-5 flex justify-end">
+              <button
+                ref={firstButtonRef}
+                type="button"
+                onClick={onDismiss}
+                className="rounded border border-emerald-600 bg-emerald-700 px-4 py-2 font-semibold text-white hover:bg-emerald-600"
+              >
+                Continue
+              </button>
+            </div>
+          </>
+        )}
+
+        {snapshot.syncGate === "failed" && isConflict && (
+          <>
+            <p id="cloud-sync-gate-description" className="mt-3">
+              This device and the cloud contain different projects. CardGoblin has not completed a
+              project choice. Choose which one should become the saved cloud project.
+            </p>
+            {snapshot.errorMessage !== null && (
+              <p className="mt-2 text-red-400" role="alert">
+                {snapshot.errorMessage}
+              </p>
+            )}
+            <div className="mt-5 flex flex-wrap justify-end gap-2">
+              <button
+                ref={firstButtonRef}
+                type="button"
+                onClick={onReload}
+                className="rounded border border-gray-500 bg-gray-700 px-3 py-2 font-semibold text-white hover:bg-gray-600"
+              >
+                Use cloud project
+              </button>
+              <button
+                type="button"
+                onClick={onOverwrite}
+                className="rounded border border-amber-600 bg-amber-700 px-3 py-2 font-semibold text-white hover:bg-amber-600"
+              >
+                Use this device&apos;s project
+              </button>
+            </div>
+          </>
+        )}
+
+        {snapshot.syncGate === "failed" && isBehind && (
+          <>
+            <p id="cloud-sync-gate-description" className="mt-3">
+              The cloud project changed on another device before this one could finish syncing.
+              CardGoblin has not completed a project choice. Choose which project to keep.
+            </p>
+            {snapshot.errorMessage !== null && (
+              <p className="mt-2 text-red-400" role="alert">
+                {snapshot.errorMessage}
+              </p>
+            )}
+            <div className="mt-5 flex flex-wrap justify-end gap-2">
+              <button
+                ref={firstButtonRef}
+                type="button"
+                onClick={onReload}
+                className="rounded border border-gray-500 bg-gray-700 px-3 py-2 font-semibold text-white hover:bg-gray-600"
+              >
+                Load cloud project
+              </button>
+              <button
+                type="button"
+                onClick={onOverwrite}
+                className="rounded border border-amber-600 bg-amber-700 px-3 py-2 font-semibold text-white hover:bg-amber-600"
+              >
+                Save this device&apos;s project
+              </button>
+            </div>
+          </>
+        )}
+
+        {snapshot.syncGate === "failed" && !isConflict && !isBehind && (
+          <>
+            <div id="cloud-sync-gate-description" className="mt-3">
+              <p>
+                Your work is still safe on this device, but it has not been confirmed as saved in
+                the cloud.
+              </p>
+              {snapshot.errorMessage !== null && (
+                <p className="mt-2 text-red-400" role="alert">
+                  {snapshot.errorMessage}
+                </p>
+              )}
+            </div>
+            <div className="mt-5 flex justify-end">
+              <button
+                ref={firstButtonRef}
+                type="button"
+                onClick={onDismiss}
+                className="rounded border border-gray-500 bg-gray-700 px-4 py-2 font-semibold text-white hover:bg-gray-600"
+              >
+                Continue locally
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export interface CloudSyncControlContentProps {
   snapshot: CloudSyncSnapshot;
   /** Injected so the relative-time label is deterministic in tests and so
@@ -365,6 +588,7 @@ export interface CloudSyncControlContentProps {
   onSignOut(): void;
   onReload(): void;
   onOverwrite(): void;
+  onDismissSyncGate(): void;
   /** Test seam: render the sign-in dialog open, statically. */
   initialDialogOpen?: boolean;
 }
@@ -378,27 +602,46 @@ export function CloudSyncControlContent({
   onSignOut,
   onReload,
   onOverwrite,
+  onDismissSyncGate,
   initialDialogOpen = false,
 }: CloudSyncControlContentProps): ReactElement {
   const [dialogOpen, setDialogOpen] = useState(initialDialogOpen);
+
+  // Authentication errors stay in the credential dialog. Once credentials
+  // are accepted, the controller opens the dedicated sync checkpoint and the
+  // credential form gets out of its way.
+  useEffect(() => {
+    if (snapshot.syncGate !== null && dialogOpen) setDialogOpen(false);
+  }, [dialogOpen, snapshot.syncGate]);
+
+  const syncGate = snapshot.syncGate !== null ? (
+    <SyncGateModal
+      snapshot={snapshot}
+      onDismiss={onDismissSyncGate}
+      onReload={onReload}
+      onOverwrite={onOverwrite}
+    />
+  ) : null;
 
   if (snapshot.status === "signed-out") {
     return (
       <>
         <button
           type="button"
+          data-cloud-sync-focus-return
           onClick={() => setDialogOpen(true)}
           title="Sign in to sync this project across devices"
           className={QUIET_BUTTON}
         >
           Sign in
         </button>
-        {dialogOpen && (
+        {dialogOpen && snapshot.syncGate === null && (
           <SignInDialog
             onClose={() => setDialogOpen(false)}
             onSubmit={onSignIn}
           />
         )}
+        {syncGate}
       </>
     );
   }
@@ -411,35 +654,43 @@ export function CloudSyncControlContent({
         : "text-gray-400";
 
   return (
-    <span className="flex flex-wrap items-center gap-1.5">
-      <StatusDot status={snapshot.status} />
-      <span className={labelColor} title={snapshot.errorMessage ?? undefined}>
-        {cloudStatusLabel(snapshot, now)}
+    <>
+      <span className="flex flex-wrap items-center gap-1.5">
+        <StatusDot status={snapshot.status} />
+        <span className={labelColor} title={snapshot.errorMessage ?? undefined}>
+          {cloudStatusLabel(snapshot, now)}
+        </span>
+        {snapshot.status === "behind" && (
+          <ChoiceButtons
+            onLeft={onReload}
+            onRight={onOverwrite}
+            leftLabel="Reload"
+            rightLabel="Overwrite"
+            leftTitle="Discard this browser's unsynced changes and load the server's copy"
+            rightTitle="Keep this browser's copy and overwrite the server with it"
+          />
+        )}
+        {snapshot.status === "conflict" && (
+          <ChoiceButtons
+            onLeft={onReload}
+            onRight={onOverwrite}
+            leftLabel="Keep cloud copy"
+            rightLabel="Keep this device's work"
+            leftTitle="Discard this device's local work and load the cloud project"
+            rightTitle="Keep this device's work and upload it, replacing the cloud project"
+          />
+        )}
+        <button
+          type="button"
+          data-cloud-sync-focus-return
+          onClick={onSignOut}
+          className={QUIET_BUTTON}
+        >
+          Sign out
+        </button>
       </span>
-      {snapshot.status === "behind" && (
-        <ChoiceButtons
-          onLeft={onReload}
-          onRight={onOverwrite}
-          leftLabel="Reload"
-          rightLabel="Overwrite"
-          leftTitle="Discard this browser's unsynced changes and load the server's copy"
-          rightTitle="Keep this browser's copy and overwrite the server with it"
-        />
-      )}
-      {snapshot.status === "conflict" && (
-        <ChoiceButtons
-          onLeft={onReload}
-          onRight={onOverwrite}
-          leftLabel="Keep cloud copy"
-          rightLabel="Keep this device's work"
-          leftTitle="Discard this device's local work and load the cloud project"
-          rightTitle="Keep this device's work and upload it, replacing the cloud project"
-        />
-      )}
-      <button type="button" onClick={onSignOut} className={QUIET_BUTTON}>
-        Sign out
-      </button>
-    </span>
+      {syncGate}
+    </>
   );
 }
 
@@ -475,6 +726,7 @@ export default function CloudSyncControl(): ReactElement {
       onSignOut={() => cloudSync.signOut()}
       onReload={() => void cloudSync.reload()}
       onOverwrite={() => void cloudSync.overwrite()}
+      onDismissSyncGate={() => cloudSync.dismissSyncGate()}
     />
   );
 }

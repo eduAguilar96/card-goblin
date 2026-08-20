@@ -32,6 +32,7 @@ const SIGNED_OUT: CloudSyncSnapshot = {
   behindRevision: null,
   conflictProject: null,
   notice: null,
+  syncGate: null,
 };
 
 function snapshot(patch: Partial<CloudSyncSnapshot>): CloudSyncSnapshot {
@@ -47,6 +48,7 @@ function render(props: Partial<CloudSyncControlContentProps> = {}): string {
       onSignOut={props.onSignOut ?? (() => {})}
       onReload={props.onReload ?? (() => {})}
       onOverwrite={props.onOverwrite ?? (() => {})}
+      onDismissSyncGate={props.onDismissSyncGate ?? (() => {})}
       initialDialogOpen={props.initialDialogOpen}
     />,
   );
@@ -211,6 +213,111 @@ describe("CloudSyncControlContent — signed in", () => {
       snapshot: snapshot({ status: "pulling", pullProgress: { done: 2, total: 5 } }),
     });
     expect(stripTags(markup)).toContain("Syncing images (2 of 5)…");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Initial sync gate — the editor remains blocked until the visible project is
+// either cloud-confirmed or explicitly identified as local-only.
+// ---------------------------------------------------------------------------
+
+describe("CloudSyncControlContent — initial sync gate", () => {
+  it("blocks with an accessible Syncing dialog while reconciliation is in progress", () => {
+    const markup = render({
+      snapshot: snapshot({ status: "pulling", syncGate: "syncing" }),
+    });
+    const text = stripTags(markup);
+    expect(markup).toContain('role="dialog"');
+    expect(markup).toContain('aria-modal="true"');
+    expect(markup).toContain('aria-labelledby="cloud-sync-gate-title"');
+    expect(markup).toContain('aria-describedby="cloud-sync-gate-description"');
+    expect(text).toContain("Syncing");
+    expect(text).toContain("Checking this device against the saved cloud project");
+    expect(text).not.toContain("Continue");
+  });
+
+  it("shows image progress inside the blocking gate", () => {
+    const markup = render({
+      snapshot: snapshot({
+        status: "pulling",
+        syncGate: "syncing",
+        pullProgress: { done: 3, total: 8 },
+      }),
+    });
+    expect(stripTags(markup)).toContain("Syncing images (3 of 8)…");
+  });
+
+  it("requires acknowledgement after success and clearly identifies the visible project", () => {
+    const markup = render({
+      snapshot: snapshot({ status: "idle", syncGate: "synced", lastSyncedAt: 1_000_000 }),
+    });
+    const text = stripTags(markup);
+    expect(text).toContain("Synced");
+    expect(text).toContain("The project now shown in the editor matches the saved cloud project");
+    expect(text).toContain("Continue");
+    expect(text).not.toContain("Continue locally");
+  });
+
+  it("failed sync says local work is safe but not cloud-confirmed", () => {
+    const markup = render({
+      snapshot: snapshot({
+        status: "offline",
+        syncGate: "failed",
+        errorMessage: "Cloud storage is unavailable.",
+      }),
+    });
+    const text = stripTags(markup);
+    expect(text).toContain("Could not sync");
+    expect(text).toContain("still safe on this device");
+    expect(text).toContain("not been confirmed as saved in the cloud");
+    expect(text).toContain("Cloud storage is unavailable.");
+    expect(text).toContain("Continue locally");
+  });
+
+  it("different local and cloud projects cannot dismiss the gate without choosing one", () => {
+    const markup = render({
+      snapshot: snapshot({
+        status: "conflict",
+        syncGate: "failed",
+        conflictProject: { revision: 3, project: { code: "cloud", sheets: {}, assets: [] } },
+      }),
+    });
+    const text = stripTags(markup);
+    expect(text).toContain("Could not sync");
+    expect(text).toContain("has not completed a project choice");
+    expect(text).toContain("Use cloud project");
+    expect(text).toContain("Use this device&#x27;s project");
+    expect(text).not.toContain("Continue locally");
+  });
+
+  it("keeps the project choices after a local-copy upload fails before its project PUT", () => {
+    const markup = render({
+      snapshot: snapshot({
+        status: "offline",
+        syncGate: "failed",
+        errorMessage: 'Couldn\'t upload image "frame".',
+        conflictProject: { revision: 3, project: { code: "cloud", sheets: {}, assets: [] } },
+      }),
+    });
+    const text = stripTags(markup);
+    expect(text).toContain("Use cloud project");
+    expect(text).toContain("Use this device&#x27;s project");
+    expect(text).toContain("Couldn&#x27;t upload image");
+    expect(text).not.toContain("Continue locally");
+  });
+
+  it("an expired remembered session can still show the failed gate while signed out", () => {
+    const markup = render({
+      snapshot: snapshot({
+        status: "signed-out",
+        syncGate: "failed",
+        errorMessage: "Your cloud session expired. Sign in again.",
+      }),
+    });
+    const text = stripTags(markup);
+    expect(text).toContain("Sign in");
+    expect(text).toContain("Could not sync");
+    expect(text).toContain("Continue locally");
   });
 });
 

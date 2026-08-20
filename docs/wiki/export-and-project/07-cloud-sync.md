@@ -37,8 +37,25 @@ what's already in the cloud:
   genuinely different from it** — nothing is replaced until you choose; see
   **Your editor has work that isn't in the cloud**, below.
 
-Either way, the dialog itself just closes — the confirmation lives in the status
-bar next to it, so it's visible without opening developer tools.
+After the credentials are accepted, a blocking checkpoint makes the result
+unambiguous before you can edit:
+
+- **Syncing** means CardGoblin is comparing this browser with the cloud, loading or
+  uploading the chosen project, and transferring its images. Keep the window open.
+- **Synced** means the project now shown in the editor matches the saved cloud
+  project. Click **Continue** to resume editing.
+- **Could not sync** means your work is still safe in this browser, but CardGoblin
+  could not confirm it as saved in the cloud. You can **Continue locally**, or, if
+  CardGoblin found two different real projects, choose **Use cloud project** or
+  **Use this device's project**. A two-project choice cannot be dismissed without
+  deciding which copy to keep.
+
+This checkpoint also appears when CardGoblin restores a remembered 30-day session
+on page load. A remembered login is never treated as proof that the project already
+visible in that browser is current: CardGoblin performs the same comparison and
+pull as a fresh sign-in. Private/incognito windows may share their private session
+while any private window remains open, but they still pass through this project
+reconciliation.
 
 If sign-in fails, the dialog now says why: a wrong username or password, the server
 not being set up for cloud sync at all, a network problem reaching it, or an
@@ -70,16 +87,20 @@ button:
   ordinary "Synced…" wording on your next change.
 - **Syncing…** — a push or pull is in progress.
 - **Offline** — the last attempt failed (no network, the server is unreachable, your
-  session expired). Editing is completely unaffected; CardGoblin quietly keeps
-  working locally and retries on your next change. When R2 itself rejects a
+  session expired). During sign-in, CardGoblin first explains this in the blocking
+  **Could not sync** checkpoint; after you choose **Continue locally**, editing is
+  unaffected and CardGoblin retries a safe cloud comparison on your next change.
+  If your local work now differs, that retry asks which project to keep instead of
+  pushing blindly. Mid-session failures use only this quiet status. When R2 itself rejects a
   storage request, the detail names the operation plus its safe status/error code
   (without exposing credentials or project contents), so deployment problems are
   actionable instead of all reading as the same generic storage error.
 - **This browser is behind** — see below.
 - **Your editor has work that isn't in the cloud** — see below.
 
-**Sign out** is always available next to the indicator. It clears the session on this
-browser only; your project stays exactly as it was in the cloud.
+After the initial checkpoint is resolved and dismissed, **Sign out** is available
+next to the indicator. It clears the session on this browser only; your project
+stays exactly as it was in the cloud.
 
 ## "This browser is behind"
 
@@ -101,16 +122,16 @@ a conflict means the cloud copy actually changed after this browser last read it
 This is the sign-in version of the same problem: signing in found a project in the
 cloud, but this browser ALSO has its own project that isn't just the demo and isn't
 already what the cloud holds — two real, different projects. Rather than guessing
-which one you want, CardGoblin pauses and asks, right in the status bar:
+which one you want, CardGoblin keeps the synchronization checkpoint open and asks:
 
-- **Keep cloud copy** — discard this browser's local work and load the cloud
+- **Use cloud project** — discard this browser's local work and load the cloud
   project (downloading its images the same way an ordinary sign-in would).
-- **Keep this device's work** — keep what's in this browser and upload it — code,
+- **Use this device's project** — keep what's in this browser and upload it — code,
   sheet rows, and every image — replacing what was in the cloud.
 
-Same shape as "This browser is behind" above (nothing replaced until you choose),
-because it's the same underlying question — it just comes up at sign-in instead of
-mid-session, so the buttons are named for what you're actually choosing between.
+Nothing is replaced until you choose. The checkpoint returns to **Syncing** while
+the choice is applied, and says **Synced** only when the chosen project is the saved
+cloud project.
 
 ## Honest limits
 
@@ -126,13 +147,13 @@ mid-session, so the buttons are named for what you're actually choosing between.
   to discard them there too).
 - **Images sync separately from code and sheets**, as described above — a moment
   where one has synced and the other hasn't is normal, not a bug.
-- **"Your editor has work that isn't in the cloud" only looks at code and sheet
-  rows, not images.** If two devices' code and sheets happen to match but they
-  have a DIFFERENT image saved under the same name, signing in won't prompt for
-  that — an ordinary sync just re-downloads whichever version the cloud has,
-  the same hash-mismatch check that keeps images current in general, silently
-  replacing the local one. Narrower and rarer than the code/sheets case this
-  prompt exists for, and not currently covered.
+- **Image work participates in the sign-in choice.** A local-only image or
+  different local bytes under the same name counts as work, even if code and
+  sheet rows already match. CardGoblin asks which project to keep instead of
+  silently replacing that image. Images present only in the cloud are simply
+  downloaded because that does not discard local work. Choosing the cloud
+  project removes local-only images; choosing this device uploads its complete
+  image library.
 - **Removing an image doesn't always clean up the cloud copy.** An ordinary delete
   in the Assets drawer does — that upload is removed from the cloud right away. But
   **Reset to demo** and importing a [project file](project-files.md) replace your

@@ -5,12 +5,13 @@
  * assetStore.ts's `AssetAdapter`) + a browser-only singleton.
  *
  * THE MIRROR, NOT A REPLACEMENT (§7.6's framing, load-bearing throughout this
- * file): the cloud is a mirror of the local stores. Local editing is NEVER
- * gated by anything in here — this module only ever OBSERVES `editorStore`/
- * `assetStore` and reacts; it never blocks a write, and every network path
- * degrades to a quiet status instead of surfacing an error the user has to
- * deal with. Signed-out (the default, no hint in storage) touches NEITHER
- * store at all — zero behavior change for anyone who never signs in.
+ * file): the cloud is a mirror of the local stores. This controller never
+ * blocks a store write; the UI alone places a blocking checkpoint over the
+ * editor while initial authority is established. A failed checkpoint can be
+ * acknowledged into local-only editing, while ordinary mid-session failures
+ * remain quiet status changes. Signed-out (the default, no hint in storage)
+ * touches NEITHER store at all — zero behavior change for anyone who never
+ * signs in.
  *
  * STATE MACHINE (`CloudSyncStatus`):
  *   signed-out → signing-in → pulling → idle ⇄ pushing
@@ -18,18 +19,13 @@
  *                                          ↘ behind (409 — needs Reload/Overwrite)
  *                                          ↘ conflict (found ≠ local, both real — needs a choice)
  *
- * - PULL happens exactly once per sign-in (brief D) — not on every reload.
- *   A reload with a previously-signed-in hint only RE-CONFIRMS the session
- *   (a side-effect-free GET) and records the server's revision; it never
- *   calls `replaceProject`. Rationale: this browser's local project is
- *   already authoritative for ITSELF (local-first) — blindly re-pulling on
- *   every reload risks clobbering an edit this browser made while offline
- *   and never got to push. Divergence is instead caught the existing way:
- *   the next PUSH's `baseRevision` won't match, surfacing the SAME
- *   Reload/Overwrite prompt a live conflict would. The mount-restore GET's
- *   NOT-FOUND branch is the one exception to "never act on a mere reload":
- *   nothing remote exists to defer to, so it runs the same adopt a fresh
- *   sign-in does (below) rather than leaving the bucket empty indefinitely.
+ * - Every newly authenticated session performs the SAME collision-safe
+ *   initial pull, whether authentication came from the sign-in form or a
+ *   remembered-session hint on page load. A hinted restore must never only
+ *   record the server revision: doing so lets a stale local project use the
+ *   CURRENT revision on its next push and silently overwrite newer cloud
+ *   work. `pull(true)` compares local/server before either applying cloud or
+ *   adopting local, and pauses on genuine divergence for an explicit choice.
  * - NOT FOUND IS AN ADOPT, NOT A SILENT SUCCESS (production bug fixed
  *   2026-08-18 — DESIGN.md §7.6's dated addendum has the full incident): the
  *   original not-found branch recorded revision 0 and claimed "idle" with a
@@ -101,15 +97,11 @@
  * hash, no bytes) rides the debounced push. `clear`/`replaceAll` events
  * (reset-to-demo, a project-file import while signed in) do NOT individually
  * clean up remote objects — an accepted v1 gap, documented on the listener
- * below and called out in the report. Collision detection (`conflict`,
- * above) is deliberately CODE+SHEETS ONLY (`projectContentEquals`) — an
- * asset-only divergence (same name, different bytes, on two devices whose
- * code happens to match) is NOT caught and can still be silently replaced
- * by an ordinary pull's hash-mismatch re-download; disclosed, not fixed,
- * in DESIGN.md §7.6's second dated addendum and the wiki (independent
- * review, MEDIUM — extending the comparison to assets would mean hashing
- * every local asset before every sign-in decision, for a narrower risk
- * than the code/sheets case this exists to close).
+ * below and called out in the report. Initial collision detection is asset-
+ * aware as well as code+sheets-aware: a local-only name or different local
+ * bytes is real work and requires a choice. A cloud-only asset is safe to
+ * download without prompting. Choosing cloud removes local-only assets so a
+ * successful gate can truthfully say the local library matches its manifest.
  */
 
 import {
@@ -463,13 +455,18 @@ export interface CloudSyncSnapshot {
    * the NEXT pull/push so it never lingers past whatever happens next. Null
    * the rest of the time — an ordinary edit-driven push never sets it. */
   notice: string | null;
+  /** Blocking initial-sync handoff shown after authentication. `failed`
+   * also covers unresolved conflict/behind choices; those cannot be
+   * dismissed until the user resolves them. */
+  syncGate: "syncing" | "synced" | "failed" | null;
 }
 
 export interface CloudSyncController {
   getSnapshot(): CloudSyncSnapshot;
   subscribe(listener: () => void): () => void;
   /** Resolves once sign-in AND the initial pull have settled (success or
-   * degraded-to-offline) — the dialog awaits this to know when to close.
+   * degraded-to-offline) — the credentials dialog yields to the sync gate
+   * as soon as authentication succeeds.
    * Both fields required (FEATURE: username+password) — see CloudTransport
    * .login's doc comment. */
   signIn(username: string, password: string): Promise<{ ok: true } | { ok: false; message: string }>;
@@ -480,6 +477,9 @@ export interface CloudSyncController {
    * reload() = take the other copy; overwrite() = push local over it. */
   reload(): Promise<void>;
   overwrite(): Promise<void>;
+  /** Close the initial-sync handoff only after success or a failure with no
+   * unresolved conflict/behind choice. */
+  dismissSyncGate(): void;
   /** pagehide hook — mirrors persistence.ts's `flush()`: run a PENDING
    * debounced push now; no-op when nothing is pending. */
   flush(): void;
@@ -492,8 +492,9 @@ export interface CloudSyncController {
  * PERSIST_DEBOUNCE_MS) — R2's free tier allows 1M writes/month, and a
  * per-keystroke push would be the only realistic way to threaten that. 10 s
  * idle means even a long editing session that never truly pauses for 10 s
- * produces zero pushes until it does — acceptable, since editing itself is
- * never blocked either way (module note above). Guarded against the wiki by
+ * produces zero pushes until it does — acceptable for ordinary editing;
+ * initial reconciliation is separately gated by the UI (module note above).
+ * Guarded against the wiki by
  * docFacts.test.ts, like PERSIST_DEBOUNCE_MS.
  */
 export const PUSH_DEBOUNCE_MS = 10_000;
@@ -518,15 +519,16 @@ const isTransitioning = (status: CloudSyncStatus): boolean =>
  * let a delete fired during an unresolved sign-in collision destroy the
  * cloud copy before the user had chosen to discard it — contradicting the
  * wiki's "nothing is replaced until you choose" the moment "Keep cloud
- * copy" then named the now-missing bytes in its own manifest. Every status
- * except "signed-out" and "conflict" may still mutate remote assets —
- * unlike a push, an asset add/delete is never blocked by pulling/signing-in
- * either (module note up top: "never block editing"); it's specifically
- * the UNRESOLVED CHOICE a conflict represents that must not be undercut
- * from behind it.
+ * copy" then named the now-missing bytes in its own manifest. Asset writes
+ * remain independent of the manifest debounce, but an unresolved authority
+ * choice must not be undercut from behind it.
  */
-const canMutateRemoteAssets = (status: CloudSyncStatus): boolean =>
-  status !== "signed-out" && status !== "conflict";
+const canMutateRemoteAssets = (state: CloudSyncSnapshot): boolean =>
+  state.status !== "signed-out" &&
+  state.status !== "conflict" &&
+  state.status !== "behind" &&
+  state.conflictProject === null &&
+  state.behindRevision === null;
 
 /**
  * FIX 3 (DESIGN.md §7.6's dated addendum): the two on-success confirmations
@@ -635,8 +637,7 @@ export interface CloudSyncDeps {
  * Build a controller over one set of dependencies (headless-usable — tests
  * build one per case, exactly like createEditorStore/createAssetStore). If
  * `hint.get()` is already true (a prior sign-in this browser remembers), it
- * kicks off the mount-restore session check immediately — see the module
- * note on why that check never calls `replaceProject`.
+ * kicks off the same collision-safe initial pull explicit sign-in uses.
  */
 export function createCloudSyncController(deps: CloudSyncDeps): CloudSyncController {
   const { store, assets, transport, hint } = deps;
@@ -649,11 +650,24 @@ export function createCloudSyncController(deps: CloudSyncDeps): CloudSyncControl
     behindRevision: null,
     conflictProject: null,
     notice: null,
+    syncGate: null,
   };
   let knownRevision = 0;
+  // True only after this controller has reconciled against the cloud copy
+  // (or observed it absent). A failed/partial initial pull must not let an
+  // ordinary edit push using a revision whose project was never fully
+  // applied or explicitly chosen.
+  let revisionAuthoritative = false;
+  // While authority is unknown, a cloud-only asset normally means "this
+  // device has not downloaded it yet." Once the user mutates local state in
+  // that window, however, absence can mean an intentional deletion. Preserve
+  // that intent by forcing the next collision-safe pull to ask rather than
+  // silently restoring cloud-only data.
+  let localChangedWhileUnauthoritative = false;
   let pushTimer: ReturnType<typeof setTimeout> | null = null;
   let pushInFlight = false;
   let pushAgainAfterInFlight = false;
+  let resolutionInFlight = false;
   // Suppresses the store/asset listeners below while THIS controller is the
   // one writing local state (a pull's replaceProject + asset downloads) —
   // exactly persistence.ts's resetToDemo `muted` idiom, extended to cover
@@ -683,6 +697,13 @@ export function createCloudSyncController(deps: CloudSyncDeps): CloudSyncControl
     snapshot = { ...snapshot, ...patch };
     notify();
   };
+
+  /** Ordinary background sync never opens the blocking handoff. Once an
+   * authenticated initial sync has opened it, however, every terminal path
+   * must report its outcome there as well as in the status bar. */
+  const syncGatePatch = (
+    state: Exclude<CloudSyncSnapshot["syncGate"], null>,
+  ): Partial<CloudSyncSnapshot> => (snapshot.syncGate === null ? {} : { syncGate: state });
 
   /** A fresh read of `snapshot.status`, specifically for re-checking it AFTER
    * an `await` inside a block that already narrowed `snapshot.status` to one
@@ -720,8 +741,32 @@ export function createCloudSyncController(deps: CloudSyncDeps): CloudSyncControl
     return manifest;
   }
 
-  async function runPush(): Promise<void> {
-    if (disposed) return;
+  /** Initial collision detection is asymmetric by design: a cloud-only
+   * asset can be downloaded safely, but a local-only or locally-different
+   * asset is work that choosing cloud would discard and therefore requires
+   * an explicit choice. */
+  async function localAssetsDivergeFromCloud(
+    manifest: readonly CloudAssetManifestEntry[],
+  ): Promise<boolean> {
+    const serverByName = new Map(manifest.map((entry) => [entry.name, entry]));
+    for (const local of assets.getSnapshot().assets) {
+      const server = serverByName.get(local.name);
+      if (server === undefined || server.mime !== local.mime || server.size !== local.size) return true;
+      const stored = await assets.getBytes(local.name);
+      if (stored === null || (await sha256Hex(await assetBytes(stored))) !== server.hash) return true;
+    }
+    return false;
+  }
+
+  async function runPush(allowConflictResolution = false): Promise<void> {
+    if (
+      disposed ||
+      !revisionAuthoritative ||
+      (!allowConflictResolution &&
+        (snapshot.conflictProject !== null || snapshot.behindRevision !== null))
+    ) {
+      return;
+    }
     if (pushInFlight) {
       pushAgainAfterInFlight = true;
       return;
@@ -763,7 +808,9 @@ export function createCloudSyncController(deps: CloudSyncDeps): CloudSyncControl
     // manifest go out regardless.
     const unconfirmed = manifest.filter((entry) => remoteAssetHashes.get(entry.name) !== entry.hash);
     if (unconfirmed.length > 0) {
-      const uploaded = await Promise.all(unconfirmed.map((entry) => uploadAssetBytes(entry.name)));
+      const uploaded = await Promise.all(
+        unconfirmed.map((entry) => uploadAssetBytes(entry.name, allowConflictResolution)),
+      );
       if (disposed || snapshot.status === "signed-out") {
         pushInFlight = false;
         return;
@@ -772,6 +819,7 @@ export function createCloudSyncController(deps: CloudSyncDeps): CloudSyncControl
         // uploadAssetBytes already recorded "offline" + why — the manifest
         // must not go out still claiming an asset that just failed to land.
         pushInFlight = false;
+        setSnapshot(syncGatePatch("failed"));
         if (pushAgainAfterInFlight) {
           pushAgainAfterInFlight = false;
           schedulePush();
@@ -794,13 +842,30 @@ export function createCloudSyncController(deps: CloudSyncDeps): CloudSyncControl
 
     if (result.ok) {
       knownRevision = result.revision;
+      localChangedWhileUnauthoritative = false;
       // Every entry THIS push just claimed is now genuinely confirmed.
       for (const entry of manifest) remoteAssetHashes.set(entry.name, entry.hash);
-      setSnapshot({ status: "idle", lastSyncedAt: Date.now(), errorMessage: null });
+      setSnapshot({
+        status: "idle",
+        lastSyncedAt: Date.now(),
+        errorMessage: null,
+        behindRevision: null,
+        conflictProject: null,
+        ...syncGatePatch("synced"),
+      });
     } else if (result.conflict) {
-      setSnapshot({ status: "behind", behindRevision: result.revision, errorMessage: null });
+      setSnapshot({
+        status: "behind",
+        behindRevision: result.revision,
+        errorMessage: null,
+        ...syncGatePatch("failed"),
+      });
     } else {
-      setSnapshot({ status: "offline", errorMessage: result.message ?? describeFailure(result.status) });
+      setSnapshot({
+        status: "offline",
+        errorMessage: result.message ?? describeFailure(result.status),
+        ...syncGatePatch("failed"),
+      });
     }
 
     if (pushAgainAfterInFlight) {
@@ -838,6 +903,7 @@ export function createCloudSyncController(deps: CloudSyncDeps): CloudSyncControl
     // caller can't reintroduce a post-dispose mutation just by forgetting to.
     if (disposed) return;
     knownRevision = baseRevision;
+    revisionAuthoritative = true;
     setSnapshot({ status: "pushing", pullProgress: null, errorMessage: null, notice: null });
     // LOW fix (independent review): the asset store's initial IndexedDB
     // restore is itself async (assetStore.ts's `initAssetStore` fires its
@@ -853,7 +919,7 @@ export function createCloudSyncController(deps: CloudSyncDeps): CloudSyncControl
     // not whatever placeholder existed before IndexedDB answered.
     await assets.refresh();
     if (disposed || snapshot.status === "signed-out") return;
-    await runPush();
+    await runPush(notice === null);
     if (disposed) return;
     if (notice !== null && currentStatus() === "idle") setSnapshot({ notice });
   }
@@ -865,6 +931,17 @@ export function createCloudSyncController(deps: CloudSyncDeps): CloudSyncControl
    * 10 s of unsaved edits). */
   function flushPendingPush(): void {
     if (pushTimer === null) return;
+    // pagehide must not bypass the same reconciliation boundary the debounce
+    // respects. In particular, a hinted initial pull may have a CURRENT
+    // server revision in flight while local still reflects an older copy.
+    if (
+      (snapshot.status !== "idle" && snapshot.status !== "pushing" && snapshot.status !== "offline") ||
+      !revisionAuthoritative ||
+      snapshot.conflictProject !== null ||
+      snapshot.behindRevision !== null
+    ) {
+      return;
+    }
     cancelPushTimer();
     void runPush();
   }
@@ -884,6 +961,14 @@ export function createCloudSyncController(deps: CloudSyncDeps): CloudSyncControl
         return;
       }
       if (snapshot.status === "signed-out") return; // signed out while waiting
+      // A failed initial GET/partial pull deliberately leaves the revision
+      // non-authoritative. The next edit retries collision-safe
+      // reconciliation; it must never become a blind PUT from revision 0 or
+      // silently do nothing for the rest of the session.
+      if (!revisionAuthoritative) {
+        void pull(/* checkForCollision */ true);
+        return;
+      }
       void runPush();
     }, PUSH_DEBOUNCE_MS);
   }
@@ -906,7 +991,7 @@ export function createCloudSyncController(deps: CloudSyncDeps): CloudSyncControl
     const missing: CloudAssetManifestEntry[] = [];
     for (const entry of manifest) {
       const local = localByName.get(entry.name);
-      if (local === undefined) {
+      if (local === undefined || local.mime !== entry.mime || local.size !== entry.size) {
         missing.push(entry);
         continue;
       }
@@ -924,8 +1009,10 @@ export function createCloudSyncController(deps: CloudSyncDeps): CloudSyncControl
     setSnapshot({ pullProgress: { done: 0, total: missing.length } });
     for (const [i, entry] of missing.entries()) {
       const presign = await transport.presignAssetGet(entry.name);
+      if (disposed || currentStatus() === "signed-out") return failed;
       if (presign.ok) {
         const bytes = await transport.downloadFromPresignedUrl(presign.url);
+        if (disposed || currentStatus() === "signed-out") return failed;
         if (bytes !== null) {
           try {
             await assets.upload(entry.name, entry.mime, bytes);
@@ -961,13 +1048,7 @@ export function createCloudSyncController(deps: CloudSyncDeps): CloudSyncControl
   ): Promise<{ assetFailures: number }> {
     // Same defense-in-depth as adoptLocalProject's own top-of-function check.
     if (disposed) return { assetFailures: 0 };
-    knownRevision = revision;
-    // HIGH fix: every entry the SERVER's own manifest lists is, by
-    // definition, confirmed present remotely with that hash — feed that
-    // into the SAME tracking `runPush` uses (its doc comment), so a later
-    // edit's push doesn't redundantly re-upload art this device only just
-    // downloaded (or already matched by hash).
-    for (const entry of project.assets) remoteAssetHashes.set(entry.name, entry.hash);
+    revisionAuthoritative = false;
     muted = true;
     try {
       store.getState().replaceProject({ code: project.code, sheets: project.sheets });
@@ -977,9 +1058,29 @@ export function createCloudSyncController(deps: CloudSyncDeps): CloudSyncControl
     let assetFailures = 0;
     muted = true;
     try {
-      assetFailures = await pullAssets(project.assets);
+      const serverNames = new Set(project.assets.map((entry) => entry.name));
+      for (const local of assets.getSnapshot().assets) {
+        if (disposed || currentStatus() === "signed-out") return { assetFailures };
+        if (!serverNames.has(local.name)) {
+          try {
+            await assets.remove(local.name);
+          } catch {
+            assetFailures++;
+          }
+        }
+      }
+      assetFailures += await pullAssets(project.assets);
     } finally {
       muted = false;
+    }
+    if (disposed || currentStatus() === "signed-out") return { assetFailures };
+    if (assetFailures === 0) {
+      knownRevision = revision;
+      revisionAuthoritative = true;
+      localChangedWhileUnauthoritative = false;
+      // Every entry the SERVER's own manifest lists is confirmed present
+      // remotely; only record that confidence once local fully matches it.
+      for (const entry of project.assets) remoteAssetHashes.set(entry.name, entry.hash);
     }
     return { assetFailures };
   }
@@ -1000,9 +1101,24 @@ export function createCloudSyncController(deps: CloudSyncDeps): CloudSyncControl
   async function pull(checkForCollision: boolean): Promise<void> {
     setSnapshot({ status: "pulling", pullProgress: null, notice: null });
     const result = await transport.getProject();
-    if (disposed) return;
+    // Sign-out is authoritative even when the GET was already in flight:
+    // its late response must not apply cloud state or reopen the gate.
+    if (disposed || currentStatus() === "signed-out") return;
     if (!result.ok) {
-      setSnapshot({ status: "offline", errorMessage: result.message ?? describeFailure(result.status) });
+      if (result.status === 401) {
+        hint.set(false);
+        setSnapshot({
+          status: "signed-out",
+          errorMessage: "Your cloud session expired. Sign in again.",
+          ...syncGatePatch("failed"),
+        });
+      } else {
+        setSnapshot({
+          status: "offline",
+          errorMessage: result.message ?? describeFailure(result.status),
+          ...syncGatePatch("failed"),
+        });
+      }
       return;
     }
     if (!result.found) {
@@ -1018,16 +1134,28 @@ export function createCloudSyncController(deps: CloudSyncDeps): CloudSyncControl
       // work. Local matching the demo, or matching the server, both mean
       // nothing would be lost, so both apply immediately — unchanged from
       // before this fix (and the case every earlier test already covers).
+      muted = true;
+      try {
+        await assets.refresh();
+      } finally {
+        muted = false;
+      }
+      if (disposed || currentStatus() === "signed-out") return;
       const local = store.getState();
       const localSeed: EditorSeed = { code: local.code, sheets: local.sheets };
       const serverSeed: EditorSeed = { code: result.project.code, sheets: result.project.sheets };
       const collides =
-        !projectContentEquals(localSeed, demoSeed()) && !projectContentEquals(localSeed, serverSeed);
+        localChangedWhileUnauthoritative ||
+        (!projectContentEquals(localSeed, demoSeed()) && !projectContentEquals(localSeed, serverSeed)) ||
+        (await localAssetsDivergeFromCloud(result.project.assets));
+      if (disposed || currentStatus() === "signed-out") return;
       if (collides) {
         setSnapshot({
           status: "conflict",
           pullProgress: null,
+          behindRevision: null,
           conflictProject: { revision: result.revision, project: result.project },
+          ...syncGatePatch("failed"),
         });
         return;
       }
@@ -1042,13 +1170,26 @@ export function createCloudSyncController(deps: CloudSyncDeps): CloudSyncControl
       // down is the same class of dishonesty FIX 2 closed for the manifest
       // push, extended here to the pull side (partialPullMessage's doc
       // comment).
-      setSnapshot({ status: "offline", pullProgress: null, errorMessage: partialPullMessage(assetFailures) });
+      setSnapshot({
+        status: "offline",
+        pullProgress: null,
+        errorMessage: partialPullMessage(assetFailures),
+        ...syncGatePatch("failed"),
+      });
       return;
     }
-    setSnapshot({ status: "idle", lastSyncedAt: Date.now(), pullProgress: null, notice: LOADED_NOTICE });
+    setSnapshot({
+      status: "idle",
+      lastSyncedAt: Date.now(),
+      pullProgress: null,
+      notice: LOADED_NOTICE,
+      behindRevision: null,
+      conflictProject: null,
+      ...syncGatePatch("synced"),
+    });
   }
 
-  // -- mount-restore (module note: confirms auth, never pulls) ------------
+  // -- mount-restore -------------------------------------------------------
 
   function restoreSessionIfHinted(): void {
     // `disposed` guards the now-deferred (queueMicrotask) call below: this
@@ -1056,31 +1197,8 @@ export function createCloudSyncController(deps: CloudSyncDeps): CloudSyncControl
     // turn between being scheduled and running (e.g. a rapid second
     // attach()) — a no-op in that case, not a harmful stale write.
     if (disposed || !hint.get()) return;
-    setSnapshot({ status: "pulling", pullProgress: null }); // "confirming", reuses the same visible label
-    void transport.getProject().then(async (result) => {
-      if (disposed) return;
-      if (!result.ok) {
-        if (result.status === 401) {
-          hint.set(false);
-          setSnapshot({ status: "signed-out", errorMessage: null });
-        } else {
-          setSnapshot({ status: "offline", errorMessage: result.message ?? describeFailure(result.status) });
-        }
-        return;
-      }
-      if (!result.found) {
-        // Same gap as pull()'s not-found branch, same fix (FIX 1): a
-        // returning visit that re-confirms an active session against a
-        // STILL empty bucket must not keep sitting at a quiet "idle"
-        // forever — nothing remote exists to defer to here (contrast the
-        // found branch below, which deliberately never touches local on a
-        // mere reload — module comment up top).
-        await adoptLocalProject(0, ADOPTED_NOTICE);
-        return;
-      }
-      knownRevision = result.revision;
-      setSnapshot({ status: "idle", pullProgress: null });
-    });
+    setSnapshot({ syncGate: "syncing", errorMessage: null });
+    void pull(/* checkForCollision */ true);
   }
 
   // -- reactive wiring ------------------------------------------------------
@@ -1088,11 +1206,17 @@ export function createCloudSyncController(deps: CloudSyncDeps): CloudSyncControl
   const unsubscribeStore = store.subscribe((state, prev) => {
     if (muted) return;
     if (state.code === prev.code && state.sheets === prev.sheets) return;
+    if (!revisionAuthoritative && snapshot.status === "offline") {
+      localChangedWhileUnauthoritative = true;
+    }
     schedulePush();
   });
 
   const unsubscribeAssets = assets.subscribe((event) => {
     if (muted) return;
+    if (!revisionAuthoritative && snapshot.status === "offline") {
+      localChangedWhileUnauthoritative = true;
+    }
     // remoteAssetHashes clears in lockstep with hashCache (HIGH fix): ANY
     // local mutation invalidates confidence that R2 still matches, until
     // re-confirmed by an actual successful upload or a fresh pull manifest
@@ -1134,8 +1258,10 @@ export function createCloudSyncController(deps: CloudSyncDeps): CloudSyncControl
    * this with `void` and ignores the result — a live put has nothing
    * further gated on it succeeding.
    */
-  async function uploadAssetBytes(name: string): Promise<boolean> {
-    if (!canMutateRemoteAssets(snapshot.status)) return false;
+  async function uploadAssetBytes(name: string, allowConflictResolution = false): Promise<boolean> {
+    if (!allowConflictResolution && (!revisionAuthoritative || !canMutateRemoteAssets(snapshot))) {
+      return false;
+    }
     const stored = await assets.getBytes(name);
     if (stored === null) return true; // vanished locally before we got to it — nothing to upload
     const bytes = await assetBytes(stored);
@@ -1161,7 +1287,7 @@ export function createCloudSyncController(deps: CloudSyncDeps): CloudSyncControl
   }
 
   async function deleteAssetRemote(name: string): Promise<void> {
-    if (!canMutateRemoteAssets(snapshot.status)) return;
+    if (!revisionAuthoritative || !canMutateRemoteAssets(snapshot)) return;
     const result = await transport.deleteAsset(name);
     if (!result.ok) {
       setSnapshot({ status: "offline", errorMessage: result.message ?? describeFailure(result.status) });
@@ -1199,7 +1325,9 @@ export function createCloudSyncController(deps: CloudSyncDeps): CloudSyncControl
         setSnapshot({ status: "signed-out" });
         return { ok: false, message: signInFailureMessage(result.status) };
       }
+      if (disposed || currentStatus() === "signed-out") return { ok: true };
       hint.set(true);
+      setSnapshot({ syncGate: "syncing" });
       await pull(/* checkForCollision */ true); // FIX 4 — see pull()'s doc comment
       return { ok: true };
     },
@@ -1212,9 +1340,14 @@ export function createCloudSyncController(deps: CloudSyncDeps): CloudSyncControl
       // CloudSyncController interface) — its eventual result is guarded
       // against landing after the fact by runPush's own `signed-out` check.
       flushPendingPush();
+      // If reconciliation blocked the flush, signing out drops the timer;
+      // it must not wake later with revision state signOut resets below.
+      cancelPushTimer();
       hint.set(false);
       void transport.logout();
       knownRevision = 0;
+      revisionAuthoritative = false;
+      localChangedWhileUnauthoritative = false;
       hashCache.clear();
       setSnapshot({
         status: "signed-out",
@@ -1224,82 +1357,106 @@ export function createCloudSyncController(deps: CloudSyncDeps): CloudSyncControl
         behindRevision: null,
         conflictProject: null,
         notice: null,
+        syncGate: null,
       });
     },
 
     async reload() {
-      if (snapshot.status === "conflict") {
-        // FIX 4's "Keep cloud copy": apply the copy `pull()` already
-        // fetched rather than re-fetching — no second network round trip,
-        // and no risk of a DIFFERENT server state answering this GET than
-        // the one the prompt described.
-        const pending = snapshot.conflictProject;
-        if (pending === null || disposed) return;
-        cancelPushTimer();
-        const { assetFailures } = await applyCloudProject(pending.revision, pending.project);
-        // Same sign-out-mid-flight guard as pull()'s clean-apply branch.
-        if (disposed || currentStatus() === "signed-out") return;
-        if (assetFailures > 0) {
-          // MEDIUM fix (independent review): "worse in the conflict path,
-          // where reload() has just discarded local work" — the code+sheets
-          // choice ("Keep cloud copy") is unconditional and already took
-          // effect above, so conflictProject still clears either way, but a
-          // partial image failure must not ALSO claim a clean green sync.
+      if (resolutionInFlight || disposed) return;
+      resolutionInFlight = true;
+      if (snapshot.syncGate !== null) setSnapshot({ syncGate: "syncing", errorMessage: null });
+      try {
+        if (snapshot.conflictProject !== null && snapshot.behindRevision === null) {
+          // FIX 4's "Keep cloud copy": apply the copy `pull()` already
+          // fetched rather than re-fetching — no second network round trip,
+          // and no risk of a DIFFERENT server state answering this GET than
+          // the one the prompt described.
+          const pending = snapshot.conflictProject;
+          if (pending === null || disposed) return;
+          cancelPushTimer();
+          setSnapshot({ status: "pulling", pullProgress: null });
+          const { assetFailures } = await applyCloudProject(pending.revision, pending.project);
+          // Same sign-out-mid-flight guard as pull()'s clean-apply branch.
+          if (disposed || currentStatus() === "signed-out") return;
+          if (assetFailures > 0) {
+            // The code+sheets choice already took effect, but a partial
+            // image failure must not also claim a clean green sync.
+            setSnapshot({
+              status: "offline",
+              pullProgress: null,
+              conflictProject: null,
+              errorMessage: partialPullMessage(assetFailures),
+              ...syncGatePatch("failed"),
+            });
+            return;
+          }
           setSnapshot({
-            status: "offline",
+            status: "idle",
+            lastSyncedAt: Date.now(),
             pullProgress: null,
+            notice: LOADED_NOTICE,
             conflictProject: null,
-            errorMessage: partialPullMessage(assetFailures),
+            behindRevision: null,
+            ...syncGatePatch("synced"),
           });
           return;
         }
-        setSnapshot({
-          status: "idle",
-          lastSyncedAt: Date.now(),
-          pullProgress: null,
-          notice: LOADED_NOTICE,
-          conflictProject: null,
-        });
-        return;
+        // Deliberately does NOT flush (contrast signOut): "Reload" means
+        // discard this browser's unsynced edits and take the server's copy —
+        // pushing them first would defeat the entire point of the choice.
+        // checkForCollision is false: this Reload IS the user's answer to an
+        // ALREADY-showing "behind" prompt (pull()'s doc comment) — it must
+        // unconditionally take the server's copy, not run the heuristic again.
+        cancelPushTimer();
+        await pull(false);
+      } finally {
+        resolutionInFlight = false;
       }
-      // Deliberately does NOT flush (contrast signOut): "Reload" means
-      // discard this browser's unsynced edits and take the server's copy —
-      // pushing them first would defeat the entire point of the choice.
-      // checkForCollision is false: this Reload IS the user's answer to an
-      // ALREADY-showing "behind" prompt (pull()'s doc comment) — it must
-      // unconditionally take the server's copy, not run the heuristic again.
-      cancelPushTimer();
-      await pull(false);
     },
 
     async overwrite() {
-      if (snapshot.status === "conflict") {
-        // FIX 4's "Keep this device's work": the SAME adopt an empty-cloud
-        // first sign-in uses, based at the revision this device just saw —
-        // a 409 here (someone pushed AGAIN before this resolved) surfaces
-        // the ordinary "behind" prompt via runPush's own conflict handling,
-        // never a clobber.
-        const pending = snapshot.conflictProject;
-        if (pending === null || disposed) return;
+      const canResolveConflict = snapshot.conflictProject !== null && snapshot.behindRevision === null;
+      if (resolutionInFlight || disposed || (!canResolveConflict && snapshot.behindRevision === null)) return;
+      resolutionInFlight = true;
+      if (snapshot.syncGate !== null) setSnapshot({ syncGate: "syncing", errorMessage: null });
+      try {
+        if (canResolveConflict) {
+          // FIX 4's "Keep this device's work": the SAME adopt an empty-cloud
+          // first sign-in uses, based at the revision this device just saw.
+          const pending = snapshot.conflictProject;
+          if (pending === null || disposed) return;
+          cancelPushTimer();
+          await adoptLocalProject(pending.revision, null);
+          if (disposed) return;
+          // Only clear the pending choice on actual success. A transient
+          // failure remains retryable and a new 409 becomes `behind`.
+          if (currentStatus() === "idle") setSnapshot({ conflictProject: null });
+          return;
+        }
+        if (snapshot.behindRevision === null) return;
+        knownRevision = snapshot.behindRevision;
+        revisionAuthoritative = true;
         cancelPushTimer();
-        await adoptLocalProject(pending.revision, null);
-        if (disposed) return;
-        // HIGH fix (independent review): only clear the pending choice on
-        // an actual SUCCESS. adoptLocalProject can bail without ever
-        // reaching putProject (an asset upload failure → "offline") or
-        // land a 409 (a THIRD device won the race → "behind") — clearing
-        // conflictProject unconditionally made "Keep this device's work"
-        // silently evaporate in either case, with no record a choice was
-        // ever made and the prompt already gone. Status reads "idle" ONLY
-        // once adoptLocalProject's runPush has actually succeeded (that
-        // function's own doc comment).
-        if (currentStatus() === "idle") setSnapshot({ conflictProject: null });
+        await runPush(/* allowConflictResolution */ true);
+      } finally {
+        resolutionInFlight = false;
+      }
+    },
+
+    dismissSyncGate() {
+      if (snapshot.syncGate === "synced") {
+        setSnapshot({ syncGate: null });
         return;
       }
-      if (snapshot.behindRevision === null) return;
-      knownRevision = snapshot.behindRevision;
-      cancelPushTimer();
-      await runPush();
+      if (
+        snapshot.syncGate === "failed" &&
+        snapshot.conflictProject === null &&
+        snapshot.behindRevision === null &&
+        snapshot.status !== "conflict" &&
+        snapshot.status !== "behind"
+      ) {
+        setSnapshot({ syncGate: null });
+      }
     },
 
     flush: flushPendingPush,
@@ -1401,6 +1558,7 @@ function makeSingleton(): {
     signOut: () => active.signOut(),
     reload: () => active.reload(),
     overwrite: () => active.overwrite(),
+    dismissSyncGate: () => active.dismissSyncGate(),
     flush: () => active.flush(),
     dispose: () => active.dispose(),
   };

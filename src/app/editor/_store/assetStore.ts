@@ -400,6 +400,11 @@ export function createAssetStore(adapter: AssetAdapter, startDisabled = false): 
   // setAssets/disable, never inline in getSnapshot itself.
   let snapshot: AssetStoreSnapshot = { assets, disabled };
   const listeners = new Set<(event: AssetChangeEvent) => void>();
+  // Cold start can have more than one consumer waiting for the first IDB
+  // read (the asset UI and cloud-session reconciliation). They must join one
+  // read: two independent list requests can resolve out of order, allowing
+  // an older result to replace a cache that cloud sync has already updated.
+  let refreshInFlight: Promise<void> | null = null;
 
   const setAssets = (next: AssetMeta[]): void => {
     assets = next;
@@ -435,23 +440,10 @@ export function createAssetStore(adapter: AssetAdapter, startDisabled = false): 
     }
   };
 
-  return {
-    getSnapshot: () => snapshot,
-    // m1: a disabled store reports NO assets — the checker (W005) and the
-    // renderer (asset: resolution) must agree an asset library that stopped
-    // answering is the same as an empty one, not a stale pre-disable list.
-    // A FRESH set every call, disabled or not: the return type says
-    // ReadonlySet, but a shared module-level instance is still a live object a
-    // caller could mutate into every other store's answer (review residual).
-    getAssetNames: () => (disabled ? new Set<string>() : new Set(assets.map((a) => a.name))),
-
-    subscribe(listener) {
-      listeners.add(listener);
-      return () => listeners.delete(listener);
-    },
-
-    async refresh() {
-      if (disabled) return;
+  const refresh = (): Promise<void> => {
+    if (disabled) return Promise.resolve();
+    if (refreshInFlight !== null) return refreshInFlight;
+    refreshInFlight = (async () => {
       try {
         const next = sortedMetas((await adapter.list()).map(metaOf));
         const changed = !metasEqual(assets, next);
@@ -467,8 +459,29 @@ export function createAssetStore(adapter: AssetAdapter, startDisabled = false): 
         if (changed) notify({ type: "replaceAll" });
       } catch {
         disable();
+      } finally {
+        refreshInFlight = null;
       }
+    })();
+    return refreshInFlight;
+  };
+
+  return {
+    getSnapshot: () => snapshot,
+    // m1: a disabled store reports NO assets — the checker (W005) and the
+    // renderer (asset: resolution) must agree an asset library that stopped
+    // answering is the same as an empty one, not a stale pre-disable list.
+    // A FRESH set every call, disabled or not: the return type says
+    // ReadonlySet, but a shared module-level instance is still a live object a
+    // caller could mutate into every other store's answer (review residual).
+    getAssetNames: () => (disabled ? new Set<string>() : new Set(assets.map((a) => a.name))),
+
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
     },
+
+    refresh,
 
     async getBytes(name) {
       if (disabled) return null;

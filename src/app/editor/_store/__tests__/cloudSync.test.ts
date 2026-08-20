@@ -443,6 +443,23 @@ describe("sign-in", () => {
     expect(store.getState().code).toBe(before); // nothing to pull — local stands
   });
 
+  it("a successful initial sync gate can be dismissed", async () => {
+    const { controller } = harness();
+    await controller.signIn(GOOD_USERNAME, "correct-password");
+    expect(controller.getSnapshot().syncGate).toBe("synced");
+    controller.dismissSyncGate();
+    expect(controller.getSnapshot().syncGate).toBeNull();
+  });
+
+  it("a non-conflict initial sync failure can be dismissed to continue locally", async () => {
+    const { controller, transport } = harness();
+    transport.nextFailure.getProject = "network";
+    await controller.signIn(GOOD_USERNAME, "correct-password");
+    expect(controller.getSnapshot()).toMatchObject({ status: "offline", syncGate: "failed" });
+    controller.dismissSyncGate();
+    expect(controller.getSnapshot().syncGate).toBeNull();
+  });
+
   it("success with a server project: replaces local code/sheets", async () => {
     const { store, controller, transport } = harness();
     transport.server.revision = 5;
@@ -503,7 +520,7 @@ describe("sign-in", () => {
     expect(pulled?.bytes).toEqual(dragonBytes);
   });
 
-  it("pulls a DIFFERING same-name asset (hash mismatch) — re-downloads and overwrites", async () => {
+  it("a DIFFERING same-name asset is a collision; choosing cloud re-downloads and overwrites", async () => {
     const { assetStore, controller, transport } = harness();
     const oldBytes = new Uint8Array([1]);
     const newBytes = new Uint8Array([2, 2]);
@@ -518,6 +535,10 @@ describe("sign-in", () => {
       ],
     };
     await controller.signIn(GOOD_USERNAME, "correct-password");
+    expect(controller.getSnapshot().status).toBe("conflict");
+    expect((await assetStore.getBytes("dragon"))?.bytes).toEqual(oldBytes);
+
+    await controller.reload();
     expect(transport.calls.downloadFromPresignedUrl).toBe(1);
     const pulled = await assetStore.getBytes("dragon");
     expect(pulled?.bytes).toEqual(newBytes);
@@ -735,9 +756,12 @@ describe("sign-in collision (FIX 4)", () => {
     const snap = controller.getSnapshot();
     expect(snap.status).toBe("conflict");
     expect(snap.conflictProject).toEqual({ revision: 9, project: transport.server.project });
+    expect(snap.syncGate).toBe("failed");
     expect(snap.lastSyncedAt).toBeNull(); // FIX 2: nothing has synced yet
     expect(snap.notice).toBeNull();
     expect(store.getState().code).toBe(localCodeBefore); // NOT silently replaced
+    controller.dismissSyncGate();
+    expect(controller.getSnapshot().syncGate).toBe("failed"); // unresolved choices are blocking
   });
 
   it("local matching the untouched demo seed is NOT a collision — applies immediately (unchanged)", async () => {
@@ -761,6 +785,48 @@ describe("sign-in collision (FIX 4)", () => {
     expect(controller.getSnapshot().notice).toBe(LOADED_NOTICE);
   });
 
+  it("local-only asset counts as work, and choosing cloud removes it so the library matches the manifest", async () => {
+    const { assetStore, controller, transport } = harness();
+    await assetStore.upload("local_art", "image/png", new Uint8Array([1, 2]));
+    transport.server.revision = 3;
+    transport.server.project = { code: "CLOUD project", sheets: {}, assets: [] };
+
+    await controller.signIn(GOOD_USERNAME, "correct-password");
+    expect(controller.getSnapshot().status).toBe("conflict");
+    expect(assetStore.getSnapshot().assets.map((asset) => asset.name)).toEqual(["local_art"]);
+
+    await controller.reload();
+    expect(controller.getSnapshot().status).toBe("idle");
+    expect(assetStore.getSnapshot().assets).toEqual([]);
+  });
+
+  it("same asset bytes with a different MIME still get replaced when cloud is chosen", async () => {
+    const { assetStore, controller, transport } = harness();
+    const bytes = new Uint8Array([8, 6, 7, 5]);
+    await assetStore.upload("frame", "image/webp", bytes);
+    transport.server.revision = 3;
+    transport.server.assets.set("frame", { bytes, mime: "image/png" });
+    transport.server.project = {
+      code: "CLOUD project",
+      sheets: {},
+      assets: [
+        {
+          name: "frame",
+          mime: "image/png",
+          size: bytes.byteLength,
+          hash: await sha256HexForTest(bytes),
+        },
+      ],
+    };
+
+    await controller.signIn(GOOD_USERNAME, "correct-password");
+    expect(controller.getSnapshot().status).toBe("conflict");
+    await controller.reload();
+
+    expect(controller.getSnapshot().status).toBe("idle");
+    expect((await assetStore.getBytes("frame"))?.mime).toBe("image/png");
+  });
+
   it("'Keep cloud copy' (reload()) applies the copy pull() already fetched", async () => {
     const { store, controller, transport } = harnessWithLocalWork();
     transport.server.revision = 9;
@@ -769,7 +835,9 @@ describe("sign-in collision (FIX 4)", () => {
     expect(controller.getSnapshot().status).toBe("conflict");
     const getProjectCallsBefore = transport.calls.getProject;
 
-    await controller.reload();
+    const resolving = controller.reload();
+    expect(controller.getSnapshot().syncGate).toBe("syncing");
+    await resolving;
 
     expect(store.getState().code).toBe("Sheet: Cloud\n  column y: Text\n");
     const snap = controller.getSnapshot();
@@ -777,8 +845,38 @@ describe("sign-in collision (FIX 4)", () => {
     expect(snap.lastSyncedAt).not.toBeNull();
     expect(snap.notice).toBe(LOADED_NOTICE);
     expect(snap.conflictProject).toBeNull();
+    expect(snap.syncGate).toBe("synced");
     // No second round trip — the prompt's copy is reused, not re-fetched.
     expect(transport.calls.getProject).toBe(getProjectCallsBefore);
+  });
+
+  it("a conflict choice is single-flight: rapid Reload clicks start only one resolution", async () => {
+    const { controller, transport } = harnessWithLocalWork();
+    const bytes = new Uint8Array([4, 2]);
+    transport.server.revision = 9;
+    transport.server.assets.set("dragon", { bytes, mime: "image/png" });
+    transport.server.project = {
+      code: "CLOUD current work",
+      sheets: {},
+      assets: [
+        {
+          name: "dragon",
+          mime: "image/png",
+          size: bytes.byteLength,
+          hash: await sha256HexForTest(bytes),
+        },
+      ],
+    };
+    await controller.signIn(GOOD_USERNAME, "correct-password");
+
+    const first = controller.reload();
+    const second = controller.reload();
+    expect(controller.getSnapshot().syncGate).toBe("syncing");
+    await Promise.all([first, second]);
+
+    expect(transport.calls.presignAssetGet).toBe(1);
+    expect(transport.calls.downloadFromPresignedUrl).toBe(1);
+    expect(controller.getSnapshot().syncGate).toBe("synced");
   });
 
   it("'Keep this device's work' (overwrite()) pushes local — AND its assets — over the cloud copy", async () => {
@@ -808,7 +906,8 @@ describe("sign-in collision (FIX 4)", () => {
   });
 
   it("a 409 on 'Keep this device's work' (someone pushed AGAIN before this resolved) surfaces 'behind'", async () => {
-    const { controller, transport } = harnessWithLocalWork();
+    const { store, controller, transport } = harnessWithLocalWork();
+    const localCode = store.getState().code;
     transport.server.revision = 9;
     transport.server.project = { code: "Sheet: Cloud\n  column y: Text\n", sheets: {}, assets: [] };
     await controller.signIn(GOOD_USERNAME, "correct-password");
@@ -827,13 +926,25 @@ describe("sign-in collision (FIX 4)", () => {
     // cleared just because it didn't land — overwrite() only clears
     // conflictProject on an actual success (that function's doc comment).
     expect(snap.conflictProject).not.toBeNull();
+
+    // Retrying against the newly reported revision resolves both layers of
+    // pending state; no stale conflict payload survives a successful PUT.
+    await controller.overwrite();
+    expect(controller.getSnapshot()).toMatchObject({
+      status: "idle",
+      syncGate: "synced",
+      behindRevision: null,
+      conflictProject: null,
+    });
+    expect(transport.server.revision).toBe(11);
+    expect(transport.server.project?.code).toBe(localCode);
   });
 
   it(
     "HIGH fix: 'Keep this device's work' failing on an asset upload does NOT silently clear the " +
       "pending conflict — no record it was ever chosen, and the manifest never even goes out",
     async () => {
-      const { assetStore, controller, transport } = harnessWithLocalWork();
+      const { store, assetStore, controller, transport } = harnessWithLocalWork();
       await assetStore.upload("dragon", "image/png", new Uint8Array([1]));
       transport.server.revision = 9;
       transport.server.project = { code: "Sheet: Cloud\n  column y: Text\n", sheets: {}, assets: [] };
@@ -845,11 +956,33 @@ describe("sign-in collision (FIX 4)", () => {
 
       const snap = controller.getSnapshot();
       expect(snap.status).toBe("offline");
+      expect(snap.syncGate).toBe("failed");
       // BEFORE this fix, conflictProject was cleared unconditionally right
       // here — the user's choice would have silently evaporated with no
       // trace it was ever made and no "conflict" UI left to retry from.
       expect(snap.conflictProject).not.toBeNull();
       expect(transport.calls.putProject ?? 0).toBe(0); // never even reached the manifest push
+      controller.dismissSyncGate();
+      expect(controller.getSnapshot().syncGate).toBe("failed");
+      store.getState().setCode(store.getState().code + "\n# still unresolved\n");
+      controller.flush();
+      await flushAsync();
+      expect(transport.calls.putProject ?? 0).toBe(0);
+
+      // The retained choice is still authoritative even though the compact
+      // status says Offline; live asset writes cannot slip around it.
+      const assetPutAttempts = transport.calls.presignAssetPut;
+      await assetStore.upload("imp", "image/png", new Uint8Array([2]));
+      await flushAsync();
+      expect(transport.calls.presignAssetPut).toBe(assetPutAttempts);
+
+      // The unresolved choice remains actionable after the transient failure.
+      const retry = controller.overwrite();
+      expect(controller.getSnapshot().syncGate).toBe("syncing");
+      await retry;
+      expect(controller.getSnapshot().status).toBe("idle");
+      expect(controller.getSnapshot().syncGate).toBe("synced");
+      expect(controller.getSnapshot().conflictProject).toBeNull();
     },
   );
 });
@@ -907,8 +1040,8 @@ describe("a manifest never claims an asset that isn't actually confirmed on R2 (
   });
 
   it(
-    "entry point 3 — a clean pull's local-only asset: not uploaded by the pull itself (existing, " +
-      "documented behavior), but the NEXT push uploads it before its manifest can name it",
+    "entry point 3 — a local-only asset pauses as a collision, then Keep this device uploads " +
+      "its bytes before the manifest can name it",
     async () => {
       const { store, assetStore, controller, transport } = harness();
       // Local has an image the server doesn't know about — added BEFORE
@@ -920,13 +1053,11 @@ describe("a manifest never claims an asset that isn't actually confirmed on R2 (
       transport.server.project = { code: store.getState().code, sheets: store.getState().sheets, assets: [] };
 
       await controller.signIn(GOOD_USERNAME, "correct-password");
-      expect(controller.getSnapshot().status).toBe("idle"); // clean pull, not "conflict"
-      expect(transport.calls.presignAssetPut ?? 0).toBe(0); // the pull itself never uploads
+      expect(controller.getSnapshot().status).toBe("conflict");
+      expect(transport.calls.presignAssetPut ?? 0).toBe(0);
       expect(transport.server.project?.assets ?? []).toEqual([]);
 
-      store.getState().setCode(store.getState().code + "\n# later edit\n");
-      controller.flush();
-      await waitForStatus(controller, "idle");
+      await controller.overwrite();
 
       expect(transport.server.assets.get("dragon")?.bytes).toEqual(new Uint8Array([4, 4, 4]));
       expect(transport.server.project?.assets.map((a) => a.name)).toEqual(["dragon"]);
@@ -1006,6 +1137,55 @@ describe("a manifest never claims an asset that isn't actually confirmed on R2 (
 // ---------------------------------------------------------------------------
 
 describe("asset mutations are suppressed while a conflict is unresolved (MEDIUM fix)", () => {
+  it("failed initial authority blocks live asset upload/delete until a safe pull resolves", async () => {
+    const { assetStore, controller, transport } = harness();
+    await assetStore.upload("existing", "image/png", new Uint8Array([1]));
+    transport.nextFailure.getProject = "network";
+    await controller.signIn(GOOD_USERNAME, "correct-password");
+    expect(controller.getSnapshot()).toMatchObject({ status: "offline", syncGate: "failed" });
+    controller.dismissSyncGate();
+
+    const presignsBefore = transport.calls.presignAssetPut ?? 0;
+    await assetStore.upload("new", "image/png", new Uint8Array([2]));
+    await assetStore.remove("existing");
+    await flushAsync();
+
+    expect(transport.calls.presignAssetPut ?? 0).toBe(presignsBefore);
+    expect(transport.calls.deleteAsset ?? 0).toBe(0);
+  });
+
+  it("a local deletion while authority is unknown becomes a conflict instead of being restored", async () => {
+    vi.useFakeTimers();
+    const { store, assetStore, controller, transport } = harness();
+    const bytes = new Uint8Array([3, 3, 3]);
+    await assetStore.upload("dragon", "image/png", bytes);
+    transport.server.revision = 4;
+    transport.server.assets.set("dragon", { bytes, mime: "image/png" });
+    transport.server.project = {
+      code: store.getState().code,
+      sheets: store.getState().sheets,
+      assets: [
+        {
+          name: "dragon",
+          mime: "image/png",
+          size: bytes.byteLength,
+          hash: await sha256HexForTest(bytes),
+        },
+      ],
+    };
+    transport.nextFailure.getProject = "network";
+    await controller.signIn(GOOD_USERNAME, "correct-password");
+    controller.dismissSyncGate();
+
+    await assetStore.remove("dragon");
+    await vi.advanceTimersByTimeAsync(PUSH_DEBOUNCE_MS * 2);
+
+    expect(controller.getSnapshot().status).toBe("conflict");
+    expect(await assetStore.getBytes("dragon")).toBeNull();
+    expect(transport.server.assets.get("dragon")?.bytes).toEqual(bytes);
+    expect(transport.calls.deleteAsset ?? 0).toBe(0);
+  });
+
   it(
     "a DELETE fired while the collision prompt is showing does NOT reach the transport — " +
       "the cloud copy survives until a choice is made",
@@ -1061,7 +1241,8 @@ describe("asset mutations are suppressed while a conflict is unresolved (MEDIUM 
 
 describe("a partial asset pull doesn't claim a clean sync (MEDIUM fix)", () => {
   it("a clean pull whose asset download fails stays offline with a count, never lastSyncedAt/notice", async () => {
-    const { controller, transport } = harness();
+    vi.useFakeTimers();
+    const { store, controller, transport } = harness();
     const bytes = new Uint8Array([1, 2, 3]);
     transport.server.revision = 4;
     transport.server.project = {
@@ -1079,6 +1260,20 @@ describe("a partial asset pull doesn't claim a clean sync (MEDIUM fix)", () => {
     expect(snap.lastSyncedAt).toBeNull();
     expect(snap.notice).toBeNull();
     expect(snap.errorMessage).toContain("1 image");
+    expect(snap.syncGate).toBe("failed");
+
+    // Continuing locally may dismiss the handoff, but it must not turn the
+    // partially-applied revision into authority for a manifest that omits
+    // the failed cloud asset.
+    controller.dismissSyncGate();
+    expect(controller.getSnapshot().syncGate).toBeNull();
+    const readsBeforeRetry = transport.calls.getProject;
+    store.getState().setCode(store.getState().code + "\n# local edit\n");
+    await vi.advanceTimersByTimeAsync(PUSH_DEBOUNCE_MS * 2);
+    expect(transport.calls.putProject ?? 0).toBe(0);
+    expect(transport.calls.getProject).toBeGreaterThan(readsBeforeRetry);
+    expect(controller.getSnapshot().status).toBe("conflict");
+    expect(transport.server.project?.assets.map((asset) => asset.name)).toEqual(["dragon"]);
   });
 
   it("the conflict path's 'Keep cloud copy' with a failed image ALSO stays offline, not idle/green", async () => {
@@ -1466,25 +1661,109 @@ describe("sign out", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Mount-restore (hint present at construction) — confirms, never clobbers
+// Mount-restore (hint present at construction) — same collision-safe initial
+// pull as explicit sign-in. It must never silently adopt a server revision
+// while leaving stale local content in place.
 // ---------------------------------------------------------------------------
 
 describe("mount-restore session check", () => {
-  it("hinted + still valid: reaches idle without ever calling replaceProject (no clobber)", async () => {
+  it("hinted + still valid with untouched demo local: applies cloud and completes the gate", async () => {
     const assetStore = createAssetStore(createInMemoryAssetAdapter());
     const store = createEditorStore(undefined, assetStore);
-    const localCode = store.getState().code;
     const transport = createFakeTransport();
     transport.server.revision = 9;
-    transport.server.project = { code: "SERVER content — must NOT appear locally", sheets: {}, assets: [] };
+    transport.server.project = { code: "SERVER content", sheets: {}, assets: [] };
     const hint = fakeHint(true);
 
     const controller = createCloudSyncController({ store, assets: assetStore, transport, hint });
     await flushAsync();
 
     expect(controller.getSnapshot().status).toBe("idle");
-    expect(store.getState().code).toBe(localCode); // unchanged — mount-restore never pulls
+    expect(controller.getSnapshot().syncGate).toBe("synced");
+    expect(store.getState().code).toBe("SERVER content");
     expect(transport.calls.getProject).toBe(1);
+  });
+
+  it("hinted stale local + current cloud pauses for a choice and cannot silently overwrite cloud", async () => {
+    vi.useFakeTimers();
+    const assetStore = createAssetStore(createInMemoryAssetAdapter());
+    const store = createEditorStore(undefined, assetStore);
+    store.getState().setCode("LOCAL stale work");
+    const transport = createFakeTransport();
+    transport.server.revision = 9;
+    transport.server.project = { code: "CLOUD current work", sheets: {}, assets: [] };
+    const controller = createCloudSyncController({
+      store,
+      assets: assetStore,
+      transport,
+      hint: fakeHint(true),
+    });
+
+    await vi.advanceTimersByTimeAsync(0);
+    expect(controller.getSnapshot()).toMatchObject({
+      status: "conflict",
+      syncGate: "failed",
+      conflictProject: { revision: 9 },
+    });
+    expect(store.getState().code).toBe("LOCAL stale work");
+
+    // This is the production-dangerous sequence: another local edit plus a
+    // pagehide flush. Before the fix, restore had silently recorded revision
+    // 9 without applying/comparing, so this PUT overwrote the cloud.
+    store.getState().setCode("LOCAL newer edit");
+    controller.flush();
+    await vi.advanceTimersByTimeAsync(PUSH_DEBOUNCE_MS * 2);
+    expect(transport.calls.putProject ?? 0).toBe(0);
+    expect(transport.server.revision).toBe(9);
+    expect(transport.server.project?.code).toBe("CLOUD current work");
+
+    controller.dismissSyncGate();
+    expect(controller.getSnapshot().syncGate).toBe("failed");
+  });
+
+  it("the cold asset-cache refresh landing during GET is not mistaken for a user edit", async () => {
+    const bytes = new Uint8Array([6, 6]);
+    const assetStore = createAssetStore(
+      createInMemoryAssetAdapter([{ name: "dragon", mime: "image/png", bytes }]),
+    );
+    const store = createEditorStore(undefined, assetStore);
+    const transport = createFakeTransport();
+    let resolveGet!: (result: GetProjectResult) => void;
+    transport.getProject = () =>
+      new Promise<GetProjectResult>((resolve) => {
+        resolveGet = resolve;
+      });
+    const controller = createCloudSyncController({
+      store,
+      assets: assetStore,
+      transport,
+      hint: fakeHint(true),
+    });
+    await Promise.resolve();
+    expect(controller.getSnapshot().status).toBe("pulling");
+
+    await assetStore.refresh();
+    resolveGet({
+      ok: true,
+      found: true,
+      revision: 5,
+      project: {
+        code: "CLOUD project",
+        sheets: {},
+        assets: [
+          {
+            name: "dragon",
+            mime: "image/png",
+            size: bytes.byteLength,
+            hash: await sha256HexForTest(bytes),
+          },
+        ],
+      },
+    });
+    await waitForStatus(controller, "idle");
+
+    expect(controller.getSnapshot().status).toBe("idle");
+    expect(controller.getSnapshot().syncGate).toBe("synced");
   });
 
   it("hinted but the session is gone (401): clears the hint, falls back to signed-out", async () => {
@@ -1496,6 +1775,8 @@ describe("mount-restore session check", () => {
     const controller = createCloudSyncController({ store, assets: assetStore, transport, hint });
     await flushAsync();
     expect(controller.getSnapshot().status).toBe("signed-out");
+    expect(controller.getSnapshot().syncGate).toBe("failed");
+    expect(controller.getSnapshot().errorMessage).toBe("Your cloud session expired. Sign in again.");
     expect(hint.get()).toBe(false);
   });
 
@@ -1509,6 +1790,43 @@ describe("mount-restore session check", () => {
     await flushAsync();
     expect(controller.getSnapshot().status).toBe("offline");
     expect(hint.get()).toBe(true);
+  });
+
+  it("sign-out during the hinted GET cancels queued work and ignores the late cloud response", async () => {
+    vi.useFakeTimers();
+    const assetStore = createAssetStore(createInMemoryAssetAdapter());
+    const store = createEditorStore(undefined, assetStore);
+    store.getState().setCode("LOCAL work");
+    const transport = createFakeTransport();
+    let resolveGet!: (result: GetProjectResult) => void;
+    transport.getProject = () => new Promise<GetProjectResult>((resolve) => {
+      resolveGet = resolve;
+    });
+    const controller = createCloudSyncController({
+      store,
+      assets: assetStore,
+      transport,
+      hint: fakeHint(true),
+    });
+    await Promise.resolve(); // start the queued hinted pull
+    expect(controller.getSnapshot().syncGate).toBe("syncing");
+
+    store.getState().setCode("LOCAL edit while GET is pending");
+    controller.flush();
+    expect(transport.calls.putProject ?? 0).toBe(0);
+    controller.signOut();
+    resolveGet({
+      ok: true,
+      found: true,
+      revision: 12,
+      project: { code: "CLOUD must not apply late", sheets: {}, assets: [] },
+    });
+    await vi.advanceTimersByTimeAsync(PUSH_DEBOUNCE_MS * 2);
+
+    expect(controller.getSnapshot().status).toBe("signed-out");
+    expect(controller.getSnapshot().syncGate).toBeNull();
+    expect(store.getState().code).toBe("LOCAL edit while GET is pending");
+    expect(transport.calls.putProject ?? 0).toBe(0);
   });
 
   it("no hint: constructing a controller never calls the transport", () => {
