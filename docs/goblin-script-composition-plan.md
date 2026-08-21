@@ -4,6 +4,14 @@ Status: implemented, with grammar, runtime, compatibility, and boundary-conditio
 reviews. `docs/DESIGN.md` remains the normative language specification; keep this
 document as the concise execution and acceptance brief.
 
+> **Historical note:** this brief records the original no-argument composition slice.
+> Its no-argument limitation and “parameters are future work” statements were
+> superseded by ◆49: Templates now declare typed parameters and `Front:`/`Back:` or
+> nested Template calls pass explicit indented arguments. See
+> [`DESIGN.md`](DESIGN.md) and
+> [Templates & shapes](wiki/goblin-script/03-templates-and-shapes.md) for current
+> semantics.
+
 ## Outcome
 
 Replace off-card conditional hacks with three additive features that work together:

@@ -40,6 +40,10 @@ import { useState, type ReactElement } from "react";
 import { buildFlagIndex } from "@/app/editor/_components/gridModel";
 import { AssetsDrawerButton } from "@/app/editor/_components/assetsDrawer";
 import {
+  ExportDataButton,
+  exportEditorData,
+} from "@/app/editor/_components/dataExport";
+import {
   exportEditorProject,
   importEditorProject,
   ProjectFileButtons,
@@ -67,6 +71,7 @@ export default function StatusBar(): ReactElement {
       autosaveDisabled={autosaveDisabled}
       onReset={resetEditorToDemo}
       onExportProject={exportEditorProject}
+      onExportData={exportEditorData}
       onImportProject={importEditorProject}
     />
   );
@@ -79,6 +84,7 @@ export interface StatusBarContentProps {
   autosaveDisabled: boolean;
   onReset(): void;
   onExportProject(): void | Promise<void>;
+  onExportData(): void;
   onImportProject(seed: EditorSeed, assets: readonly StoredAsset[]): void;
 }
 
@@ -91,6 +97,7 @@ export function StatusBarContent({
   autosaveDisabled,
   onReset,
   onExportProject,
+  onExportData,
   onImportProject,
 }: StatusBarContentProps): ReactElement {
   const cards = (lastGood?.model.decks ?? []).reduce((n, deck) => n + deck.cards.length, 0);
@@ -147,6 +154,7 @@ export function StatusBarContent({
           </span>
         )}
         <AssetsDrawerButton />
+        <ExportDataButton disabled={cards === 0} onExport={onExportData} />
         <ProjectFileButtons onExport={onExportProject} onImport={onImportProject} />
         <CloudSyncControl />
         <ResetToDemoButton onReset={onReset} />

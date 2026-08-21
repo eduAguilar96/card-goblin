@@ -445,12 +445,16 @@ function scanAncestors(lines: string[], lineIndex: number, startIndent: number):
     // Property-ish line (lowercase key, incl. `column name: …`): the cursor is
     // in its value continuation ONLY while no block header sits between them.
     const letDecl = /^let[ \t]+[A-Za-z][A-Za-z0-9_]*[ \t]*:/.test(body);
+    const virtual = /^virtual[ \t]+column[ \t]+[A-Za-z_][A-Za-z0-9_]*[ \t]*:/.test(body);
     const prop = /^(?:column[ \t]+)?([a-z_][A-Za-z0-9_]*)[ \t]*:/.exec(body);
     if (letDecl && !sawHeader && out.continuationKey === null) {
       out.continuationKey = "let";
     }
     if (prop && !sawHeader && out.continuationKey === null) {
       out.continuationKey = prop[1];
+    }
+    if (virtual && !sawHeader && out.continuationKey === null) {
+      out.continuationKey = "virtual";
     }
     // Anything else (a continuation line itself, broken text): transparent.
   }
@@ -632,6 +636,50 @@ function scanDirectLets(lines: string[], headerLine: number): string[] {
   return names;
 }
 
+interface ScannedTemplateParam {
+  name: string;
+  type: string;
+}
+
+/** Direct `param name: Type` declarations are hoisted across one Template
+ * activation. This remains a textual scan so declarations typed after the
+ * cursor (and declarations in a temporarily broken document) still help. */
+function scanDirectParams(lines: string[], headerLine: number): ScannedTemplateParam[] {
+  const headerIndent = indentOf(lines[headerLine]);
+  let childIndent = Number.POSITIVE_INFINITY;
+  let end = lines.length;
+  for (let i = headerLine + 1; i < lines.length; i++) {
+    if (isBlankOrComment(lines[i])) continue;
+    const indent = indentOf(lines[i]);
+    if (indent <= headerIndent) {
+      end = i;
+      break;
+    }
+    childIndent = Math.min(childIndent, indent);
+  }
+  if (!Number.isFinite(childIndent)) return [];
+  const params: ScannedTemplateParam[] = [];
+  for (let i = headerLine + 1; i < end; i++) {
+    if (indentOf(lines[i]) !== childIndent) continue;
+    const match = /^param[ \t]+([A-Za-z][A-Za-z0-9_]*)[ \t]*:[ \t]*([A-Za-z][A-Za-z0-9_]*)/.exec(
+      lines[i].trim(),
+    );
+    if (match && !params.some((param) => param.name === match[1])) {
+      params.push({ name: match[1], type: match[2] });
+    }
+  }
+  return params;
+}
+
+function scanTemplateParams(lines: string[], templateName: string): ScannedTemplateParam[] {
+  for (let i = 0; i < lines.length; i++) {
+    if (indentOf(lines[i]) !== 0) continue;
+    const match = /^Template[ \t]*:[ \t]*([A-Za-z][A-Za-z0-9_]*)/.exec(lines[i].trim());
+    if (match?.[1] === templateName) return scanDirectParams(lines, i);
+  }
+  return [];
+}
+
 function scanGlobalLets(lines: string[]): string[] {
   const names: string[] = [];
   for (const line of lines) {
@@ -649,6 +697,7 @@ function resolveRefScope(
   globalInitializer = false,
 ): RefScope {
   const scopes: CardScope[] = [];
+  let directSheetName: string | null = null;
   let certain = false;
   if (globalInitializer) {
     scopes.push(...scanAllCards(lines));
@@ -662,6 +711,12 @@ function resolveRefScope(
       scopes.push(...using);
       certain = true;
     }
+  } else if (ancestors.topKind === "Sheet" && ancestors.topName) {
+    // ◆48 virtual initializer: its own physical columns plus the union of
+    // loop variables from every Card bound to this Sheet.
+    directSheetName = ancestors.topName;
+    scopes.push(...scanAllCards(lines).filter((scope) => scope.sheetName === directSheetName));
+    certain = true;
   }
   const columns: SnapshotColumn[] = [];
   const columnSheets = new Map<string, string>();
@@ -674,6 +729,13 @@ function resolveRefScope(
     }
   };
   let anySheetResolved = false;
+  if (directSheetName !== null) {
+    const sheet = snapshot.sheets.find((candidate) => candidate.name === directSheetName);
+    if (sheet) {
+      anySheetResolved = true;
+      addSheet(sheet);
+    }
+  }
   for (const scope of scopes) {
     const sheet = snapshot.sheets.find((s) => s.name === scope.sheetName);
     if (sheet) {
@@ -700,6 +762,14 @@ function resolveRefScope(
     }
     if (frame.repeatVar) {
       lexical.push({ name: frame.repeatVar, detail: "repeat index (0-based)" });
+    }
+    if (frame.kind === "Template") {
+      for (const param of scanDirectParams(lines, frame.line)) {
+        lexical.push({
+          name: param.name,
+          detail: `Template parameter — immutable ${param.type}`,
+        });
+      }
     }
   }
   for (const name of scanGlobalLets(lines)) {
@@ -763,10 +833,10 @@ function bracketSuggestions(scope: RefScope): CompletionSuggestion[] {
   // globals. Inside a global initializer the checker deliberately reverses
   // those two so global dependency graphs are stable.
   if (!scope.globalsBeforeColumns) out.push(...globals);
-  // Built-in position bindings (§3.6, ◆42): offered LAST, after every real
+  // Built-in generation bindings (§3.6, ◆42/◆49): offered LAST, after every real
   // column — matching their resolution order, and (since sortText combines
   // group with array position, goblinLanguage.ts) sorting after them in the
-  // menu too. A column literally named row/card shadows the built-in and
+  // menu too. A column named after any built-in shadows that built-in and
   // already claimed the label above — dedupeByLabel (computeCompletions)
   // drops this one for free, the same "first occurrence wins" mechanism
   // that already resolves every other shadowing case here.
@@ -782,6 +852,34 @@ function bracketSuggestions(scope: RefScope): CompletionSuggestion[] {
     insertText: "card",
     kind: "variable",
     detail: "built-in — 1-based card position in the generated deck (rows × loop × count)",
+    group: 0,
+  });
+  out.push({
+    label: "copy",
+    insertText: "copy",
+    kind: "variable",
+    detail: "built-in — 1-based copy within this row × loop combination",
+    group: 0,
+  });
+  out.push({
+    label: "deck",
+    insertText: "deck",
+    kind: "variable",
+    detail: "built-in — Card declaration name for this generated deck",
+    group: 0,
+  });
+  out.push({
+    label: "deck_card",
+    insertText: "deck_card",
+    kind: "variable",
+    detail: "built-in — clearer alias of [card], 1-based within this deck",
+    group: 0,
+  });
+  out.push({
+    label: "project_card",
+    insertText: "project_card",
+    kind: "variable",
+    detail: "built-in — 1-based physical card position across the generated project",
     group: 0,
   });
   return out;
@@ -927,6 +1025,121 @@ function previousSiblingIsIf(lines: string[], lineIndex: number, indent: number)
   return false;
 }
 
+interface CallArgumentContext {
+  templateName: string;
+  params: ScannedTemplateParam[];
+  /** Set for a continuation line beneath `argument: expression`. */
+  argumentName: string | null;
+}
+
+function previousLessIndentedLine(
+  lines: string[],
+  fromLine: number,
+  indent: number,
+): { line: number; indent: number; body: string } | null {
+  for (let i = fromLine - 1; i >= 0; i--) {
+    if (isBlankOrComment(lines[i])) continue;
+    const candidateIndent = indentOf(lines[i]);
+    if (candidateIndent >= indent) continue;
+    return { line: i, indent: candidateIndent, body: lines[i].trim() };
+  }
+  return null;
+}
+
+/** Locate the explicit argument block surrounding the cursor. Both
+ * `Front: Name`/`Back: Name` and nested `Name:` calls use the same child
+ * `name: expression` spelling. */
+function callArgumentContext(
+  lines: string[],
+  lineIndex: number,
+  indent: number,
+): CallArgumentContext | null {
+  const parent = previousLessIndentedLine(lines, lineIndex, indent);
+  if (!parent) return null;
+
+  const targetOf = (body: string): string | null => {
+    const face = /^(?:Front|Back)[ \t]*:[ \t]*([A-Za-z][A-Za-z0-9_]*)[ \t]*(?:#.*)?$/.exec(
+      body,
+    );
+    const nested = /^([A-Za-z][A-Za-z0-9_]*)[ \t]*:[ \t]*(?:#.*)?$/.exec(body);
+    const target = face?.[1] ?? nested?.[1] ?? null;
+    if (
+      target === null ||
+      [
+        "Template", "Card", "Front", "Back", "Rectangle", "Text", "TextBox", "Icon",
+        "Image", "Qr", "Repeat", "If", "Else",
+      ].includes(target)
+    ) {
+      return null;
+    }
+    return target;
+  };
+
+  // A continuation line first sees its argument line. Look one level farther
+  // for the surrounding call before interpreting a bare `name:` as a nested
+  // call of its own; this also supports uppercase parameter names.
+  const argument = /^([A-Za-z][A-Za-z0-9_]*)[ \t]*:/.exec(parent.body);
+  const grandparent = previousLessIndentedLine(lines, parent.line, parent.indent);
+  const grandTarget = grandparent ? targetOf(grandparent.body) : null;
+  if (argument && grandTarget !== null) {
+    const params = scanTemplateParams(lines, grandTarget);
+    if (params.some((param) => param.name === argument[1])) {
+      return { templateName: grandTarget, params, argumentName: argument[1] };
+    }
+  }
+
+  const templateName = targetOf(parent.body);
+  if (templateName === null) return null;
+  return { templateName, params: scanTemplateParams(lines, templateName), argumentName: null };
+}
+
+function parameterTypeSuggestions(snapshot: CompletionSnapshot): CompletionSuggestion[] {
+  const out: CompletionSuggestion[] = ["Text", "Number", "Bool", "Color"].map(
+    (name) => ({
+      label: name,
+      insertText: name,
+      kind: "value",
+      detail: "built-in parameter type",
+      group: 0,
+    }),
+  );
+  for (const en of snapshot.enums) {
+    out.push({
+      label: en.name,
+      insertText: en.name,
+      kind: "enum",
+      detail: `enum parameter type — ${en.cases.length} cases`,
+      group: 0,
+    });
+  }
+  return out;
+}
+
+function argumentValueSuggestions(
+  param: ScannedTemplateParam | undefined,
+  beforeWord: string,
+  scope: RefScope,
+  snapshot: CompletionSnapshot,
+): CompletionSuggestion[] {
+  if (param?.type === "Color") {
+    return [...colorSuggestions(), ...expressionExtras(beforeWord, scope, snapshot)];
+  }
+  const enumDecl = param ? snapshot.enums.find((en) => en.name === param.type) : undefined;
+  if (enumDecl) {
+    return [
+      ...enumDecl.cases.map((name) => ({
+        label: name,
+        insertText: name,
+        kind: "enumCase" as const,
+        detail: `${enumDecl.name} case`,
+        group: 0 as const,
+      })),
+      ...expressionExtras(beforeWord, scope, snapshot),
+    ];
+  }
+  return expressionExtras(beforeWord, scope, snapshot);
+}
+
 function nodeSuggestions(
   lines: string[],
   lineIndex: number,
@@ -934,8 +1147,19 @@ function nodeSuggestions(
   colonFollows: boolean,
   templates: string[],
   enclosingTemplate: string | null,
+  allowParams: boolean,
 ): CompletionSuggestion[] {
   const out = keySuggestions(ELEMENT_OPENERS, colonFollows, true);
+  if (allowParams) {
+    out.push({
+      label: "param",
+      insertText: "param ${1:name}: ${2:Text}",
+      snippet: true,
+      kind: "keyword",
+      detail: "param <name>: <Type> — immutable, required Template parameter",
+      group: 0,
+    });
+  }
   out.push({
     label: "let",
     insertText: "let ",
@@ -963,7 +1187,7 @@ function nodeSuggestions(
       label: name === "let" ? "let:" : name,
       insertText: colonFollows ? name : `${name}:`,
       kind: "template",
-      detail: "Template call — no arguments; does not capture caller locals",
+      detail: "Template call — pass parameters in an indented argument block",
       group: 0,
     });
   }
@@ -1042,17 +1266,34 @@ export function computeCompletions(
   // Current line's `key:` (property or block header), when the cursor is past
   // the colon.
   const letLine = /^[ \t]*let[ \t]+[A-Za-z][A-Za-z0-9_]*[ \t]*:/.exec(line);
+  const paramLine = /^[ \t]*param[ \t]+[A-Za-z][A-Za-z0-9_]*[ \t]*:/.exec(line);
+  const virtualLine = /^[ \t]*virtual[ \t]+column[ \t]+[A-Za-z_][A-Za-z0-9_]*[ \t]*:/.exec(line);
   const propLine = /^[ \t]*(?:column[ \t]+([A-Za-z_][A-Za-z0-9_]*)|([A-Za-z_][A-Za-z0-9_]*))[ \t]*:/.exec(
     line,
   );
-  const colonIndex = letLine ? letLine[0].length : propLine ? propLine[0].length : -1;
+  const colonIndex = letLine
+    ? letLine[0].length
+    : paramLine
+      ? paramLine[0].length
+      : virtualLine
+        ? virtualLine[0].length
+        : propLine
+          ? propLine[0].length
+          : -1;
+  const virtualEquals = virtualLine ? line.indexOf("=", virtualLine[0].length) : -1;
   const currentKey =
     col >= colonIndex && colonIndex >= 0
       ? letLine
         ? "let"
-        : propLine![1] !== undefined
-          ? "column"
-          : propLine![2]
+        : paramLine
+          ? "param"
+          : virtualLine
+            ? virtualEquals >= 0 && col > virtualEquals
+              ? "virtual"
+              : "column"
+          : propLine![1] !== undefined
+            ? "column"
+            : propLine![2]
       : null;
 
   if (state.inString) {
@@ -1105,9 +1346,17 @@ export function computeCompletions(
 
   const scope = () => resolveRefScope(lines, ancestors, currentSnapshot, globalLetContext);
   const beforeWord = before.slice(0, wordStart);
+  const callArgs = callArgumentContext(lines, lineIndex, indent);
 
   // -- value position on the current line -----------------------------------
   if (currentKey !== null) {
+    if (currentKey === "param") {
+      return result(parameterTypeSuggestions(currentSnapshot));
+    }
+    if (callArgs !== null) {
+      const param = callArgs.params.find((candidate) => candidate.name === currentKey);
+      return result(argumentValueSuggestions(param, beforeWord, scope(), currentSnapshot));
+    }
     if (
       !["let", "If", "Else", "Repeat"].includes(currentKey) &&
       (ancestors.innermost === "Template" ||
@@ -1116,7 +1365,8 @@ export function computeCompletions(
         ancestors.innermost === "Else")
     ) {
       // Any otherwise-unclaimed identifier header in template-node position
-      // is a no-argument Template call, including lowercase names.
+      // is a Template call, including lowercase names. Its value belongs in
+      // indented argument lines rather than after this colon.
       return empty();
     }
     return result(
@@ -1132,6 +1382,12 @@ export function computeCompletions(
   }
 
   // -- value continuation (deeper-indented expression lines, ◆23†) ----------
+  if (callArgs !== null && callArgs.argumentName !== null) {
+    const param = callArgs.params.find(
+      (candidate) => candidate.name === callArgs.argumentName,
+    );
+    return result(argumentValueSuggestions(param, beforeWord, scope(), currentSnapshot));
+  }
   if (ancestors.continuationKey !== null) {
     return result(
       valueSuggestions(
@@ -1149,7 +1405,20 @@ export function computeCompletions(
   if (/^[ \t]*[A-Za-z_]?[A-Za-z0-9_]*$/.test(before)) {
     // `let <name>` is a naming position, not a keyword/value position.
     if (/^[ \t]*let(?:[ \t]+[A-Za-z][A-Za-z0-9_]*)?[ \t]*$/.test(before)) return empty();
+    if (/^[ \t]*param(?:[ \t]+[A-Za-z][A-Za-z0-9_]*)?[ \t]*$/.test(before)) return empty();
     const colonFollows = /^[ \t]*:/.test(line.slice(wordEnd));
+    if (callArgs !== null) {
+      return result(
+        keySuggestions(
+          callArgs.params.map((param) => ({
+            key: param.name,
+            detail: `${param.type} parameter for ${callArgs.templateName}`,
+          })),
+          colonFollows,
+          false,
+        ),
+      );
+    }
     switch (ancestors.innermost) {
       case "Rectangle":
       case "Text":
@@ -1180,6 +1449,7 @@ export function computeCompletions(
             colonFollows,
             currentTemplates,
             ancestors.topKind === "Template" ? ancestors.topName : null,
+            ancestors.innermost === "Template",
           ),
         );
       case "Sheet":
@@ -1189,6 +1459,14 @@ export function computeCompletions(
             insertText: "column ",
             kind: "property",
             detail: "column <name>: Text | Number | <Enum>",
+            group: 0,
+          },
+          {
+            label: "virtual column",
+            insertText: "virtual column ${1:name}: ${2:Text} = ${3:\"[card]\"}",
+            snippet: true,
+            kind: "property",
+            detail: "computed export-only column",
             group: 0,
           },
         ]);
@@ -1257,6 +1535,8 @@ function valueSuggestions(
     case "Else":
       return NO_SUGGESTIONS;
     case "let":
+      return expressionExtras(beforeWord, scope(), snapshot);
+    case "virtual":
       return expressionExtras(beforeWord, scope(), snapshot);
     case "Front":
     case "Back":

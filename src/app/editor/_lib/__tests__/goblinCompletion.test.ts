@@ -89,6 +89,7 @@ function at(doc: string, snapshot: CompletionSnapshot = SNAP): CompletionResult 
 }
 
 const labels = (r: CompletionResult): string[] => r.suggestions.map((s) => s.label);
+const GENERATION_BUILT_INS = ["row", "card", "copy", "deck", "deck_card", "project_card"];
 const byLabel = (r: CompletionResult, label: string) => {
   const found = r.suggestions.find((s) => s.label === label);
   expect(found, `expected a suggestion labeled '${label}'`).toBeDefined();
@@ -241,7 +242,7 @@ describe("bracket refs", () => {
       src("Card: Monster", "  sheet: Monsters", "  loop: Rarity as r", "  count: [¦"),
     );
     // row/card (§3.6, ◆42) sort last, after every real column.
-    expect(labels(r)).toEqual(["r", "name", "cost", "suit", "row", "card"]);
+    expect(labels(r)).toEqual(["r", "name", "cost", "suit", ...GENERATION_BUILT_INS]);
     expect(byLabel(r, "r").detail).toBe("loop — enum Rarity");
     expect(byLabel(r, "cost").detail).toBe("Number — Monsters");
     expect(byLabel(r, "suit").detail).toBe("enum Suit — Monsters");
@@ -260,7 +261,7 @@ describe("bracket refs", () => {
         "  Front: MonsterFront",
       ),
     );
-    expect(labels(r)).toEqual(["name", "cost", "suit", "row", "card"]);
+    expect(labels(r)).toEqual(["name", "cost", "suit", ...GENERATION_BUILT_INS]);
   });
 
   it("two Cards using one Template union their sheets' columns", () => {
@@ -277,7 +278,7 @@ describe("bracket refs", () => {
         "  Back: T",
       ),
     );
-    expect(labels(r)).toEqual(["name", "cost", "suit", "flavor", "row", "card"]);
+    expect(labels(r)).toEqual(["name", "cost", "suit", "flavor", ...GENERATION_BUILT_INS]);
   });
 
   it("string interpolation offers the same refs (◆30: brackets always mean data)", () => {
@@ -312,26 +313,28 @@ describe("bracket refs", () => {
   });
 
   it("unplaceable context degrades to the union of all sheets' columns", () => {
-    expect(labels(at("count: [¦"))).toEqual(["name", "cost", "suit", "flavor", "row", "card"]);
+    expect(labels(at("count: [¦"))).toEqual([
+      "name", "cost", "suit", "flavor", ...GENERATION_BUILT_INS,
+    ]);
   });
 
   it("a Card naming an unknown sheet degrades to the union too", () => {
     const r = at(src("Card: M", "  sheet: Nonexistent", "  count: [¦"));
-    expect(labels(r)).toEqual(["name", "cost", "suit", "flavor", "row", "card"]);
+    expect(labels(r)).toEqual(["name", "cost", "suit", "flavor", ...GENERATION_BUILT_INS]);
   });
 
   it("a Template no Card uses degrades to the union", () => {
     const r = at(src("Template: Orphan", "  Text:", "    y: [¦"));
-    expect(labels(r)).toEqual(["name", "cost", "suit", "flavor", "row", "card"]);
+    expect(labels(r)).toEqual(["name", "cost", "suit", "flavor", ...GENERATION_BUILT_INS]);
   });
 
-  it("a Card bound to a zero-column sheet resolves to just the built-ins (§3.6, ◆42 — they never depend on columns)", () => {
+  it("a Card bound to a zero-column sheet resolves to just the generation built-ins", () => {
     const zeroSnap = buildCompletionSnapshot(
       compileSource(src("Sheet: Blanks", "Sheet: Full", "  column a: Text")).bindings,
       null,
     );
     const r = at(src("Card: B", "  sheet: Blanks", "  count: [¦"), zeroSnap);
-    expect(labels(r)).toEqual(["row", "card"]);
+    expect(labels(r)).toEqual(GENERATION_BUILT_INS);
   });
 
   it("nested Repeats reusing a variable name suggest it once (innermost wins)", () => {
@@ -355,18 +358,22 @@ describe("bracket refs", () => {
     expect(byLabel(r, "suit").detail).toBe("loop — enum Rarity");
   });
 
-  // -- built-in row/card (§3.6, ◆42) -----------------------------------------
+  // -- built-in generation identity (§3.6, ◆42/◆49) --------------------------
 
-  it("offers row and card LAST, after every real column, with explanatory detail text", () => {
+  it("offers generation built-ins LAST, after every real column, with explanatory detail text", () => {
     const r = at(src("Card: M", "  sheet: Monsters", "  count: [¦"));
     const all = labels(r);
-    expect(all.slice(-2)).toEqual(["row", "card"]);
+    expect(all.slice(-GENERATION_BUILT_INS.length)).toEqual(GENERATION_BUILT_INS);
     expect(byLabel(r, "row").detail).toBe(
       "built-in — 1-based row position in its sheet (the grid gutter number)",
     );
     expect(byLabel(r, "card").detail).toBe(
       "built-in — 1-based card position in the generated deck (rows × loop × count)",
     );
+    expect(byLabel(r, "copy").detail).toContain("row × loop combination");
+    expect(byLabel(r, "deck").detail).toContain("Card declaration name");
+    expect(byLabel(r, "deck_card").detail).toContain("alias of [card]");
+    expect(byLabel(r, "project_card").detail).toContain("generated project");
   });
 
   it("a column literally named row/card shadows the built-in — only ONE suggestion, the column's", () => {
@@ -411,7 +418,8 @@ describe("bracket refs", () => {
     );
     expect(labels(r).slice(0, 7)).toEqual(["inner", "i", "outer", "r", "name", "cost", "suit"]);
     expect(labels(r)).toEqual([
-      "inner", "i", "outer", "r", "name", "cost", "suit", "accent", "row", "card",
+      "inner", "i", "outer", "r", "name", "cost", "suit", "accent",
+      ...GENERATION_BUILT_INS,
     ]);
     expect(byLabel(r, "inner").detail).toContain("local let");
     expect(byLabel(r, "accent").detail).toContain("global let");
@@ -468,6 +476,22 @@ describe("bracket refs", () => {
     );
     expect(labels(r)).toContain("hp");
     expect(labels(r)).not.toContain("caller_i");
+  });
+
+  it("hoists direct Template parameters into that Template's reference scope", () => {
+    const r = at(
+      src(
+        "Enum: Edition",
+        "  case Black",
+        "  case White",
+        "Template: Face",
+        "  Text:",
+        "    text: \"[¦]\"",
+        "  param edition: Edition",
+      ),
+    );
+    expect(labels(r)).toContain("edition");
+    expect(byLabel(r, "edition").detail).toBe("Template parameter — immutable Edition");
   });
 });
 
@@ -533,25 +557,28 @@ describe("property keys", () => {
     expect(byLabel(r, "size").detail).toBe([...SIZE_PRESETS.keys()].join(" | "));
   });
 
-  it("Template and Repeat bodies offer nodes, local lets, and Template calls", () => {
-    for (const doc of [
-      src("Template: T", "  ¦"),
-      src("Template: T", "  Repeat: 3 as i", "    ¦"),
-    ]) {
-      const r = at(doc);
-      expect(labels(r)).toEqual([
-        "Rectangle", "Text", "TextBox", "Icon", "Image", "Qr", "Repeat", "If", "let",
-        "MonsterFront", "ExtraFront",
-      ]);
-      expect(byLabel(r, "Rectangle").insertText).toBe("Rectangle: ");
-      expect(byLabel(r, "Image").detail).toBe(
-        "x y width height src (fit color pivot rotate)",
-      );
-    }
+  it("Template bodies offer params; nested blocks offer nodes/lets but not params", () => {
+    const direct = at(src("Template: T", "  ¦"));
+    expect(labels(direct)).toEqual([
+      "Rectangle", "Text", "TextBox", "Icon", "Image", "Qr", "Repeat", "If", "param",
+      "let", "MonsterFront", "ExtraFront",
+    ]);
+    expect(byLabel(direct, "param").snippet).toBe(true);
+
+    const nested = at(src("Template: T", "  Repeat: 3 as i", "    ¦"));
+    expect(labels(nested)).toEqual([
+      "Rectangle", "Text", "TextBox", "Icon", "Image", "Qr", "Repeat", "If", "let",
+      "MonsterFront", "ExtraFront",
+    ]);
+    expect(byLabel(nested, "Rectangle").insertText).toBe("Rectangle: ");
+    expect(byLabel(nested, "Image").detail).toBe(
+      "x y width height src (fit color pivot rotate)",
+    );
   });
 
-  it("Sheet body offers `column`, Enum body offers `case`", () => {
+  it("Sheet body offers physical/virtual columns, Enum body offers `case`", () => {
     expect(byLabel(at(src("Sheet: S", "  ¦")), "column").insertText).toBe("column ");
+    expect(byLabel(at(src("Sheet: S", "  ¦")), "virtual column").snippet).toBe(true);
     expect(byLabel(at(src("Enum: E", "  ¦")), "case").insertText).toBe("case ");
   });
 
@@ -646,6 +673,80 @@ describe("value positions", () => {
   it("Front:/Back: offer template names", () => {
     expect(labels(at(src("Card: M", "  Front: ¦")))).toEqual(["MonsterFront", "ExtraFront"]);
     expect(labels(at(src("Card: M", "  Back: ¦")))).toEqual(["MonsterFront", "ExtraFront"]);
+  });
+
+  it("completes parameter types and explicit call argument names", () => {
+    expect(labels(at(src("Template: Face", "  param tint: ¦")))).toEqual([
+      "Text", "Number", "Bool", "Color", "Suit", "Rarity",
+    ]);
+
+    const doc = src(
+      "Enum: Edition",
+      "  case Black",
+      "  case White",
+      "Template: Face",
+      "  param edition: Edition",
+      "  param tint: Color",
+      "Card: BlackCards",
+      "  Front: Face",
+      "    ¦",
+    );
+    const args = at(doc);
+    expect(labels(args)).toEqual(["edition", "tint"]);
+    expect(byLabel(args, "edition").insertText).toBe("edition: ");
+    expect(byLabel(args, "edition").detail).toBe("Edition parameter for Face");
+  });
+
+  it("uses declared parameter types for argument values and caller scope for forwarding", () => {
+    const editionSnapshot: CompletionSnapshot = {
+      ...SNAP,
+      enums: [...SNAP.enums, { name: "Edition", cases: ["Black", "White"] }],
+    };
+    const enumValue = at(src(
+      "Enum: Edition",
+      "  case Black",
+      "  case White",
+      "Template: Inner",
+      "  param edition: Edition",
+      "Template: Outer",
+      "  param outer_edition: Edition",
+      "  Inner:",
+      "    edition: ¦",
+    ), editionSnapshot);
+    expect(labels(enumValue).slice(0, 2)).toEqual(["Black", "White"]);
+
+    const continued = at(src(
+      "Template: Inner",
+      "  param Edition: Edition",
+      "Template: Outer",
+      "  Inner:",
+      "    Edition:",
+      "      ¦",
+    ), editionSnapshot);
+    expect(labels(continued).slice(0, 2)).toEqual(["Black", "White"]);
+
+    const forwarded = at(src(
+      "Enum: Edition",
+      "  case Black",
+      "  case White",
+      "Template: Inner",
+      "  param edition: Edition",
+      "Template: Outer",
+      "  param outer_edition: Edition",
+      "  Inner:",
+      "    edition: [¦]",
+    ), editionSnapshot);
+    expect(labels(forwarded)).toContain("outer_edition");
+
+    const color = at(src(
+      "Template: Inner",
+      "  param tint: Color",
+      "Template: Outer",
+      "  Inner:",
+      "    tint: ¦",
+    ));
+    expect(labels(color)).toContain("white");
+    expect(labels(color)).toContain("#RRGGBB");
   });
 
   it("keeps If/Else contextual as direct face Template names", () => {
@@ -873,6 +974,23 @@ describe("value positions", () => {
     expect(labels(at(src("Sheet: S", "  column power: ¦")))).toEqual([
       "Text", "Number", "Suit", "Rarity",
     ]);
+  });
+
+  it("virtual-column type and initializer offer types and the bound Sheet context", () => {
+    expect(labels(at(src("Sheet: Monsters", "  virtual column code: ¦")))).toEqual([
+      "Text", "Number", "Suit", "Rarity",
+    ]);
+    const refs = labels(at(src(
+      "Sheet: Monsters",
+      "  column name: Text",
+      "  virtual column code: Text = [¦]",
+      "Card: C",
+      "  sheet: Monsters",
+      "  loop: Suit as suit",
+    )));
+    expect(refs).toContain("name");
+    expect(refs).toContain("suit");
+    expect(refs).toContain("card");
   });
 
   it("value continuation lines inherit the property's expected type (◆23†)", () => {

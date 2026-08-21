@@ -9,7 +9,7 @@
  *   (`[[` is the literal-`[` escape, §3.5; `\n` and `\\` are the M3 §3.1
  *   escapes — anything else after `\` paints invalid, matching E001).
  * - Block openers (`Enum: … Repeat: Front: Back:`), contextual node openers
- *   (`If:`/`Else:`), contextual `let name:`, and expression keywords
+ *   (`If:`/`Else:`), contextual `let name:`/`param name:`, and expression keywords
  *   (`if then else and or not as case column`) are keywords; lowercase
  *   `key:` lines are property keys; other capitalized identifiers (enum
  *   names, templates, `Text`/`Number` column types, `Enum.Case` members)
@@ -49,7 +49,11 @@ const EXPR_KEYWORDS = ["if", "then", "else", "and", "or", "not", "as", "case", "
 /** Exported as pure regexes so contextual-keyword compatibility stays pinned
  * without needing Monaco in the language tests. */
 export const GOBLIN_CONTEXTUAL_LET_RE = /^(\s*)(let)(?=\s+[A-Za-z][A-Za-z0-9_]*\s*:)/;
+export const GOBLIN_CONTEXTUAL_PARAM_RE =
+  /^(\s*)(param)(?=\s+[A-Za-z][A-Za-z0-9_]*\s*:)/;
 export const GOBLIN_CONTEXTUAL_BRANCH_RE = /^(\s*)(If|Else)(?=\s*:)/;
+export const GOBLIN_CONTEXTUAL_VIRTUAL_RE =
+  /^(\s*)(virtual)(?=\s+column\s+[A-Za-z][A-Za-z0-9_]*\s*:)/;
 /** The open-tag highlighter uses the compiler's ACTUAL named-color
  * vocabulary, case-insensitively, rather than painting any identifier as a
  * valid color. Scope pairing is deliberately not claimed here: Monarch
@@ -91,7 +95,9 @@ const monarchLanguage: languages.IMonarchLanguage = {
         GOBLIN_CONTEXTUAL_LET_RE,
         ["white", "keyword"],
       ],
+      [GOBLIN_CONTEXTUAL_PARAM_RE, ["white", "keyword"]],
       [GOBLIN_CONTEXTUAL_BRANCH_RE, ["white", "keyword"]],
+      [GOBLIN_CONTEXTUAL_VIRTUAL_RE, ["white", "keyword"]],
       // Capitalized word before ':' — block opener (or a stray block-ish word).
       [
         /[A-Z][A-Za-z0-9_]*(?=\s*:)/,
@@ -106,7 +112,7 @@ const monarchLanguage: languages.IMonarchLanguage = {
         /[a-z][A-Za-z0-9_]*/,
         { cases: { "@exprKeywords": "keyword", "@default": "identifier" } },
       ],
-      [/==|!=|<=|>=|[<>+\-*/%().:]/, "operator"],
+      [/==|!=|<=|>=|[=<>+\-*/%().:]/, "operator"],
       [/[ \t]+/, "white"],
     ],
     string: [

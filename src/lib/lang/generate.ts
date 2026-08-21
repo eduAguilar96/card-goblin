@@ -65,9 +65,11 @@ import {
   evalRootExpr,
   parseNumberCell,
   REPEAT_CAP,
+  valueToText,
 } from "./eval";
 import type {
   CardInstance,
+  CardRef,
   DataDiagnostic,
   Deck,
   LoopCaseBinding,
@@ -186,11 +188,15 @@ class Generator {
     // GENERATION (§3.7): per Card in declaration order (bindings.cards is
     // already source-ordered, duplicates included).
     const decks: Deck[] = [];
+    let projectCardCount = 0;
     for (const card of this.bindings.cards) {
       // decks.length is the deck's final index when it IS emitted — skipped
       // cards return null without generating any cardRef-bearing diagnostic.
-      const deck = this.generateDeck(card, decks.length);
-      if (deck) decks.push(deck);
+      const deck = this.generateDeck(card, decks.length, projectCardCount);
+      if (deck) {
+        decks.push(deck);
+        projectCardCount += deck.cards.length;
+      }
     }
 
     const excludedPristineRows: Record<string, number> = {};
@@ -276,7 +282,11 @@ class Generator {
 
   // -- deck generation (§3.7) -----------------------------------------------
 
-  private generateDeck(card: CardBindings, deckIndex: number): Deck | null {
+  private generateDeck(
+    card: CardBindings,
+    deckIndex: number,
+    projectCardStart: number,
+  ): Deck | null {
     const { sheet, size, front } = card;
     // Unresolved essentials → no deck (documented in the header comment).
     if (!sheet || !size || !front || card.xUnits === null || card.yUnits === null) return null;
@@ -302,6 +312,7 @@ class Generator {
     const cards: CardInstance[] = [];
     const deck: Deck = {
       cardName: card.decl.name.name,
+      sheetName: sheet.decl.name.name,
       widthMm: size.widthMm,
       heightMm: size.heightMm,
       xUnits,
@@ -309,7 +320,7 @@ class Generator {
       cards,
     };
     try {
-      this.fillDeck(deck, cards, deckIndex, card, xUnits, yUnits);
+      this.fillDeck(deck, cards, deckIndex, projectCardStart, card, xUnits, yUnits);
     } catch (err) {
       // Never-throws (⚑8): an internal failure degrades this ONE deck to a
       // D000, keeping the instances generated so far and every other deck.
@@ -326,6 +337,7 @@ class Generator {
     deck: Deck,
     cards: CardInstance[],
     deckIndex: number,
+    projectCardStart: number,
     card: CardBindings,
     xUnits: number,
     yUnits: number,
@@ -350,6 +362,7 @@ class Generator {
         // so D005 keeps deduping across every copy of one combination, not
         // just its first, matching the pre-◆42 "once per combination" rule.
         const iconIssues = new Map<string, DataDiagnostic>();
+        const virtualIssues = new Set<string>();
         const firstCardNumber = cards.length + 1;
         const ctx = this.makeContext(
           card,
@@ -359,9 +372,28 @@ class Generator {
           xUnits,
           yUnits,
           firstCardNumber,
+          projectCardStart + firstCardNumber,
+          1,
+          deck.cardName,
           iconIssues,
         );
         const loopRecord = toLoopRecord(loopValues);
+        const exportDataFor = (copyIndex: number, cardIndex: number) =>
+          this.evaluateExportData(
+            card,
+            data,
+            rowIndex,
+            loopValues,
+            xUnits,
+            yUnits,
+            firstCardNumber + copyIndex,
+            projectCardStart + cardIndex + 1,
+            copyIndex + 1,
+            deck.cardName,
+            iconIssues,
+            { deck: deck.cardName, deckIndex, cardIndex },
+            virtualIssues,
+          );
 
         // count: default 1; integer ≥ 0 required — else D006 + exactly ONE
         // placeholder for this combination (§3.7 †). An unevaluable count
@@ -400,7 +432,19 @@ class Generator {
 
         let emitted: boolean;
         if (countFailure) {
-          emitted = this.emit(deck, cards, deckIndex, rowIndex, loopRecord, 1, null, countFailure, []);
+          emitted = this.emit(
+            deck,
+            cards,
+            deckIndex,
+            projectCardStart,
+            rowIndex,
+            loopRecord,
+            1,
+            null,
+            countFailure,
+            [],
+            exportDataFor,
+          );
         } else if (count === 0) {
           emitted = true; // a legal zero — nothing to emit, no diagnostic
         } else {
@@ -413,7 +457,7 @@ class Generator {
           // sharing ONE back array across all 2,000 copies even when Front
           // diverges on every one — re-evaluating a face that provably can't
           // have changed would be pure waste (front0/back0 below are reused
-          // by reference, not merely by equal content). `ctx.cardPosition`
+          // by reference, not merely by equal content). `ctx.identity`
           // is reset before EACH face so count:'s own read (if any) can't
           // bleed into whether that face counts as diverging.
           //
@@ -423,12 +467,12 @@ class Generator {
           let error: DataDiagnostic[] | null = null;
           let copies: { front: Shape[]; back: Shape[] }[] | null = null;
           try {
-            ctx.cardPosition.used = false;
-            const front0 = evalFace(front, ctx);
-            const frontUsed = ctx.cardPosition.used;
-            ctx.cardPosition.used = false;
+            ctx.identity.varyingUsed = false;
+            const front0 = evalFace(front, ctx, card.frontFace);
+            const frontUsed = ctx.identity.varyingUsed;
+            ctx.identity.varyingUsed = false;
             const back0 = this.evalBackFace(card, ctx, xUnits, yUnits);
-            const backUsed = ctx.cardPosition.used;
+            const backUsed = ctx.identity.varyingUsed;
             copies = [{ front: front0, back: back0 }];
             if ((frontUsed || backUsed) && count > 1) {
               const evalLimit = Math.min(count, CARD_CAP - (firstCardNumber - 1));
@@ -441,11 +485,14 @@ class Generator {
                   xUnits,
                   yUnits,
                   firstCardNumber + copyIndex,
+                  projectCardStart + firstCardNumber + copyIndex,
+                  copyIndex + 1,
+                  deck.cardName,
                   iconIssues,
                 );
                 try {
                   copies.push({
-                    front: frontUsed ? evalFace(front, copyCtx) : front0,
+                    front: frontUsed ? evalFace(front, copyCtx, card.frontFace) : front0,
                     back: backUsed ? this.evalBackFace(card, copyCtx, xUnits, yUnits) : back0,
                   });
                 } catch (copyErr) {
@@ -479,17 +526,31 @@ class Generator {
             error = err.diagnostics;
           }
           emitted = error
-            ? this.emit(deck, cards, deckIndex, rowIndex, loopRecord, count, null, error, [])
+            ? this.emit(
+                deck,
+                cards,
+                deckIndex,
+                projectCardStart,
+                rowIndex,
+                loopRecord,
+                count,
+                null,
+                error,
+                [],
+                exportDataFor,
+              )
             : this.emit(
                 deck,
                 cards,
                 deckIndex,
+                projectCardStart,
                 rowIndex,
                 loopRecord,
                 count,
                 copies,
                 null,
                 iconIssues.values(),
+                exportDataFor,
               );
         }
         if (!emitted) break rows; // D007 — the Card is truncated (◆27†)
@@ -506,7 +567,7 @@ class Generator {
     yUnits: number,
   ): Shape[] {
     return card.back
-      ? evalFace(card.back, ctx)
+      ? evalFace(card.back, ctx, card.backFace)
       : [
           {
             kind: "rect",
@@ -535,12 +596,14 @@ class Generator {
     deck: Deck,
     cards: CardInstance[],
     deckIndex: number,
+    projectCardStart: number,
     rowIndex: number,
     loopBindings: Record<string, LoopCaseBinding>,
     n: number,
     copies: readonly { front: Shape[]; back: Shape[] }[] | null,
     error: DataDiagnostic[] | null,
     iconIssues: Iterable<DataDiagnostic>,
+    exportDataFor: (copyIndex: number, cardIndex: number) => Readonly<Record<string, string>>,
   ): boolean {
     const firstIndex = cards.length;
     const allowed = Math.min(n, CARD_CAP - firstIndex);
@@ -571,7 +634,14 @@ class Generator {
           const instance: CardInstance = {
             front: face.front,
             back: face.back,
-            meta: { rowIndex, loopBindings, copyIndex },
+            exportData: exportDataFor(copyIndex, firstIndex + copyIndex),
+            meta: {
+              rowIndex,
+              loopBindings,
+              copyIndex,
+              deckCardIndex: firstIndex + copyIndex,
+              projectCardIndex: projectCardStart + firstIndex + copyIndex,
+            },
             contentHash,
           };
           if (error) instance.error = { diagnostics: error };
@@ -587,7 +657,14 @@ class Generator {
           cards.push({
             front: face.front,
             back: face.back,
-            meta: { rowIndex, loopBindings, copyIndex },
+            exportData: exportDataFor(copyIndex, firstIndex + copyIndex),
+            meta: {
+              rowIndex,
+              loopBindings,
+              copyIndex,
+              deckCardIndex: firstIndex + copyIndex,
+              projectCardIndex: projectCardStart + firstIndex + copyIndex,
+            },
             contentHash: hashInstance(deck, face.front, face.back, null),
           });
         }
@@ -601,6 +678,69 @@ class Generator {
       return false;
     }
     return true;
+  }
+
+  /** ◆48: build the user-declared portion of one CSV row. Physical cells
+   * remain byte-for-byte as entered; virtuals evaluate in a fresh root
+   * context for THIS emitted copy, so `[card]` is exact even when neither
+   * rendered face reads it. A virtual data failure blanks only that field —
+   * it never turns an otherwise printable card into a placeholder. */
+  private evaluateExportData(
+    card: CardBindings,
+    data: SheetData,
+    rowIndex: number,
+    loopValues: ReadonlyMap<string, LoopCaseBinding>,
+    xUnits: number,
+    yUnits: number,
+    cardNumber: number,
+    projectCardNumber: number,
+    copyNumber: number,
+    deckName: string,
+    iconIssues: Map<string, DataDiagnostic>,
+    cardRef: CardRef,
+    reportedIssues: Set<string>,
+  ): Readonly<Record<string, string>> {
+    const values = Object.create(null) as Record<string, string>;
+    const row = data.rows[rowIndex];
+    for (const name of data.info.columns.keys()) {
+      values[name] = rawCellOf(row, name);
+    }
+    for (const [name, virtual] of data.info.virtualColumns) {
+      const ctx = this.makeContext(
+        card,
+        data,
+        rowIndex,
+        loopValues,
+        xUnits,
+        yUnits,
+        cardNumber,
+        projectCardNumber,
+        copyNumber,
+        deckName,
+        iconIssues,
+      );
+      try {
+        values[name] = valueToText(evalRootExpr(virtual.decl.initializer, ctx, null));
+      } catch (err) {
+        if (!(err instanceof DataError)) throw err;
+        values[name] = "";
+        for (const diagnostic of err.diagnostics) {
+          // D001–D003 are owned and registered by the shared cell-validation
+          // machinery. Card-scoped issues need one export-specific entry,
+          // deduped per virtual/combination even when count: emits many copies.
+          if (diagnostic.cell) continue;
+          const key = `${name}|${diagnostic.code}|${diagnostic.message}`;
+          if (reportedIssues.has(key)) continue;
+          reportedIssues.add(key);
+          this.diagnostics.push({
+            ...diagnostic,
+            message: `Virtual column '${name}': ${diagnostic.message}`,
+            cardRef,
+          });
+        }
+      }
+    }
+    return values;
   }
 
   /** `cardNumber` (§3.6, ◆42): the 1-based [card] value THIS context's face
@@ -619,6 +759,9 @@ class Generator {
     xUnits: number,
     yUnits: number,
     cardNumber: number,
+    projectCardNumber: number,
+    copyNumber: number,
+    deckName: string,
     iconIssues: Map<string, DataDiagnostic>,
   ): EvalContext {
     const row = data.rows[rowIndex];
@@ -647,7 +790,13 @@ class Generator {
       },
       loopValues,
       rowNumber: rowIndex + 1,
-      cardPosition: { value: cardNumber, used: false },
+      identity: {
+        deckName,
+        copyNumber,
+        deckCardNumber: cardNumber,
+        projectCardNumber,
+        varyingUsed: false,
+      },
       repeatStack: [],
       budget: { remaining: REPEAT_CAP },
       iconIssues,

@@ -8,9 +8,9 @@
  * keywords recognized by the parser in header position only (◆30†). Only the
  * declaration words (`case`, `column`) and expression-structure words
  * (`if then else and or not as`) are reserved and lex as keyword tokens.
- * The binding/control words `let`, `If`, and `Else` deliberately remain plain
- * identifiers: they are contextual forms recognized only in their parser
- * positions, preserving declarations and columns with those names.
+ * The binding/control words `let`, `If`, `Else`, and `virtual` deliberately
+ * remain plain identifiers: they are contextual forms recognized only in
+ * their parser positions, preserving declarations and columns with those names.
  *
  * A parse never throws: all lexical problems become E001 diagnostics and the
  * lexer recovers on the same line.
@@ -48,6 +48,7 @@ export const KEYWORDS: ReadonlySet<string> = new Set([
 
 export type Op =
   | ":"
+  | "="
   | "("
   | ")"
   | "."
@@ -281,9 +282,21 @@ function lexLineContent(
       continue;
     }
     if (c === "=") {
-      diagnostics.push(
-        syntaxError('Unexpected "="; comparison is written "=="', range(i, i + 1)),
-      );
+      // ◆48's one assignment-looking token is declaration punctuation, not
+      // an expression operator. Preserve the long-standing `x = 1` hint
+      // everywhere else so equality mistakes still point users to `==`.
+      const virtualPrefix = line.slice(start, i);
+      if (
+        /^virtual\s+column\s+[A-Za-z][A-Za-z0-9_]*\s*:\s*[A-Za-z][A-Za-z0-9_]*\s*$/.test(
+          virtualPrefix,
+        )
+      ) {
+        out.push({ kind: "op", op: "=", range: range(i, i + 1) });
+      } else {
+        diagnostics.push(
+          syntaxError('Unexpected "="; comparison is written "=="', range(i, i + 1)),
+        );
+      }
       i++;
       continue;
     }

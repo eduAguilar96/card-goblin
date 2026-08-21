@@ -1971,6 +1971,65 @@ describe("templates are checked per using Card", () => {
   });
 });
 
+// -- export-only virtual columns (◆48) -------------------------------------
+
+describe("virtual columns (◆48)", () => {
+  const virtualProject = (...sheetLines: string[]): string =>
+    src(
+      "Sheet: S",
+      "  column code: Text",
+      ...sheetLines.map((line) => `  ${line}`),
+      "Template: T",
+      "  Text:",
+      "    x: 0",
+      "    y: 0",
+      "    size: 1",
+      "    text: [code]",
+      "Card: C",
+      "  sheet: S",
+      "  size: poker",
+      "  x_units: 20",
+      "  y_units: auto",
+      "  Front: T",
+    );
+
+  it("checks formulas in each bound Card context without adding grid columns", () => {
+    const result = checkOf(
+      virtualProject('virtual column card_code: Text = "[card]|[code]"'),
+    );
+    expect(result.diagnostics).toEqual([]);
+    const sheet = result.bindings.sheets.get("S")!;
+    expect([...sheet.columns.keys()]).toEqual(["code"]);
+    expect([...sheet.virtualColumns.keys()]).toEqual(["card_code"]);
+  });
+
+  it("supports global-let indirection", () => {
+    const source = [
+      'let card_code: "[card]|[code]"',
+      virtualProject("virtual column card_code: Text = [card_code]"),
+    ].join("\n");
+    expect(codesOf(source)).toEqual([]);
+  });
+
+  it("enforces the declared type and rejects physical/virtual duplicate names", () => {
+    expect(codesOf(virtualProject('virtual column n: Number = "nope"'))).toEqual(["E003"]);
+    expect(codesOf(virtualProject('virtual column code: Text = "duplicate"'))).toEqual([
+      "E005",
+    ]);
+  });
+
+  it("does not make one virtual column available to another as a binding", () => {
+    expect(
+      codesOf(
+        virtualProject(
+          'virtual column first: Text = "ok"',
+          "virtual column second: Text = [first]",
+        ),
+      ),
+    ).toEqual(["E002"]);
+  });
+});
+
 // -- built-in [row]/[card] position bindings (§3.6, ◆42) --------------------
 
 describe("built-in [row]/[card] position bindings (§3.6, ◆42)", () => {
@@ -2096,6 +2155,35 @@ describe("built-in [row]/[card] position bindings (§3.6, ◆42)", () => {
       "Type mismatch: expected Color, got Number",
     );
   });
+});
+
+describe("generated-instance identity built-ins", () => {
+  it("types deck as Text and every identity number as Number", () => {
+    expect(
+      codesOf(
+        withElement("Text:", [
+          "x: [copy] + [deck_card] + [project_card]",
+          ...TEXT_BASE.slice(1),
+          'text: "[deck]|[card]"',
+        ]),
+      ),
+    ).toEqual([]);
+
+    expect(
+      codesOf(withElement("Text:", ["x: [deck]", ...TEXT_BASE.slice(1), 'text: "x"'])),
+    ).toContain("E003");
+  });
+
+  it.each(["copy", "deck", "deck_card", "project_card"])(
+    "a sheet column named %s shadows the same-named built-in",
+    (name) => {
+      const diagnostics = diagsOf(src("Sheet: S", `  column ${name}: Text`));
+      expect(diagnostics.map((d) => d.code).sort()).toEqual(["W001", "W002"]);
+      expect(diagnostics.find((d) => d.code === "W001")?.message).toBe(
+        `Column '${name}' of sheet 'S' shadows the built-in [${name}] binding`,
+      );
+    },
+  );
 });
 
 // -- expected-type resolution (◆14†, ◆21†) ----------------------------------

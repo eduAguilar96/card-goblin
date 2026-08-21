@@ -62,10 +62,14 @@ describe("contextual keywords (◆30†)", () => {
         "Sheet: S",
         "  column let: Text",
         "Template: If",
+        "  param Value: Number",
         "Template: Else",
+        "  param Value: Number",
         "Card: C",
         "  Front: If",
+        "    Value: 1",
         "  Back: Else",
+        "    Value: 2",
         "",
       ].join("\n"),
     );
@@ -76,6 +80,8 @@ describe("contextual keywords (◆30†)", () => {
     const card = p.declarations[3] as CardDecl;
     expect(card.items.flatMap((item) => item.kind === "Face" ? [item.template?.name] : []))
       .toEqual(["If", "Else"]);
+    expect(card.items.flatMap((item) => item.kind === "Face" ? [item.arguments[0]?.name.name] : []))
+      .toEqual(["Value", "Value"]);
   });
 });
 
@@ -161,6 +167,32 @@ describe("reserved words are illegal as declared names (§3.1)", () => {
 });
 
 describe("declarations (§3.2)", () => {
+  it("parses typed virtual columns with an export expression (◆48)", () => {
+    const p = parseClean(
+      'Sheet: S\n  column code: Text\n  virtual column card_code: Text = "[card]|[code]"\n',
+    );
+    const sheet = p.declarations[0] as SheetDecl;
+    expect(sheet.columns.map((column) => column.name.name)).toEqual(["code"]);
+    expect(sheet.virtualColumns).toHaveLength(1);
+    expect(sheet.virtualColumns[0].name.name).toBe("card_code");
+    expect(sheet.virtualColumns[0].columnType.name).toBe("Text");
+    expect(sheet.virtualColumns[0].initializer.kind).toBe("String");
+  });
+
+  it("keeps virtual contextual — an ordinary column may still be named virtual", () => {
+    const p = parseClean("Sheet: S\n  column virtual: Text\n");
+    const sheet = p.declarations[0] as SheetDecl;
+    expect(sheet.columns[0].name.name).toBe("virtual");
+    expect(sheet.virtualColumns).toEqual([]);
+  });
+
+  it("requires = and an initializer on a virtual column", () => {
+    const missingEquals = diags("Sheet: S\n  virtual column code: Text [card]\n");
+    expect(missingEquals).toHaveLength(1);
+    expect(missingEquals[0].message).toContain("Expected '='");
+    expect(diags("Sheet: S\n  virtual column code: Text =\n")[0].code).toBe("E001");
+  });
+
   it("a zero-column Sheet is legal (⚑13†)", () => {
     const p = parseClean("Sheet: Empty\nCard: C\n  sheet: Empty\n");
     const sheet = p.declarations[0] as SheetDecl;
@@ -195,17 +227,30 @@ describe("declarations (§3.2)", () => {
     ]);
   });
 
-  it("indented content under Front: is E001 — block headers never continue (◆23†)", () => {
-    const { program, diagnostics } = parse(
-      "Card: C\n  Front: T\n    x: 1\n  Back: B\n",
-    );
-    expect(diagnostics).toHaveLength(1);
-    expect(diagnostics[0].message).toContain("inline");
-    const card = program.declarations[0] as CardDecl;
+  it("parses explicit argument blocks under Front:/Back:", () => {
+    const card = parseClean(
+      "Card: C\n  Front: T\n    x: 1\n    Edition: White\n  Back: B\n    label: \"back\"\n",
+    ).declarations[0] as CardDecl;
+    const faces = card.items.filter((item) => item.kind === "Face");
+    expect(faces.map((face) => face.arguments.map((arg) => arg.name.name))).toEqual([
+      ["x", "Edition"],
+      ["label"],
+    ]);
     expect(card.items.map((i) => (i.kind === "Face" ? i.face : "?"))).toEqual([
       "Front",
       "Back",
     ]);
+  });
+
+  it("hoists direct Template params and rejects params inside structural blocks", () => {
+    const clean = parseClean(
+      "Template: T\n  Rectangle:\n  param edition: Edition\n  param color: Color\n",
+    ).declarations[0] as TemplateDecl;
+    expect(clean.params.map((param) => [param.name.name, param.paramType.name])).toEqual([
+      ["edition", "Edition"],
+      ["color", "Color"],
+    ]);
+    expect(diags("Template: T\n  If: 1 == 1\n    param bad: Text\n")).toHaveLength(1);
   });
 });
 

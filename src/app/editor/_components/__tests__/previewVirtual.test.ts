@@ -166,6 +166,7 @@ describe("columnCount / rowHeightPx", () => {
 describe("layoutDecks", () => {
   const deck = (cards: number, widthMm = 63.5, heightMm = 88.9): Deck => ({
     cardName: "D",
+    sheetName: "S",
     widthMm,
     heightMm,
     xUnits: 20,
@@ -173,7 +174,14 @@ describe("layoutDecks", () => {
     cards: Array.from({ length: cards }, () => ({
       front: [],
       back: [],
-      meta: { rowIndex: 0, loopBindings: {}, copyIndex: 0 },
+      exportData: {},
+      meta: {
+        rowIndex: 0,
+        loopBindings: {},
+        copyIndex: 0,
+        deckCardIndex: 0,
+        projectCardIndex: 0,
+      },
       contentHash: "0",
     })),
   });

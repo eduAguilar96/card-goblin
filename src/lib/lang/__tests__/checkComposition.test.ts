@@ -96,6 +96,78 @@ describe("checker composition and lexical bindings", () => {
     )).toBe(true);
   });
 
+  it("checks typed arguments, forwarding, and invocation arity", () => {
+    const result = checked(lines(
+      "Enum: Edition",
+      "  case Black",
+      "  case White",
+      "Template: Leaf",
+      "  param edition: Edition",
+      "  param ink: Color",
+      "  Rectangle:",
+      "    x: 0",
+      "    y: 0",
+      "    width: 1",
+      "    height: 1",
+      "    color: [ink]",
+      "Template: Root",
+      "  param edition: Edition",
+      "  Leaf:",
+      "    edition: [edition]",
+      "    ink: red",
+      "Template: Bad",
+      "  Leaf:",
+      "    edition: 1",
+      "    extra: 2",
+      "    extra: 3",
+      "Card: C",
+      "  sheet: S",
+      "  size: poker",
+      "  x_units: 20",
+      "  y_units: auto",
+      "  Front: Root",
+      "    edition: Edition.Black",
+      "Sheet: S",
+    ));
+    expect(result.diagnostics.map((d) => `${d.code}:${d.message}`)).toEqual(expect.arrayContaining([
+      expect.stringContaining("E003:Argument 'edition' expects enum Edition, got Number"),
+      expect.stringContaining("E008:Unknown argument 'extra'"),
+      expect.stringContaining("E005:Duplicate argument 'extra'"),
+      expect.stringContaining("E008:Missing argument 'ink'"),
+    ]));
+    const paramRefs = [...result.bindings.cards[0].resolutions.values()]
+      .filter((resolution) => resolution.kind === "param");
+    expect(paramRefs.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("reports duplicate params and a root let collision", () => {
+    const result = checked(lines(
+      "Template: Root",
+      "  param value: Number",
+      "  param value: Text",
+      "  let value: 2",
+      "  Text:",
+      "    x: 0",
+      "    y: 0",
+      "    size: 1",
+      "    text: [value]",
+      "Card: C",
+      "  sheet: S",
+      "  size: poker",
+      "  x_units: 20",
+      "  y_units: auto",
+      "  Front: Root",
+      "    value: 1",
+      "Sheet: S",
+    ));
+    expect(result.diagnostics.filter((d) => d.code === "E005").map((d) => d.message)).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("Duplicate parameter 'value'"),
+        expect.stringContaining("Root binding 'value' conflicts"),
+      ]),
+    );
+  });
+
   it("leaves an unreachable invalid global lazy and warns only that it is unused", () => {
     const result = checked(lines(
       "let unused: [missing]",

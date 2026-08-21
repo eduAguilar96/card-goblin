@@ -11,15 +11,24 @@ const firstString = (source: string): Token & { kind: "string" } => {
 };
 
 describe("composition words stay contextual", () => {
-  it("does not globally reserve let, If, or Else", () => {
+  it("does not globally reserve let, If, Else, or virtual", () => {
     expect(KEYWORDS.has("let")).toBe(false);
     expect(KEYWORDS.has("If")).toBe(false);
     expect(KEYWORDS.has("Else")).toBe(false);
+    expect(KEYWORDS.has("virtual")).toBe(false);
     expect(
-      lex("let If Else").tokens
+      lex("let If Else virtual").tokens
         .filter((token) => token.kind !== "newline" && token.kind !== "eof")
         .map((token) => token.kind),
-    ).toEqual(["identifier", "identifier", "identifier"]);
+    ).toEqual(["identifier", "identifier", "identifier", "identifier"]);
+  });
+
+  it("tokenizes the virtual-column = separator without changing ==", () => {
+    expect(
+      lex("virtual column code: Text = [card] == 1").tokens
+        .filter((token) => token.kind === "op")
+        .map((token) => token.kind === "op" ? token.op : ""),
+    ).toEqual([":", "=", "=="]);
   });
 
   it("keeps lowercase expression else reserved for targeted parser recovery", () => {

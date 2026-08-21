@@ -28,13 +28,16 @@
 import type {
   ElementNode,
   Expr,
+  FaceNode,
   IfNode,
   LetNode,
   RepeatNode,
   StringLit,
   TemplateCallNode,
   TemplateDecl,
+  TemplateArgumentNode,
   TemplateNode,
+  TemplateParamDecl,
 } from "./ast";
 import type { CardBindings, ResolvableNode, Resolution } from "./check";
 import type {
@@ -110,8 +113,15 @@ interface BindingSlot {
   value?: Value;
 }
 
+interface ParameterSlot extends BindingSlot {
+  argument: Expr;
+  /** Snapshot of the caller's lexical Repeat values at the call edge. */
+  callerRepeats: { name: string; value: number }[];
+}
+
 interface EvalFrame {
   slots: Map<LetNode, BindingSlot>;
+  params: Map<TemplateParamDecl, ParameterSlot>;
 }
 
 interface EvalSession {
@@ -145,13 +155,18 @@ export interface EvalContext {
    * bound sheet (pristine rows counted — it's exactly the grid gutter
    * number). Fixed for the whole combination; every copy shares it. */
   rowNumber: number;
-  /** `[card]` (§3.6, ◆42): 1-based position of the CURRENT copy within its
-   * deck. `.value` is mutable — generate.ts advances it per copy ONLY when
-   * `.used` shows a face actually read [card] (set by resolveName below), so
-   * a face that never reads it still evaluates once and its copies still
-   * share one Shape array / one contentHash, exactly as before this binding
-   * existed. */
-  cardPosition: { value: number; used: boolean };
+  /** Identity of the current generated instance. The numeric values are all
+   * 1-based. `varyingUsed` is set only when evaluation actually reads a
+   * copy-varying binding (`[copy]`, `[card]`/`[deck_card]`, or
+   * `[project_card]`), allowing generate.ts to retain shared face arrays for
+   * expressions that use only invariant `[row]`/`[deck]`. */
+  identity: {
+    deckName: string;
+    copyNumber: number;
+    deckCardNumber: number;
+    projectCardNumber: number;
+    varyingUsed: boolean;
+  };
   /** Innermost-last stack of enclosing Repeat variables. */
   repeatStack: { name: string; value: number }[];
   /** Remaining Repeat iterations for this instance (◆27). */
@@ -163,7 +178,7 @@ export interface EvalContext {
   iconIssues: Map<string, DataDiagnostic>;
   /** Fresh for each root expression/face evaluation, while every existing
    * per-instance field above retains its lifetime (especially Repeat budget
-   * and cardPosition). Internal evaluator state; generate.ts initializes it
+   * and identity). Internal evaluator state; generate.ts initializes it
    * to null and root entry points restore it on exit. */
   session: EvalSession | null;
 }
@@ -260,7 +275,7 @@ function evalExprInner(expr: Expr, ctx: EvalContext, axisUnits: number | null): 
       let out = "";
       for (const part of expr.parts) {
         if (part.kind === "text") out += part.value;
-        else out += toText(resolveName(part.name, part, ctx));
+        else out += valueToText(resolveName(part.name, part, ctx));
       }
       return text(out);
     }
@@ -380,7 +395,7 @@ function numOperand(expr: Expr, ctx: EvalContext, axisUnits: number | null): num
 /** Coercion in Text positions (§3.5 ◆†): Number → trailing-zeros-trimmed
  * (JS number formatting never prints trailing zeros), Enum → its case name.
  * Bool/Color in a Text position is E003 — poisoned here. */
-function toText(v: Value): string {
+export function valueToText(v: Value): string {
   switch (v.kind) {
     case "number":
       return String(v.value);
@@ -419,16 +434,56 @@ function resolveName(name: string, node: ResolvableNode, ctx: EvalContext): Valu
       return readCell(res, ctx);
     case "let":
       return resolveLet(res.binding, res.scope, ctx);
+    case "param":
+      return resolveParameter(res.parameter, ctx);
     case "position": {
-      // §3.6, ◆42: [row] is fixed for the whole combination; [card] flags
-      // `.used` so generate.ts knows this combination's copies must each
-      // resolve their OWN faces (they can no longer share one evaluation).
       if (res.which === "row") return num(ctx.rowNumber);
-      ctx.cardPosition.used = true;
-      return num(ctx.cardPosition.value);
+      if (res.which === "deck") return text(ctx.identity.deckName);
+      // These values may differ between count: copies, so a face that reads
+      // any of them must be resolved separately for every emitted copy.
+      ctx.identity.varyingUsed = true;
+      if (res.which === "copy") return num(ctx.identity.copyNumber);
+      if (res.which === "project_card") return num(ctx.identity.projectCardNumber);
+      // `[card]` remains the compatibility spelling of `[deck_card]`.
+      return num(ctx.identity.deckCardNumber);
     }
     default:
       return poisoned();
+  }
+}
+
+function resolveParameter(parameter: TemplateParamDecl, ctx: EvalContext): Value {
+  const session = ctx.session;
+  if (!session) return poisoned();
+  let slot: ParameterSlot | undefined;
+  for (let i = session.frames.length - 1; i >= 0; i--) {
+    slot = session.frames[i].params.get(parameter);
+    if (slot) break;
+  }
+  if (!slot) return poisoned();
+  if (slot.state === "value") return slot.value as Value;
+  if (slot.state === "evaluating") return poisoned();
+  slot.state = "evaluating";
+  const activeRepeats = ctx.repeatStack;
+  // Argument nodes are resolved in the caller's static scope. Repeat values
+  // are the one runtime binding represented by a name stack rather than AST
+  // identity, so restore the caller snapshot while lazily evaluating too.
+  // Nested forwarding composes naturally: each parameter swaps to its own
+  // captured stack, then restores the previous parameter/callee environment.
+  ctx.repeatStack = slot.callerRepeats;
+  try {
+    // The argument's recorded resolutions point into the caller activation.
+    // That activation remains below this frame until the call returns.
+    const value = evalExpr(slot.argument, ctx, null);
+    slot.value = value;
+    slot.state = "value";
+    return value;
+  } catch (error) {
+    slot.state = "uninitialized";
+    delete slot.value;
+    throw error;
+  } finally {
+    ctx.repeatStack = activeRepeats;
   }
 }
 
@@ -521,13 +576,17 @@ function resolveIdentifier(
 /** Evaluate one face template into resolved shapes, in declaration order
  * (z-order ◆15). Throws DataError on any data problem — the caller turns
  * the whole instance into a placeholder (⚑8). */
-export function evalFace(template: TemplateDecl, ctx: EvalContext): Shape[] {
+export function evalFace(
+  template: TemplateDecl,
+  ctx: EvalContext,
+  invocation?: FaceNode | null,
+): Shape[] {
   return withSession(ctx, () => {
     const session = requireSession(ctx);
     session.templateStack.push(template);
     try {
       const shapes: Shape[] = [];
-      emitChildren(template.children, ctx, shapes, 1);
+      emitChildren(template.children, ctx, shapes, 1, template, invocation?.arguments ?? []);
       return shapes;
     } finally {
       session.templateStack.pop();
@@ -540,13 +599,35 @@ function emitChildren(
   ctx: EvalContext,
   out: Shape[],
   depth: number,
+  template?: TemplateDecl,
+  args: readonly TemplateArgumentNode[] = [],
 ): void {
   const session = requireSession(ctx);
   const slots = new Map<LetNode, BindingSlot>();
   for (const child of children) {
     if (child.kind === "Let") slots.set(child, { state: "uninitialized" });
   }
-  session.frames.push({ slots });
+  const params = new Map<TemplateParamDecl, ParameterSlot>();
+  if (template) {
+    const argumentsByName = new Map<string, TemplateArgumentNode>();
+    for (const arg of args) {
+      if (!argumentsByName.has(arg.name.name)) argumentsByName.set(arg.name.name, arg);
+    }
+    const declared = new Set<string>();
+    for (const param of template.params) {
+      if (declared.has(param.name.name)) continue;
+      declared.add(param.name.name);
+      const argumentNode = argumentsByName.get(param.name.name);
+      if (argumentNode) {
+        params.set(param, {
+          state: "uninitialized",
+          argument: argumentNode.value,
+          callerRepeats: ctx.repeatStack.map((repeat) => ({ ...repeat })),
+        });
+      }
+    }
+  }
+  session.frames.push({ slots, params });
   try {
     for (const node of children) emitNode(node, ctx, out, depth);
   } finally {
@@ -602,7 +683,7 @@ function emitTemplateCall(
   session.callDepth++;
   session.templateStack.push(template);
   try {
-    emitChildren(template.children, ctx, out, depth + 1);
+    emitChildren(template.children, ctx, out, depth + 1, template, node.arguments);
   } finally {
     session.templateStack.pop();
     session.callDepth--;
@@ -696,7 +777,7 @@ function evalElement(el: ElementNode, ctx: EvalContext): Shape {
       // the resolved text (escapes or cell data) render as SPACES; hard
       // breaks belong to TextBox. Resolved here so the model, the hash,
       // and every renderer agree on the visible text.
-      const text = toText(evalExpr(textExpr, ctx, null)).replace(/\n/g, " ");
+      const text = valueToText(evalExpr(textExpr, ctx, null)).replace(/\n/g, " ");
       const size = numberProp(el, "size", ctx, ctx.xUnits);
       const font = fontOf(el, ctx);
       // Inline icons (◆44, §7.5): markers parse AFTER interpolation — a
@@ -732,7 +813,7 @@ function evalElement(el: ElementNode, ctx: EvalContext): Shape {
       const lineHeight = lineHeightOf(el);
       const font = fontOf(el, ctx);
       const textExpr = requireProp(el, "text");
-      const text = toText(evalExpr(textExpr, ctx, null));
+      const text = valueToText(evalExpr(textExpr, ctx, null));
       // Inline icons (◆44, §7.5): the same post-interpolation markers as
       // Text, fed through the wrap engine — a marker is one atomic token
       // that wraps like a word in its 1-em slot.
@@ -766,7 +847,7 @@ function evalElement(el: ElementNode, ctx: EvalContext): Shape {
     case "Icon": {
       const { x, pivot } = xAndPivot(el, ctx);
       const codeExpr = requireProp(el, "code");
-      const code = toText(evalExpr(codeExpr, ctx, null));
+      const code = valueToText(evalExpr(codeExpr, ctx, null));
       // D005 (§3.8 †): computed code not in the curated list — collect the
       // diagnostic but STILL emit the icon (the failed ligature is its own
       // visible indicator). Literal codes were W004-checked at compile time,
@@ -811,7 +892,7 @@ function evalElement(el: ElementNode, ctx: EvalContext): Shape {
         y: numberProp(el, "y", ctx, ctx.yUnits),
         width: imageDimProp(el, "width", ctx, ctx.xUnits),
         height: imageDimProp(el, "height", ctx, ctx.yUnits),
-        src: toText(evalExpr(requireProp(el, "src"), ctx, null)),
+        src: valueToText(evalExpr(requireProp(el, "src"), ctx, null)),
         ...(carriesTint ? { color: imageColor } : {}),
         fit: fitOf(el, ctx),
         pivot: pivotOf(el, ctx), // §3.4: applied to the RESOLVED box at render time
@@ -824,7 +905,7 @@ function evalElement(el: ElementNode, ctx: EvalContext): Shape {
       // Encoding happens HERE, at eval time (pure, deterministic — the
       // wrap.ts precedent): the shape carries the resolved module matrix,
       // never the source data, so the renderer only draws.
-      const data = toText(evalExpr(requireProp(el, "data"), ctx, null));
+      const data = valueToText(evalExpr(requireProp(el, "data"), ctx, null));
       const level = qrLevelOf(el, ctx);
       const encoded = encodeQr(data, level);
       if (!encoded) {

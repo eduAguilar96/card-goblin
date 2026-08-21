@@ -5,6 +5,8 @@ import {
   GOBLIN_COLOR_SCOPE_OPEN_RE,
   GOBLIN_CONTEXTUAL_BRANCH_RE,
   GOBLIN_CONTEXTUAL_LET_RE,
+  GOBLIN_CONTEXTUAL_PARAM_RE,
+  GOBLIN_CONTEXTUAL_VIRTUAL_RE,
 } from "../goblinLanguage";
 
 describe("Goblin contextual highlighting", () => {
@@ -15,12 +17,25 @@ describe("Goblin contextual highlighting", () => {
     expect(GOBLIN_CONTEXTUAL_LET_RE.test("Template: let")).toBe(false);
   });
 
+  it("highlights only the declaration form of a Template parameter", () => {
+    expect(GOBLIN_CONTEXTUAL_PARAM_RE.test("  param edition: Edition")).toBe(true);
+    expect(GOBLIN_CONTEXTUAL_PARAM_RE.test("  param tint: Color")).toBe(true);
+    expect(GOBLIN_CONTEXTUAL_PARAM_RE.test("  column param: Text")).toBe(false);
+    expect(GOBLIN_CONTEXTUAL_PARAM_RE.test("Template: param")).toBe(false);
+  });
+
   it("highlights structural If:/Else: without reclassifying declaration values", () => {
     expect(GOBLIN_CONTEXTUAL_BRANCH_RE.test("  If: [rare]")).toBe(true);
     expect(GOBLIN_CONTEXTUAL_BRANCH_RE.test("  Else:")).toBe(true);
     expect(GOBLIN_CONTEXTUAL_BRANCH_RE.test("Template: If")).toBe(false);
     expect(GOBLIN_CONTEXTUAL_BRANCH_RE.test("  Front: If")).toBe(false);
     expect(GOBLIN_CONTEXTUAL_BRANCH_RE.test("  column Else: Text")).toBe(false);
+  });
+
+  it("highlights virtual only in a virtual-column declaration", () => {
+    expect(GOBLIN_CONTEXTUAL_VIRTUAL_RE.test("  virtual column code: Text = [name]")).toBe(true);
+    expect(GOBLIN_CONTEXTUAL_VIRTUAL_RE.test("  column virtual: Text")).toBe(false);
+    expect(GOBLIN_CONTEXTUAL_VIRTUAL_RE.test("let virtual: 1")).toBe(false);
   });
 
   it("recognizes only actual named/hex colors, case-insensitively", () => {

@@ -32,6 +32,7 @@ export type {
   SheetInfo,
   SizePreset,
   ValueType,
+  VirtualColumnInfo,
 } from "./check";
 export { CSS_COLOR_NAMES } from "./css-colors";
 export { DICIER_CODES, DICIER_CODE_CATEGORIES } from "./dicier-codes";

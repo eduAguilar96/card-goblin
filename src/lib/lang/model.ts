@@ -580,6 +580,10 @@ export interface CardMeta {
   loopBindings: Record<string, LoopCaseBinding>;
   /** 0-based among the `count:` copies of one row × case combination. */
   copyIndex: number;
+  /** 0-based physical position within the owning Card declaration/deck. */
+  deckCardIndex: number;
+  /** 0-based physical position across every emitted Card declaration. */
+  projectCardIndex: number;
 }
 
 export interface CardInstance {
@@ -596,6 +600,10 @@ export interface CardInstance {
    * mutates one after. */
   readonly front: readonly Shape[];
   readonly back: readonly Shape[];
+  /** ◆48: declared physical cells plus virtual-column results for this exact
+   * generated instance. Metadata/provenance stays in `meta`/the owning Deck;
+   * this record contains only user-declared CSV columns. */
+  readonly exportData: Readonly<Record<string, string>>;
   meta: CardMeta;
   /**
    * Deterministic content hash (FNV-1a) of the resolved faces + deck
@@ -621,6 +629,8 @@ export interface CardInstance {
 /** One Card declaration's generated set, in Card-declaration order. */
 export interface Deck {
   cardName: string;
+  /** Bound Sheet name (◆48 CSV provenance). */
+  sheetName: string;
   widthMm: number;
   heightMm: number;
   xUnits: number;

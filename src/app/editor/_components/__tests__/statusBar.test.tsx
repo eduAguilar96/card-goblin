@@ -19,6 +19,7 @@ function renderState(state: EditorState): string {
       autosaveDisabled={state.autosaveDisabled}
       onReset={() => {}}
       onExportProject={() => {}}
+      onExportData={() => {}}
       onImportProject={() => {}}
     />,
   );
@@ -41,6 +42,7 @@ describe("StatusBarContent", () => {
     const text = stripTags(renderState(createEditorStore().getState()));
     expect(text).toContain("Export project");
     expect(text).toContain("Import project");
+    expect(text).toContain("Export Data");
     expect(text).toContain("Reset to demo"); // beside reset, per the spec
   });
 
@@ -94,6 +96,7 @@ describe("StatusBarContent", () => {
           autosaveDisabled={false}
           onReset={() => {}}
           onExportProject={() => {}}
+          onExportData={() => {}}
           onImportProject={() => {}}
         />,
       ),

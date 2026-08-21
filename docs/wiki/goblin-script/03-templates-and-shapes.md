@@ -24,29 +24,84 @@ Template: MonsterFront
     text: [name]
 ```
 
-A template gets its data from whichever Card is using it — there are no parameters to
-pass. The same template can be used by several Cards, and it's checked against each of
-them.
+A Template still gets sheet columns, Card loops, global lets, and generation built-ins
+from whichever Card reaches it. It can also declare typed parameters when a caller must
+choose a layout or style explicitly.
+
+## Template parameters
+
+Declare required parameters directly inside the Template with
+`param name: Type`. The type may be `Text`, `Number`, `Bool`, `Color`, or an enum.
+Declarations may appear anywhere among the Template's direct children and are hoisted
+across its whole body. Parameters are immutable; they cannot be declared inside an
+`If`, `Else`, or `Repeat`.
+
+```goblin
+Enum: CardEdition
+  case Black
+  case White
+
+Template: MonsterFront
+  param edition: CardEdition
+
+  let background: if [edition] == CardEdition.Black
+    then #000000
+    else #FFFFFF
+
+  Rectangle:
+    x: 0
+    y: 0
+    width: full
+    height: full
+    color: [background]
+```
+
+Supply arguments beneath `Front:` or `Back:`. Each argument is an expression evaluated
+in the Card caller's scope:
+
+```goblin
+Card: BlackCards
+  # sheet, size, units, count...
+  Front: MonsterFront
+    edition: CardEdition.Black
+
+Card: WhiteCards
+  # same data and layout, different count/style choice
+  Front: MonsterFront
+    edition: CardEdition.White
+```
+
+Every declared parameter is required. Missing, extra, duplicate, or wrongly typed
+arguments are compile errors.
 
 ## Reusing Templates
 
 A Template can call another Template by writing its name as a node header:
 
 ```goblin
+Template: Frame
+  param edition: CardEdition
+  # draw the edition-specific frame...
+
 Template: MonsterFront
+  param edition: CardEdition
+
   Frame:
+    edition: [edition]
   If: [elite]
     EliteBadge:
 ```
 
 The called shapes are inserted at that exact position, so source order still controls
 which shapes draw on top. Calls may be nested and may sit inside `If`, `Else`, or
-`Repeat`. Calls take no label, children, or arguments.
+`Repeat`. Arguments use the same indented form as Card faces.
 
-A called Template deliberately does not capture the caller's local `let` values or
-`Repeat` index. It sees its own locals, global lets, Card loops, sheet columns,
-`[row]`, and `[card]`. This keeps a Template's meaning independent of who calls it;
-explicit arguments are not part of the language yet.
+A called Template deliberately does not capture the caller's parameters, local `let`
+values, or `Repeat` index. Argument expressions *do* run in caller scope, so forwarding
+is explicit: `edition: [edition]` above passes the outer parameter to `Frame`. The
+callee then sees its own parameters and locals plus global lets, Card loops, sheet
+columns, and generation built-ins. This keeps a Template's inputs readable at the call
+site instead of making nested composition depend on hidden caller state.
 
 For compatibility, a Template may still literally be named `If` or `Else` and used
 as `Front: If` or `Back: Else`. Those two names cannot use nested-call shorthand,
@@ -72,7 +127,8 @@ produces no data errors. Branches have their own local scope. For else-if, nest 
 Use `let name: expression` anywhere a Template node can appear, including inside
 `If`, `Else`, and `Repeat`. A local let is immutable, visible throughout its lexical
 block even before its declaration, and newly evaluated for each Template call,
-selected branch, or Repeat iteration. A callee cannot see it.
+selected branch, or Repeat iteration. A callee cannot see it unless the caller passes
+it as an explicit argument.
 
 ## The coordinate grid
 

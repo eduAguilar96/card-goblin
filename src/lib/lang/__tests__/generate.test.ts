@@ -2395,6 +2395,324 @@ describe("built-in [row]/[card] bindings", () => {
   });
 });
 
+// -- generated-instance identity built-ins --------------------------------
+
+describe("[copy]/[deck]/[deck_card]/[project_card] identity", () => {
+  it("uses prospective count-time identities and count: 0 consumes no position", () => {
+    const code = src(
+      "Sheet: Sh",
+      "  column marker: Text",
+      ...textTemplate('"[row]|[copy]|[deck_card]|[project_card]|[deck]"'),
+      ...CARD_LINES,
+      '  count: if [deck] == "C" then if [row] == 1 then 0 else [copy] + [deck_card] + [project_card] else 99',
+      "  Front: T",
+    );
+    const p = projectOf(code, { Sh: [{ marker: "skip" }, { marker: "emit" }] });
+    const cards = p.model.decks[0].cards;
+
+    // Row 1 emits zero, so row 2 still sees prospective copy/deck/project
+    // positions 1/1/1 and therefore requests three copies.
+    expect(cards.map((card) => (card.front[0] as TextShape).text)).toEqual([
+      "2|1|1|1|C",
+      "2|2|2|2|C",
+      "2|3|3|3|C",
+    ]);
+    expect(cards.map((card) => card.meta.rowIndex)).toEqual([1, 1, 1]);
+    expect(cards.map((card) => card.meta.projectCardIndex)).toEqual([0, 1, 2]);
+    expect(p.dataDiagnostics).toEqual([]);
+  });
+
+  it("numbers two Card declarations, resets copy per combination, and preserves the [card] alias", () => {
+    const code = src(
+      'let identity: "[deck]|[copy]|[deck_card]|[card]|[project_card]"',
+      "Sheet: Sh",
+      "  virtual column identity: Text = [identity]",
+      ...textTemplate("[identity]"),
+      "Card: BlackCards",
+      "  sheet: Sh",
+      "  size: poker",
+      "  x_units: 20",
+      "  y_units: auto",
+      "  count: 2",
+      "  Front: T",
+      "Card: WhiteCards",
+      "  sheet: Sh",
+      "  size: poker",
+      "  x_units: 20",
+      "  y_units: auto",
+      "  count: 2",
+      "  Front: T",
+    );
+    const p = projectOf(code, { Sh: [{}, {}] });
+    const texts = p.model.decks.map((deck) =>
+      deck.cards.map((card) => (card.front[0] as TextShape).text),
+    );
+    expect(texts).toEqual([
+      [
+        "BlackCards|1|1|1|1",
+        "BlackCards|2|2|2|2",
+        "BlackCards|1|3|3|3",
+        "BlackCards|2|4|4|4",
+      ],
+      [
+        "WhiteCards|1|1|1|5",
+        "WhiteCards|2|2|2|6",
+        "WhiteCards|1|3|3|7",
+        "WhiteCards|2|4|4|8",
+      ],
+    ]);
+    expect(
+      p.model.decks.flatMap((deck) => deck.cards.map((card) => card.exportData.identity)),
+    ).toEqual(texts.flat());
+    expect(
+      p.model.decks.map((deck) =>
+        deck.cards.map((card) => [card.meta.copyIndex, card.meta.deckCardIndex]),
+      ),
+    ).toEqual([
+      [
+        [0, 0],
+        [1, 1],
+        [0, 2],
+        [1, 3],
+      ],
+      [
+        [0, 0],
+        [1, 1],
+        [0, 2],
+        [1, 3],
+      ],
+    ]);
+    expect(
+      p.model.decks.flatMap((deck) => deck.cards.map((card) => card.meta.projectCardIndex)),
+    ).toEqual([0, 1, 2, 3, 4, 5, 6, 7]);
+  });
+
+  it("keeps invariant [deck] faces shared while [copy] forces per-copy faces and hashes", () => {
+    const shared = textProject('"[deck]"', [], [{}], { cardExtra: ["count: 3"] });
+    expect(shared.model.decks[0].cards[0].front).toBe(shared.model.decks[0].cards[1].front);
+
+    const divergent = textProject('"[copy]"', [], [{}], { cardExtra: ["count: 3"] });
+    const cards = divergent.model.decks[0].cards;
+    expect(cards.map((card) => (card.front[0] as TextShape).text)).toEqual(["1", "2", "3"]);
+    expect(cards[0].front).not.toBe(cards[1].front);
+    expect(new Set(cards.map((card) => card.contentHash)).size).toBe(3);
+  });
+
+  it("counts failed placeholders in project positions before the next Card declaration", () => {
+    const code = src(
+      "Sheet: Sh",
+      ...textTemplate("60 / ([project_card] - 2)"),
+      "Card: Broken",
+      "  sheet: Sh",
+      "  size: poker",
+      "  x_units: 20",
+      "  y_units: auto",
+      "  count: 2",
+      "  Front: T",
+      "Card: After",
+      "  sheet: Sh",
+      "  size: poker",
+      "  x_units: 20",
+      "  y_units: auto",
+      "  count: 2",
+      "  Front: T",
+    );
+    const p = projectOf(code, { Sh: [{}] });
+    expect(p.model.decks[0].cards.every((card) => card.error !== undefined)).toBe(true);
+    expect(p.model.decks[0].cards.map((card) => card.meta.projectCardIndex)).toEqual([0, 1]);
+    expect(p.model.decks[1].cards.map((card) => card.meta.projectCardIndex)).toEqual([2, 3]);
+    expect(
+      p.model.decks[1].cards.map((card) => (card.front[0] as TextShape).text),
+    ).toEqual(["60", "30"]);
+  });
+
+  it("a D006 count placeholder consumes one project position before the next deck", () => {
+    const code = src(
+      "Sheet: Sh",
+      ...textTemplate('"[project_card]"'),
+      "Card: InvalidCount",
+      "  sheet: Sh",
+      "  size: poker",
+      "  x_units: 20",
+      "  y_units: auto",
+      "  count: -1",
+      "  Front: T",
+      "Card: After",
+      "  sheet: Sh",
+      "  size: poker",
+      "  x_units: 20",
+      "  y_units: auto",
+      "  count: 2",
+      "  Front: T",
+    );
+    const p = projectOf(code, { Sh: [{}] });
+    const [invalid, after] = p.model.decks;
+
+    expect(invalid.cards).toHaveLength(1);
+    expect(invalid.cards[0].error?.diagnostics.map((d) => d.code)).toEqual(["D006"]);
+    expect(invalid.cards[0].meta.projectCardIndex).toBe(0);
+    expect(after.cards.map((card) => card.meta.projectCardIndex)).toEqual([1, 2]);
+    expect(after.cards.map((card) => (card.front[0] as TextShape).text)).toEqual(["2", "3"]);
+  });
+
+  it("a D007-truncated deck consumes exactly 2,000 project positions", () => {
+    const code = src(
+      "Sheet: Sh",
+      "Template: Fixed",
+      "  Text:",
+      "    x: 0",
+      "    y: 0",
+      "    size: 1",
+      '    text: "fixed"',
+      "Template: Identity",
+      "  Text:",
+      "    x: 0",
+      "    y: 0",
+      "    size: 1",
+      '    text: "[project_card]"',
+      "Card: Capped",
+      "  sheet: Sh",
+      "  size: poker",
+      "  x_units: 20",
+      "  y_units: auto",
+      "  count: 2001",
+      "  Front: Fixed",
+      "Card: After",
+      "  sheet: Sh",
+      "  size: poker",
+      "  x_units: 20",
+      "  y_units: auto",
+      "  Front: Identity",
+    );
+    const p = projectOf(code, { Sh: [{}] });
+    const [capped, after] = p.model.decks;
+
+    expect(capped.cards).toHaveLength(CARD_CAP);
+    expect(dataCodes(p)).toEqual(["D007"]);
+    expect(capped.cards.at(-1)?.meta.projectCardIndex).toBe(1999);
+    expect(after.cards[0].meta.projectCardIndex).toBe(2000);
+    expect((after.cards[0].front[0] as TextShape).text).toBe("2001");
+  });
+
+  it("same-named sheet columns shadow script built-ins without changing generated metadata", () => {
+    const code = src(
+      "Sheet: Sh",
+      "  column row: Text",
+      "  column card: Text",
+      "  column copy: Text",
+      "  column deck: Text",
+      "  column deck_card: Text",
+      "  column project_card: Text",
+      ...textTemplate('"[row]|[card]|[copy]|[deck]|[deck_card]|[project_card]"'),
+      ...CARD_LINES,
+      "  count: 2",
+      "  Front: T",
+    );
+    const p = projectOf(code, {
+      Sh: [
+        {
+          row: "sheet-row",
+          card: "sheet-card",
+          copy: "sheet-copy",
+          deck: "sheet-deck",
+          deck_card: "sheet-deck-card",
+          project_card: "sheet-project-card",
+        },
+      ],
+    });
+    const cards = p.model.decks[0].cards;
+
+    expect(cards.map((card) => (card.front[0] as TextShape).text)).toEqual([
+      "sheet-row|sheet-card|sheet-copy|sheet-deck|sheet-deck-card|sheet-project-card",
+      "sheet-row|sheet-card|sheet-copy|sheet-deck|sheet-deck-card|sheet-project-card",
+    ]);
+    expect(cards[0].front).toBe(cards[1].front);
+    expect(
+      cards.map((card) => [
+        card.meta.rowIndex,
+        card.meta.copyIndex,
+        card.meta.deckCardIndex,
+        card.meta.projectCardIndex,
+      ]),
+    ).toEqual([
+      [0, 0, 0, 0],
+      [0, 1, 1, 1],
+    ]);
+  });
+});
+
+// -- export-only virtual columns (◆48) -------------------------------------
+
+describe("virtual-column export data (◆48)", () => {
+  it("captures physical cells and evaluates virtuals for each generated instance", () => {
+    const code = src(
+      "Enum: Suit",
+      "  case Rock",
+      "  case Paper",
+      "Sheet: Sh",
+      "  column code: Text",
+      "  column count: Number",
+      '  virtual column card_code: Text = "[row]|[card]|[code]|[suit]"',
+      "  virtual column serial: Number = [card] * 10",
+      ...textTemplate('"face"'),
+      ...CARD_LINES,
+      "  loop: Suit as suit",
+      "  count: [count]",
+      "  Front: T",
+    );
+    const result = projectOf(code, { Sh: [{ code: "A,1", count: "02" }] });
+    const deck = result.model.decks[0];
+    expect(deck.sheetName).toBe("Sh");
+    expect(deck.cards).toHaveLength(4);
+    expect(deck.cards.map((card) => card.exportData.card_code)).toEqual([
+      "1|1|A,1|Rock",
+      "1|2|A,1|Rock",
+      "1|3|A,1|Paper",
+      "1|4|A,1|Paper",
+    ]);
+    expect(deck.cards.map((card) => card.exportData.serial)).toEqual([
+      "10", "20", "30", "40",
+    ]);
+    // Physical values are export facts too and remain exactly as entered.
+    expect(deck.cards[0].exportData.code).toBe("A,1");
+    expect(deck.cards[0].exportData.count).toBe("02");
+  });
+
+  it("a virtual data error blanks only that field and does not replace the card", () => {
+    const code = src(
+      "Sheet: Sh",
+      "  column label: Text",
+      "  column amount: Number",
+      "  virtual column doubled: Number = [amount] * 2",
+      ...textTemplate("[label]"),
+      ...CARD_LINES,
+      "  Front: T",
+    );
+    const result = projectOf(code, { Sh: [{ label: "print me", amount: "" }] });
+    expect(result.model.decks[0].cards[0].error).toBeUndefined();
+    expect(result.model.decks[0].cards[0].exportData.doubled).toBe("");
+    expect(dataCodes(result)).toContain("D003");
+  });
+
+  it("virtual-only changes do not alter rendered-content hashes", () => {
+    const make = (formula: string) =>
+      projectOf(
+        src(
+          "Sheet: Sh",
+          "  column code: Text",
+          `  virtual column exported: Text = ${formula}`,
+          ...textTemplate('"same face"'),
+          ...CARD_LINES,
+          "  Front: T",
+        ),
+        { Sh: [{ code: "x" }] },
+      );
+    expect(make('"first"').model.decks[0].cards[0].contentHash).toBe(
+      make('"second"').model.decks[0].cards[0].contentHash,
+    );
+  });
+});
+
 // -- inline icons (◆44, §7.5) ------------------------------------------------
 
 describe("inline icons in Text (◆44): markers parse AFTER interpolation into runs", () => {

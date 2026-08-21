@@ -87,6 +87,8 @@ doesn't compile. To its right sit the editor's project-lifecycle controls:
   [Uploaded assets](assets.md)), with a count badge.
 - **Export project** / **Import project** — download the whole project as a
   file, or load one back — see [Project files](project-files.md).
+- **Export Data** — download one CSV row per generated card, including virtual
+  columns — see [Data export](data-export.md).
 - **Reset to demo** — wipes your saved project and loads the demo back. It
   asks first (see [Autosave](autosave.md)).
 

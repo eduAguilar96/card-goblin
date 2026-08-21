@@ -47,8 +47,11 @@ import type {
   StringLit,
   StringRefPart,
   TemplateDecl,
+  TemplateArgumentNode,
   TemplateCallNode,
   TemplateNode,
+  TemplateParamDecl,
+  VirtualColumnDecl,
 } from "./ast";
 import type { Diagnostic, Range, Severity } from "./diagnostics";
 import type { FontFace, IconStyle, ImageFit, Pivot, QrLevel, TextBoxOverflow } from "./model";
@@ -100,6 +103,7 @@ export type Resolution =
   | { kind: "loopVar"; enumName: string | null }
   | { kind: "repeatVar" }
   | { kind: "let"; binding: LetNode; scope: "global" | "local"; type: ValueType }
+  | { kind: "param"; parameter: TemplateParamDecl; type: ValueType }
   | { kind: "enumCase"; enumName: string; caseName: string }
   | { kind: "colorName"; name: string }
   | { kind: "geometry"; keyword: "full" | "half" | "middle" }
@@ -124,10 +128,13 @@ export type Resolution =
    * dimension derives from the art's intrinsic ratio at LOAD time, so the
    * model carries the keyword and the renderer/exporter resolve it. */
   | { kind: "autoDim" }
-  /** Built-in `[row]`/`[card]` position bindings (§3.6, ◆42): resolved LAST,
-   * after sheet columns, so a sheet's own row/card column shadows them
+  /** Built-in generated-instance identity bindings (§3.6, ◆42): resolved LAST,
+   * after sheet columns, so a sheet's own same-named column shadows them
    * (warned at the column's declaration — buildSheetInfo, not here). */
-  | { kind: "position"; which: "row" | "card" };
+  | {
+      kind: "position";
+      which: "row" | "card" | "copy" | "deck" | "deck_card" | "project_card";
+    };
 
 /** AST nodes that get an entry in `CardBindings.resolutions`. */
 export type ResolvableNode = DataRef | IdentifierExpr | QualifiedName | StringRefPart;
@@ -138,10 +145,18 @@ export interface ColumnInfo {
   type: ValueType;
 }
 
+export interface VirtualColumnInfo {
+  decl: VirtualColumnDecl;
+  /** Text | Number | Enum; Unknown when the type name did not resolve (E002). */
+  type: ValueType;
+}
+
 export interface SheetInfo {
   decl: SheetDecl;
   /** Column name → info; first declaration wins on E005 duplicates. */
   columns: ReadonlyMap<string, ColumnInfo>;
+  /** Export-only computed columns; never part of ordinary name resolution. */
+  virtualColumns: ReadonlyMap<string, VirtualColumnInfo>;
 }
 
 /** One physical size (§3.4): a named preset, or `name: "custom"` when the
@@ -198,6 +213,9 @@ export interface CardBindings {
   countExpr: Expr | null;
   front: TemplateDecl | null;
   back: TemplateDecl | null;
+  /** Root invocations retain their explicit argument expressions for evaluation. */
+  frontFace: FaceNode | null;
+  backFace: FaceNode | null;
   /** Static type of every expression checked in THIS card's context
    * (the card's own `count:` plus both face templates' bodies). */
   exprTypes: ReadonlyMap<Expr, ValueType>;
@@ -411,6 +429,8 @@ interface Ctx {
   repeats: { name: string; range: Range }[];
   /** Lexical scopes in the current template activation, outermost first. */
   scopes: LetScope[];
+  /** Parameters of the current Template activation. Calls replace, never inherit, this map. */
+  params: ReadonlyMap<string, TemplateParamDecl>;
   /** Per-Card contextual binding state; declarations are AST-identity keys. */
   letStates: Map<LetNode, LetState>;
   letStack: LetNode[];
@@ -433,6 +453,7 @@ class Checker {
   private readonly enums = new Map<string, EnumDecl>();
   private readonly sheets = new Map<string, SheetInfo>();
   private readonly templates = new Map<string, TemplateDecl>();
+  private readonly paramTypes = new Map<TemplateParamDecl, ValueType>();
   private readonly globals = new Map<string, LetNode>();
   private readonly globalKinds = new Map<string, string>(); // name → kind word
 
@@ -487,6 +508,7 @@ class Checker {
         loops: new Map(),
         repeats: [],
         scopes: [],
+        params: new Map(),
         letStates: new Map(),
         letStack: [],
         blockDepth: 0,
@@ -615,6 +637,24 @@ class Checker {
       }
       if (decl.kind === "EnumDecl") this.checkEnumCases(decl);
     }
+    // Template parameter types may reference enums declared later, so resolve
+    // them only after the declaration namespace is complete.
+    for (const decl of program.declarations) {
+      if (decl.kind !== "TemplateDecl") continue;
+      const seen = new Set<string>();
+      for (const param of decl.params) {
+        if (seen.has(param.name.name)) {
+          this.error(
+            "E005",
+            `Duplicate parameter '${param.name.name}' in Template '${decl.name.name}'`,
+            param.name.range,
+          );
+          continue;
+        }
+        seen.add(param.name.name);
+        this.paramTypes.set(param, this.resolveParameterType(param));
+      }
+    }
     // Second pass for sheets so column types can reference enums declared
     // later (forward references are allowed, §3.2).
     for (const decl of program.declarations) {
@@ -656,9 +696,11 @@ class Checker {
 
   private buildSheetInfo(decl: SheetDecl): SheetInfo {
     const columns = new Map<string, ColumnInfo>();
+    const virtualColumns = new Map<string, VirtualColumnInfo>();
+    const names = new Set<string>();
     for (const col of decl.columns) {
       const name = col.name.name;
-      if (columns.has(name)) {
+      if (names.has(name)) {
         this.error(
           "E005",
           `Duplicate column '${name}' in sheet '${decl.name.name}'`,
@@ -666,8 +708,16 @@ class Checker {
         );
         continue;
       }
-      if (name === "row" || name === "card") {
-        // ◆42: a sheet's own row/card column shadows the built-in binding of
+      names.add(name);
+      if (
+        name === "row" ||
+        name === "card" ||
+        name === "copy" ||
+        name === "deck" ||
+        name === "deck_card" ||
+        name === "project_card"
+      ) {
+        // ◆42: a sheet's own same-named column shadows the built-in binding of
         // the same name for every Card that binds this sheet (§3.6 resolves
         // columns before built-ins) — warn at the column's declaration, like
         // the loop-/Repeat-variable shadow warnings below, rather than at
@@ -680,10 +730,23 @@ class Checker {
       }
       columns.set(name, { decl: col, type: this.resolveColumnType(col) });
     }
-    return { decl, columns };
+    for (const col of decl.virtualColumns) {
+      const name = col.name.name;
+      if (names.has(name)) {
+        this.error(
+          "E005",
+          `Duplicate column '${name}' in sheet '${decl.name.name}'`,
+          col.name.range,
+        );
+        continue;
+      }
+      names.add(name);
+      virtualColumns.set(name, { decl: col, type: this.resolveColumnType(col) });
+    }
+    return { decl, columns, virtualColumns };
   }
 
-  private resolveColumnType(col: ColumnDecl): ValueType {
+  private resolveColumnType(col: ColumnDecl | VirtualColumnDecl): ValueType {
     const name = col.columnType.name;
     if (name === "Text") return TEXT;
     if (name === "Number") return NUMBER;
@@ -699,6 +762,28 @@ class Checker {
         ? `'${name}' is ${other}, not a column type — expected Text, Number, or an enum name`
         : `Unknown column type '${name}' — expected Text, Number, or an enum name`,
       col.columnType.range,
+    );
+    return UNKNOWN;
+  }
+
+  private resolveParameterType(param: TemplateParamDecl): ValueType {
+    const name = param.paramType.name;
+    if (name === "Text") return TEXT;
+    if (name === "Number") return NUMBER;
+    if (name === "Bool") return BOOL;
+    if (name === "Color") return COLOR;
+    const enumDecl = this.enums.get(name);
+    if (enumDecl) {
+      this.markEnumUsed(enumDecl);
+      return enumType(name);
+    }
+    const other = this.globalKinds.get(name);
+    this.error(
+      "E002",
+      other !== undefined
+        ? `'${name}' is ${other}, not a parameter type — expected Text, Number, Bool, Color, or an enum name`
+        : `Unknown parameter type '${name}' — expected Text, Number, Bool, Color, or an enum name`,
+      param.paramType.range,
     );
     return UNKNOWN;
   }
@@ -725,6 +810,8 @@ class Checker {
     let countExpr: Expr | null = null;
     let front: TemplateDecl | null = null;
     let back: TemplateDecl | null = null;
+    let frontFace: FaceNode | null = null;
+    let backFace: FaceNode | null = null;
     const present = new Set<string>();
 
     for (const item of decl.items) {
@@ -735,8 +822,13 @@ class Checker {
         }
         present.add(item.face);
         const tpl = this.resolveFace(item);
-        if (item.face === "Front") front = tpl;
-        else back = tpl;
+        if (item.face === "Front") {
+          front = tpl;
+          frontFace = item;
+        } else {
+          back = tpl;
+          backFace = item;
+        }
         continue;
       }
 
@@ -1004,11 +1096,26 @@ class Checker {
       loops: loopMap,
       repeats: [],
       scopes: [],
+      params: new Map(),
       letStates: new Map(),
       letStack: [],
       blockDepth: 0,
       record: recorder,
     };
+    // ◆48: virtual columns are sheet-owned but evaluate in this Card's
+    // complete context. They deliberately do NOT join sheet.columns, so
+    // `[virtual_name]` cannot recursively or transitively read a computed
+    // export field; share formulas through a program `let` instead.
+    if (sheet) {
+      for (const virtual of sheet.virtualColumns.values()) {
+        this.checkValue(
+          virtual.decl.initializer,
+          this.expectedForVirtualColumn(virtual.type),
+          ctx,
+          false,
+        );
+      }
+    }
     this.collectReachableTemplates([front, back], recorder);
 
     // `count:` is the Card's only expression property — evaluated per
@@ -1018,8 +1125,8 @@ class Checker {
 
     // Faces: templates are checked in THIS card's context (⚑5, §3.6). A
     // template used as both faces is checked once — same context, same result.
-    if (front) this.checkFaceTemplate(front, ctx);
-    if (back && back !== front) this.checkFaceTemplate(back, ctx);
+    if (front) this.checkFaceTemplate(front, ctx, frontFace);
+    if (back) this.checkFaceTemplate(back, ctx, backFace);
 
     return {
       decl,
@@ -1031,11 +1138,28 @@ class Checker {
       countExpr,
       front,
       back,
+      frontFace,
+      backFace,
       exprTypes: recorder.exprTypes,
       resolutions: recorder.resolutions,
       letTypes: recorder.letTypes,
       templateCalls: recorder.templateCalls,
     };
+  }
+
+  private expectedForVirtualColumn(type: ValueType): Expected {
+    switch (type.kind) {
+      case "Text":
+        return EXP_TEXT;
+      case "Number":
+        return EXP_NUMBER;
+      case "Enum": {
+        const enumDecl = this.enums.get(type.enumName);
+        return enumDecl ? { kind: "Enum", enumDecl } : EXP_NONE;
+      }
+      default:
+        return EXP_NONE;
+    }
   }
 
   private resolveFace(face: FaceNode): TemplateDecl | null {
@@ -1059,7 +1183,11 @@ class Checker {
 
   // -- templates and elements (§3.3, §3.6) ----------------------------------
 
-  private checkFaceTemplate(tpl: TemplateDecl, ctx: Ctx): void {
+  private checkFaceTemplate(
+    tpl: TemplateDecl,
+    ctx: Ctx,
+    invocation: FaceNode | null = null,
+  ): void {
     this.callPath = [tpl];
     this.activeCalls = 0;
     this.callNodes = [];
@@ -1067,10 +1195,16 @@ class Checker {
     this.compositionBlocked = false;
     ctx.scopes = [];
     ctx.repeats = [];
+    ctx.params = new Map();
     ctx.letStates = new Map();
     ctx.letStack = [];
     ctx.blockDepth = 0;
     this.markTemplateUsed(tpl);
+    if (invocation) {
+      this.checkInvocationArguments(tpl, invocation.arguments, ctx, invocation.template?.range ?? invocation.range);
+    }
+    ctx.params = this.parameterMap(tpl);
+    this.checkParameterShadows(tpl, ctx);
     this.checkTemplateBody(tpl, ctx);
     this.callPath = [];
   }
@@ -1078,7 +1212,7 @@ class Checker {
   private checkTemplateBody(tpl: TemplateDecl, ctx: Ctx): void {
     // Every invocation has its own lexical root. A call deliberately arrives
     // with no caller scopes/repeats, preserving one resolution per AST node.
-    this.checkBlock(tpl.children, ctx, null);
+    this.checkBlock(tpl.children, ctx, null, true);
   }
 
   private checkTemplateNode(node: TemplateNode, ctx: Ctx): void {
@@ -1119,10 +1253,20 @@ class Checker {
     children: readonly TemplateNode[],
     ctx: Ctx,
     repeat: { name: string; range: Range } | null,
+    templateRoot = false,
   ): void {
     const lets = new Map<string, LetNode>();
     for (const child of children) {
       if (child.kind !== "Let") continue;
+      if (templateRoot && ctx.params.has(child.name.name)) {
+        this.error(
+          "E005",
+          `Root binding '${child.name.name}' conflicts with a parameter of the same Template`,
+          child.name.range,
+        );
+        this.collided.add(child);
+        continue;
+      }
       const previous = lets.get(child.name.name);
       if (previous) {
         this.error("E005", `Duplicate binding '${child.name.name}' in the same scope`, child.name.range);
@@ -1314,6 +1458,7 @@ class Checker {
       if (scope.lets.has(name)) shadowed = "an outer binding";
       else if (scope.repeat?.name === name) shadowed = "an enclosing Repeat variable";
     }
+    if (!shadowed && ctx.params.has(name)) shadowed = "a Template parameter";
     if (!shadowed && ctx.loops.has(name)) shadowed = "a Card loop variable";
     if (!shadowed && ctx.sheet?.columns.has(name)) {
       shadowed = `column '${name}' of sheet '${ctx.sheet.decl.name.name}'`;
@@ -1336,6 +1481,7 @@ class Checker {
         if (scope.lets.has(name)) shadowed = "an enclosing binding";
         else if (scope.repeat?.name === name) shadowed = "an enclosing Repeat variable";
       }
+      if (!shadowed && ctx.params.has(name)) shadowed = "a Template parameter";
       if (!shadowed && ctx.loops.has(name)) shadowed = "a loop variable";
       if (!shadowed && ctx.sheet?.columns.has(name)) {
         shadowed = `column '${name}' of sheet '${ctx.sheet.decl.name.name}'`;
@@ -1371,6 +1517,7 @@ class Checker {
       );
       return;
     }
+    this.checkInvocationArguments(tpl, node.arguments, ctx, node.template.range);
     ctx.record?.templateCalls.set(node, tpl);
     if (this.currentCard) {
       this.usedTemplates.add(tpl);
@@ -1401,14 +1548,108 @@ class Checker {
     this.callPath.push(tpl);
     const callerScopes = ctx.scopes;
     const callerRepeats = ctx.repeats;
+    const callerParams = ctx.params;
     ctx.scopes = [];
     ctx.repeats = [];
+    ctx.params = this.parameterMap(tpl);
+    this.checkParameterShadows(tpl, ctx);
     this.checkTemplateBody(tpl, ctx);
     ctx.scopes = callerScopes;
     ctx.repeats = callerRepeats;
+    ctx.params = callerParams;
     this.callPath.pop();
     this.callNodes.pop();
     this.activeCalls--;
+  }
+
+  private parameterMap(tpl: TemplateDecl): ReadonlyMap<string, TemplateParamDecl> {
+    const params = new Map<string, TemplateParamDecl>();
+    for (const param of tpl.params) {
+      if (!params.has(param.name.name)) params.set(param.name.name, param);
+    }
+    return params;
+  }
+
+  private expectedForParameter(param: TemplateParamDecl): Expected {
+    const type = this.paramTypes.get(param) ?? UNKNOWN;
+    if (type.kind === "Number") return EXP_NUMBER;
+    if (type.kind === "Text") return EXP_TEXT;
+    if (type.kind === "Bool") return EXP_BOOL;
+    if (type.kind === "Color") return EXP_COLOR;
+    if (type.kind === "Enum") {
+      const enumDecl = this.enums.get(type.enumName);
+      return enumDecl ? { kind: "Enum", enumDecl } : EXP_NONE;
+    }
+    return EXP_NONE;
+  }
+
+  /** Check arguments in the caller activation; the callee scope is installed afterwards. */
+  private checkInvocationArguments(
+    tpl: TemplateDecl,
+    args: readonly TemplateArgumentNode[],
+    ctx: Ctx,
+    callRange: Range,
+  ): void {
+    const params = this.parameterMap(tpl);
+    const seen = new Set<string>();
+    for (const arg of args) {
+      const name = arg.name.name;
+      if (seen.has(name)) {
+        this.depthReported = false;
+        this.typeOf(arg.value, EXP_NONE, ctx, false);
+        this.error("E005", `Duplicate argument '${name}'`, arg.name.range);
+        continue;
+      }
+      seen.add(name);
+      const param = params.get(name);
+      if (!param) {
+        this.depthReported = false;
+        this.typeOf(arg.value, EXP_NONE, ctx, false);
+        this.error(
+          "E008",
+          `Unknown argument '${name}' for Template '${tpl.name.name}'`,
+          arg.name.range,
+        );
+        continue;
+      }
+      this.depthReported = false;
+      const expected = this.expectedForParameter(param);
+      const actual = this.typeOf(arg.value, expected, ctx, false);
+      const declared = this.paramTypes.get(param) ?? UNKNOWN;
+      // Parameter values retain their declared runtime kind. Unlike a text:
+      // property, the Number/Enum-to-Text display coercion is not an assignment
+      // conversion and would make later uses of [param] unsound.
+      if (actual.kind !== "Unknown" && declared.kind !== "Unknown" && !sameType(actual, declared)) {
+        this.error(
+          "E003",
+          `Argument '${name}' expects ${typeName(declared)}, got ${typeName(actual)}`,
+          arg.value.range,
+        );
+      }
+    }
+    for (const [name] of params) {
+      if (!seen.has(name)) {
+        this.error(
+          "E008",
+          `Missing argument '${name}' for Template '${tpl.name.name}'`,
+          callRange,
+        );
+      }
+    }
+  }
+
+  private checkParameterShadows(tpl: TemplateDecl, ctx: Ctx): void {
+    for (const param of this.parameterMap(tpl).values()) {
+      const name = param.name.name;
+      let shadowed: string | null = null;
+      if (ctx.loops.has(name)) shadowed = "a Card loop variable";
+      else if (ctx.sheet?.columns.has(name)) {
+        shadowed = `column '${name}' of sheet '${ctx.sheet.decl.name.name}'`;
+      } else if (this.globals.has(name)) shadowed = "a global binding";
+      if (shadowed) {
+        this.warn("W001", `Parameter '${name}' shadows ${shadowed}`, param.name.range);
+      }
+    }
   }
 
   private chargeComposition(range: Range, crossing?: TemplateCallNode): boolean {
@@ -2046,7 +2287,7 @@ class Checker {
   // -- name resolution (§3.5, §3.6) -----------------------------------------
 
   /** `[name]`: innermost Repeat vars → the Card's loop vars → the bound
-   * sheet's columns → the built-in `[row]`/`[card]` position bindings (§3.6,
+   * sheet's columns → built-in generated-instance identity bindings (§3.6,
    * ◆42). When the context has no usable sheet (unknown/missing sheet,
    * unused template), sheet-column lookup is skipped and unmatched refs
    * poison silently — the cause has its own diagnostic already — but the
@@ -2062,6 +2303,12 @@ class Checker {
           this.recordResolution(ctx, node, { kind: "repeatVar" });
           return NUMBER;
         }
+      }
+      const param = ctx.params.get(name);
+      if (param) {
+        const type = this.paramTypes.get(param) ?? UNKNOWN;
+        this.recordResolution(ctx, node, { kind: "param", parameter: param, type });
+        return type;
       }
     }
     const loop = ctx.loops.get(name);
@@ -2096,10 +2343,18 @@ class Checker {
       const global = this.globals.get(name);
       if (global) return this.resolveLet(global, "global", range, ctx, node);
     }
-    // Built-in position bindings are last.
-    if (name === "row" || name === "card") {
+    // Built-in generated-instance identity bindings are last. `[deck]` is
+    // Text; every numbering binding is a 1-based Number.
+    if (
+      name === "row" ||
+      name === "card" ||
+      name === "copy" ||
+      name === "deck" ||
+      name === "deck_card" ||
+      name === "project_card"
+    ) {
       this.recordResolution(ctx, node, { kind: "position", which: name });
-      return NUMBER;
+      return name === "deck" ? TEXT : NUMBER;
     }
     if (ctx.sheet) this.error("E002", `Unknown reference [${name}]`, range);
     return UNKNOWN;

@@ -46,6 +46,8 @@ export interface SheetDecl {
   name: NameRef;
   /** Zero columns is legal (⚑13†, loop-only decks). */
   columns: ColumnDecl[];
+  /** Computed, export-only columns (◆48); never materialized in sheet rows. */
+  virtualColumns: VirtualColumnDecl[];
   range: Range;
 }
 
@@ -57,10 +59,31 @@ export interface ColumnDecl {
   range: Range;
 }
 
+/** `virtual column name: Type = expression` inside a Sheet (◆48). */
+export interface VirtualColumnDecl {
+  kind: "VirtualColumnDecl";
+  name: NameRef;
+  /** `Text`, `Number`, or an enum name — resolved by the checker. */
+  columnType: NameRef;
+  initializer: Expr;
+  range: Range;
+}
+
 export interface TemplateDecl {
   kind: "TemplateDecl";
   name: NameRef;
+  /** Hoisted, typed, immutable inputs supplied explicitly by each invocation. */
+  params: TemplateParamDecl[];
   children: TemplateNode[];
+  range: Range;
+}
+
+/** `param name: Type` directly inside a Template declaration. */
+export interface TemplateParamDecl {
+  kind: "TemplateParam";
+  name: NameRef;
+  /** `Text`, `Number`, `Bool`, `Color`, or an enum name. */
+  paramType: NameRef;
   range: Range;
 }
 
@@ -80,6 +103,8 @@ export interface FaceNode {
   face: "Front" | "Back";
   /** null when the name was missing/malformed (E001 already emitted). */
   template: NameRef | null;
+  /** Explicit caller-scoped values for the selected Template's parameters. */
+  arguments: TemplateArgumentNode[];
   range: Range;
 }
 
@@ -122,6 +147,16 @@ export interface ElseNode {
 export interface TemplateCallNode {
   kind: "TemplateCall";
   template: NameRef;
+  /** Explicit caller-scoped values for the selected Template's parameters. */
+  arguments: TemplateArgumentNode[];
+  range: Range;
+}
+
+/** `name: expression` nested beneath a Front/Back or Template call. */
+export interface TemplateArgumentNode {
+  kind: "TemplateArgument";
+  name: NameRef;
+  value: Expr;
   range: Range;
 }
 

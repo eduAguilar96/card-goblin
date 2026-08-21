@@ -164,6 +164,190 @@ describe("bindings, structural conditionals, and template composition", () => {
       .toBe(true);
   });
 
+  it("passes typed root arguments and explicitly forwards derived caller values", () => {
+    const result = compileProject(
+      source(
+        "Enum: Edition",
+        "  case Black",
+        "  case White",
+        "Sheet: Sh",
+        "Template: Swatch",
+        "  param fill: Color",
+        "  Rectangle:",
+        "    x: 0",
+        "    y: 0",
+        "    width: 1",
+        "    height: 1",
+        "    color: [fill]",
+        "Template: Root",
+        "  param edition: Edition",
+        "  let derived: if [edition] == Edition.Black then #000000 else #FFFFFF",
+        "  Swatch:",
+        "    fill: [derived]",
+        "Card: C",
+        "  sheet: Sh",
+        "  size: poker",
+        "  x_units: 20",
+        "  y_units: auto",
+        "  Front: Root",
+        "    edition: Edition.Black",
+        "  Back: Root",
+        "    edition: Edition.White",
+      ),
+      { Sh: [{}] },
+    );
+
+    expect(result.diagnostics.filter((d) => d.severity === "error")).toEqual([]);
+    const instance = result.model.decks[0].cards[0];
+    expect((instance.front[0] as RectShape).color).toBe("#000000");
+    expect((instance.back[0] as RectShape).color).toBe("#FFFFFF");
+  });
+
+  it("reuses one parameterized face across two counted decks with distinct identities", () => {
+    const result = compileProject(
+      source(
+        "Sheet: Sh",
+        "  column black_count: Number",
+        "  column white_count: Number",
+        "Template: SharedFace",
+        "  param background: Color",
+        "  Rectangle:",
+        "    x: 0",
+        "    y: 0",
+        "    width: full",
+        "    height: full",
+        "    color: [background]",
+        "  Text:",
+        "    x: 0",
+        "    y: 0",
+        "    size: 1",
+        '    text: "[deck]|[copy]|[project_card]"',
+        "Card: BlackCards",
+        "  sheet: Sh",
+        "  size: poker",
+        "  x_units: 20",
+        "  y_units: auto",
+        "  count: [black_count]",
+        "  Front: SharedFace",
+        "    background: #000000",
+        "Card: WhiteCards",
+        "  sheet: Sh",
+        "  size: poker",
+        "  x_units: 20",
+        "  y_units: auto",
+        "  count: [white_count]",
+        "  Front: SharedFace",
+        "    background: #FFFFFF",
+      ),
+      { Sh: [{ black_count: "2", white_count: "3" }] },
+    );
+
+    expect(result.diagnostics.filter((d) => d.severity === "error")).toEqual([]);
+    expect(result.model.decks.map((deck) => deck.cards.length)).toEqual([2, 3]);
+    expect(result.model.decks.map((deck) => (deck.cards[0].front[0] as RectShape).color))
+      .toEqual(["#000000", "#FFFFFF"]);
+    expect(
+      result.model.decks.flatMap((deck) =>
+        deck.cards.map((instance) => (instance.front[1] as TextShape).text),
+      ),
+    ).toEqual([
+      "BlackCards|1|1",
+      "BlackCards|2|2",
+      "WhiteCards|1|3",
+      "WhiteCards|2|4",
+      "WhiteCards|3|5",
+    ]);
+  });
+
+  it("does not evaluate an unused argument", () => {
+    const result = compileProject(
+      source(
+        "Sheet: Sh",
+        "  column denominator: Number",
+        "Template: Root",
+        "  param unused: Number",
+        "  Rectangle:",
+        "    x: 0",
+        "    y: 0",
+        "    width: 1",
+        "    height: 1",
+        "    color: red",
+        "Card: C",
+        "  sheet: Sh",
+        "  size: poker",
+        "  x_units: 20",
+        "  y_units: auto",
+        "  Front: Root",
+        "    unused: 10 / [denominator]",
+      ),
+      { Sh: [{ denominator: "0" }] },
+    );
+
+    expect(result.diagnostics.filter((d) => d.severity === "error")).toEqual([]);
+    expect(result.dataDiagnostics).toEqual([]);
+    expect(result.model.decks[0].cards[0].front).toHaveLength(1);
+  });
+
+  it("keeps lazy arguments bound to the caller Repeat when the callee reuses its name", () => {
+    const run = (throughLet: boolean) => compileProject(
+      source(
+        "Sheet: Sh",
+        "Template: Child",
+        "  param value: Number",
+        "  Repeat: 2 as i",
+        "    Text:",
+        "      x: 0",
+        "      y: 0",
+        "      size: 1",
+        "      text: [value]",
+        "Template: Root",
+        "  Repeat: 2 as i",
+        ...(throughLet ? ["    let lazy: [i]"] : []),
+        "    Child:",
+        `      value: ${throughLet ? "[lazy]" : "[i]"}`,
+        ...card(),
+      ),
+      { Sh: [{}] },
+    );
+
+    for (const result of [run(false), run(true)]) {
+      expect(result.diagnostics.filter((d) => d.severity === "error")).toEqual([]);
+      expect(result.model.decks[0].cards[0].front.map((shape) => (shape as TextShape).text))
+        .toEqual(["0", "0", "1", "1"]);
+    }
+  });
+
+  it("preserves each caller Repeat through multi-level lazy forwarding", () => {
+    const result = compileProject(
+      source(
+        "Sheet: Sh",
+        "Template: Leaf",
+        "  param value: Number",
+        "  Repeat: 2 as i",
+        "    Text:",
+        "      x: 0",
+        "      y: 0",
+        "      size: 1",
+        "      text: [value]",
+        "Template: Middle",
+        "  param value: Number",
+        "  Repeat: 2 as i",
+        "    Leaf:",
+        "      value: [value]",
+        "Template: Root",
+        "  Repeat: 2 as i",
+        "    Middle:",
+        "      value: [i]",
+        ...card(),
+      ),
+      { Sh: [{}] },
+    );
+
+    expect(result.diagnostics.filter((d) => d.severity === "error")).toEqual([]);
+    expect(result.model.decks[0].cards[0].front.map((shape) => (shape as TextShape).text))
+      .toEqual(["0", "0", "0", "0", "1", "1", "1", "1"]);
+  });
+
   it("reports a template cycle without throwing or recursing during generation", () => {
     const result = compileProject(
       source(

@@ -62,12 +62,13 @@ makes it unambiguous — comparing against an enum-typed reference, for instance
 
 Inside a template, `[name]` is looked up in this order, innermost first:
 
-1. the nearest enclosing **`Repeat` variable**,
-   together with local **`let` values**, nearest scope first,
-2. the Card's **`loop` variables**,
-3. the bound **sheet's columns**,
-4. global **`let` values**,
-5. the built-in **`[row]`** and **`[card]`** position bindings (below).
+1. the nearest enclosing **`Repeat` variable** and local **`let` values**,
+   nearest scope first,
+2. the current Template's **parameters**,
+3. the Card's **`loop` variables**,
+4. the bound **sheet's columns**,
+5. global **`let` values**,
+6. the built-in **generation bindings** (below).
 
 ```goblin
 Card: Monster
@@ -87,16 +88,23 @@ calls, so a template referencing
 squiggled when used by one that doesn't. A shadowed name (a `Repeat` variable with the
 same name as a column) still works, innermost-first, but warns.
 
-## `[row]` and `[card]`
+## Generation identity: row, copy, deck, and project
 
-Two built-in Number bindings, always available inside a template — no column to
-declare:
+These derived bindings are available anywhere a Card context exists, including
+Templates, `count:`, program lets, and virtual columns — no sheet column to declare:
 
 - **`[row]`** — the row's 1-based position in its sheet. It's exactly the number
   shown (and edited — see [The editor](../getting-started/the-editor.md)) in the
   grid's row gutter, so every card generated from one row shares it.
 - **`[card]`** — the card's 1-based position within its *generated deck*, counting
   every `loop:` combination and `count:` copy. It increments once per physical card.
+- **`[copy]`** — the 1-based copy within the current row × loop combination. It
+  resets to 1 for the next combination.
+- **`[deck]`** — Text containing the current `Card:` declaration name, such as
+  `BlackCards` or `WhiteCards`.
+- **`[deck_card]`** — a clearer alias for `[card]`; both always produce the same Number.
+- **`[project_card]`** — the 1-based physical position across all generated `Card:`
+  blocks in declaration order.
 
 They only differ once `loop:` or `count:` turns one row into several cards. Two rows
 (Dragon, Imp) times the demo's three suits:
@@ -110,14 +118,31 @@ They only differ once `loop:` or `count:` turns one row into several cards. Two 
 | Imp | Paper | 2 | 5 |
 | Imp | Scissors | 2 | 6 |
 
-`[row]` labels the *data* — every card from one row agrees on it. `[card]` labels the
-*deck* — a running count across the whole Card block, useful for numbering a print run
-(`text: "Card #[card]"`) or spot-checking which row produced a card while debugging.
+`[row]` labels the *data*. `[copy]` distinguishes duplicates of one row/loop result.
+`[deck]` says which Card declaration emitted the instance. `[card]`/`[deck_card]`
+number one deck, while `[project_card]` numbers the current generated project.
 
-Both are derived, not stored: nothing about them lives in your rows, your autosave, or
-an exported [project file](../export-and-project/project-files.md) — moving a row in
-the grid is what changes what `[row]` (and, downstream, `[card]`) resolve to for it.
-If a sheet declares its own `row` or `card` column, that column **shadows** the
+### Choosing a durable ID
+
+Position numbers change when you reorder rows or Card declarations, add loop cases, or
+change counts. That makes `[project_card]` useful for a particular print manifest, but
+not a durable identity. Prefer a semantic code stored in your sheet and add the variant
+and copy when duplicates must be distinct:
+
+```goblin
+text: "[edition]|[code]|[copy]"       # durable while those meanings stay stable
+text: "[deck]|[deck_card]|[code]"     # explicit, but deck-position dependent
+text: "[project_card]|[code]"         # unique in this generated project only
+```
+
+If you need an ID that survives sheet reordering, store it in a column such as `code`.
+`[row]` is a visible position, not a hidden persistent row UUID.
+
+All generation bindings are derived, not stored: nothing about them lives in your rows,
+your autosave, or an exported [project file](../export-and-project/project-files.md) —
+moving a row in the grid is what changes what `[row]` (and, downstream, `[card]`)
+resolve to for it.
+If a sheet declares a column with one of these names, that column **shadows** the
 built-in of the same name for any Card bound to it (with the usual shadowing warning)
 — existing projects that already used those names keep working unchanged.
 
@@ -142,3 +167,19 @@ Two rules worth knowing:
 - **Bad cells are local.** A cell that doesn't fit its column flags red, and only the
   cards built from that row become placeholders. See
   [Errors and diagnostics](errors.md).
+
+## Virtual columns
+
+Use `virtual column name: Type = expression` inside a `Sheet:` when an exported
+print manifest needs a computed value that users should not edit. Virtual columns
+do not appear in the grid or row storage; they are evaluated for each generated card
+and included by [Export Data](../export-and-project/data-export.md). Because they run
+in the Card context, formulas can use ordinary columns, loop variables, every
+generation binding (`[row]`, `[copy]`, `[deck]`, `[deck_card]`, `[card]`, and
+`[project_card]`), and program `let` bindings.
+
+```goblin
+Sheet: Monsters
+  column code: Text
+  virtual column card_code: Text = "[card]|[code]"
+```

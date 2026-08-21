@@ -89,6 +89,8 @@ the section that elaborates it:
 | ◆45 | Cross-device sync (§7.6) | **Object storage + one password, no database and no accounts**: Cloudflare R2 holds a per-project folder (small JSON + one object per asset), a single admin password mints an HMAC-signed cookie, asset bytes move browser↔R2 via short-lived presigned URLs, and a `revision` guard rejects stale writes | The project already serialises to one small JSON payload with discrete asset files (§7.1/§7.4), so a database would add a schema to maintain for data that is fundamentally two blobs. R2 over Vercel Blob for 10 GB and zero egress; over Supabase because free projects pause after 7 idle days, which is exactly wrong for bursty personal use. Presigning is not an optimisation but a requirement — Vercel caps request bodies at ~4.5 MB, below one asset. Local-first is preserved: the cloud mirrors localStorage/IndexedDB, so signed-out and offline sessions are unchanged |
 | ◆46 | Bindings, structural conditionals, composition (§3.1–§3.8) | Contextual `let`, `If:`/`Else:`, and no-argument `TemplateName:` calls; immutable lexical bindings, lazy selected branches, noncapturing calls, cycle errors, and composition-only caps | The three forms replace off-card conditional hacks while preserving the flat RenderModel and existing scripts; contextual recognition keeps `column let: Text`, `Template: If`, and `Front: If` legal |
 | ◆47 | Additive color styling (§3.3.2–§3.3.5) | Optional Image `color:` is an RGB **multiply** tint (white/default = identity); resolved text gains nested `{color:red}…{/color}` scopes for text, Dicier markers, and inline asset markers | Multiplication recolors white artwork while preserving black detail and source alpha, and makes white an exact compatibility default. Scoped tags extend ◆44's post-interpolation marker pass without changing wrap widths: color is paint-only run data, not content geometry. Malformed or unbalanced scopes remain raw text with no diagnostic, preserving the marker grammar's gentle failure posture |
+| ◆48 | Printable data export and virtual columns (§3.2, §7.7) | `virtual column name: Type = expression` adds a typed, read-only, export-only value to a Sheet; **Export Data** emits one RFC 4180 CSV row per generated card instance, with provenance, loop values, physical cells, and virtual values | Generated instances—not source rows—are the print manifest: loops and `count:` can multiply one row, while `[card]` can make each copy distinct. Keeping virtuals out of the grid preserves code-owned formulas and avoids a second stored value that can drift from its expression |
+| ◆49 | Parameterized composition and generated identity (§3.2–§3.7) | Direct, typed `param name: Type` declarations on Templates; explicit indented arguments on `Front:`/`Back:` and Template calls; new `[copy]`, `[deck]`, `[deck_card]`, and `[project_card]` built-ins while `[card]` remains deck-relative | Parameters let one layout accept semantic variants without ambient caller capture: arguments evaluate in caller scope and forwarding stays explicit. Separate row/copy/deck/project identities describe the actual generation hierarchy without changing `[card]` under existing scripts; semantic IDs remain stable while project ordinals are deliberately positional |
 
 ---
 
@@ -100,13 +102,14 @@ Working name: **Goblin script**, file extension `.goblin` (cosmetic, revisit fre
 
 - **Indentation-significant** (like Python/YAML). One block = deeper indent. Spaces or
   tabs, consistent within a file; the lexer emits INDENT/DEDENT tokens.
-- **Continuation rule (◆23†, ◆46):** only a **property line** (a lowercase key + `:`)
-  or `let name:` may
+- **Continuation rule (◆23†, ◆46, ◆48):** only a **property line** (a lowercase key + `:`),
+  `let name:`, or a `virtual column name: Type =` initializer may
   continue: its expression extends across subsequent lines while they are indented
   deeper than the key. Block headers (`Enum:`, `Sheet:`, `Template:`, `Card:`,
   `Rectangle:`, `Text:`, `TextBox:`, `Icon:`, `Image:`, `Qr:`, `Repeat:`, `Front:`,
   `Back:`, `If:`, `Else:`, and Template-call headers) never continue — their
-  deeper-indented lines are children. Consequently `Repeat:` and `If:` expressions
+  deeper-indented lines are children. A call argument itself is an ordinary property-like
+  expression and may continue. Consequently `Repeat:` and `If:` expressions
   must fit on one line. Continuation is a parser-level
   rule; the lexer only reports indent levels.
 - **Comments (◆22):** `#` to end of line.
@@ -129,10 +132,13 @@ Working name: **Goblin script**, file extension `.goblin` (cosmetic, revisit fre
   **declared names** (declaration names, column names, enum cases, loop/repeat
   variables) — E001; block-opener words remain usable in value positions (that is
   how `column name: Text` names the `Text` type).
-  `let`, `If`, and `Else` are deliberately **contextual**, not additions to this
-  reserved list: only `let <name>:` at program/template-node indentation and
-  `If:`/`Else:` in template-node position are structural. Thus `column let: Text`,
-  `Template: If`, `Template: Else`, and `Front: If` retain their old meanings.
+  `let`, `param`, `If`, `Else`, and `virtual` are deliberately **contextual**, not additions
+  to this reserved list: only `let <name>:` at program/template-node indentation,
+  `param <name>: <Type>` directly inside a Template,
+  `If:`/`Else:` in template-node position, and `virtual column` inside a Sheet are
+  structural. Thus `column let: Text`, `column virtual: Text`, `Template: If`,
+  `Template: Else`, and `Front: If` retain their old meanings. A single `=` is only
+  the separator in a virtual-column declaration; equality remains `==`.
 
 ### 3.2 Top-level declarations
 
@@ -151,6 +157,7 @@ Sheet: Monsters
   column cost: Number
   column health: Number
   column count: Number
+  virtual column card_code: Text = "[card]|[name]"
 
 Template: MonsterFront
   ...elements...
@@ -172,14 +179,25 @@ Card: Monster
   enum columns become dropdowns; rows are data and live outside the code (⚑12).
   A Sheet may declare **zero columns** (⚑13†): its tab shows numbered rows with
   add/remove only — the idiom for loop-only decks that just need a row count.
-- **Template** — a named list of drawable nodes. Receives data ambiently (⚑5).
+  A Sheet may also declare `virtual column <name>: <Type> = <expression>` (◆48).
+  Virtual columns are type-checked once per Card bound to the Sheet and evaluate in
+  that Card's row/loop/generated-identity context. They are absent from the grid and
+  project row payload, cannot be edited or referenced as sheet bindings, and exist
+  only in Export Data. Their names must be unique across the Sheet's physical and
+  virtual columns. `Text`, `Number`, and enum types use the ordinary expression type
+  and Text-coercion rules. The initializer follows the same indented continuation
+  rule as a property or `let` initializer.
+- **Template** — a named list of drawable nodes. It may declare any number of required,
+  immutable `param <name>: <Type>` values directly in its body, in any position; they
+  are hoisted across the whole Template activation. Types are `Text`, `Number`, `Bool`,
+  `Color`, or an enum name. Parameters are not legal inside `If`/`Else`/`Repeat`.
 - **Card** — a card *type*: binds a sheet (⚑13), physical size, unit grid, optional
   loops, copy count, and front/back templates. `Front:`/`Back:` take a template name
-  inline (◆ the README's indented form is reserved for possible future inline
-  templates). `Back:` optional → plain white (◆16). Missing `sheet:`, `size:`, or
+  inline; deeper-indented `name: expression` lines supply that Template's parameters.
+  `Back:` optional → plain white (◆16). Missing `sheet:`, `size:`, or
   `Front:`, or an unknown size preset, is E008.
 - **`let name: expression`** — an immutable, type-inferred value. Program lets may
-  read other globals, the current Card's columns/loops, and `[row]`/`[card]`.
+  read other globals, the current Card's columns/loops, and generation built-ins.
   Initializers are lazy and checked only for Cards that reach them from `count:` or a
   face; forward references work, same-scope duplicates are E005, and dependency
   cycles are E009. Without an expected type, write self-typing values such as
@@ -188,7 +206,8 @@ Card: Monster
 ### 3.3 Template nodes, conditionals, composition, and elements
 
 A Template body, an `If`/`Else` branch, or a `Repeat` body may contain drawable
-elements, local `let` bindings, nested `If`/`Repeat`, and Template calls.
+elements, local `let` bindings, nested `If`/`Repeat`, and Template calls. Only the
+direct Template body may additionally contain `param` declarations.
 
 - **Structural conditionals:** `If: <Bool expression>` has an optional `Else:` as
   its next nonblank sibling at the same indentation. Both branches are parsed and
@@ -196,10 +215,14 @@ elements, local `let` bindings, nested `If`/`Repeat`, and Template calls.
   so the other emits no shapes or data diagnostics and does not read `[card]`.
   Conditions are single-line; else-if is a nested `If:` inside `Else:`.
 - **Template calls:** any otherwise-unclaimed `<identifier>:` in template-node
-  position calls that Template, with no label, children, or arguments. Calls flatten
-  at that source position, preserving z-order. A callee does **not** capture caller
-  local lets or caller `Repeat` variables; it sees its own locals, program globals,
-  Card loops, columns, and `[row]`/`[card]`. Templates named `If` or `Else` remain
+  position calls that Template. Deeper-indented `name: expression` lines are explicit
+  arguments; they evaluate in caller scope, are checked against the declared parameter
+  type, and are lazy/cached once per call activation. Forwarding therefore requires
+  `callee_name: [caller_name]`. Calls flatten at that source position, preserving
+  z-order. A callee does **not** otherwise capture caller local lets, parameters, or
+  caller `Repeat` variables; it sees its own parameters/locals, program globals,
+  Card loops, columns, and generation built-ins. Missing, duplicate, extra, or
+  wrongly typed arguments are compile errors. Templates named `If` or `Else` remain
   valid direct `Front:`/`Back:` targets, but cannot use nested-call shorthand.
 - **Safety:** direct/indirect let and Template cycles are E009 with the dependency
   path. Per Card face, checking and evaluation independently allow at most **64 active
@@ -501,21 +524,28 @@ useful total order on Text or enum cases a game designer should rely on.
 `[name]` resolves, innermost first:
 
 1. local `let` and enclosing `Repeat` bindings, nearest lexical scope first,
-2. the Card's `loop` variables,
-3. the bound sheet's columns,
-4. program-scope `let` bindings,
-5. the **built-in position bindings** (M3, 2026-08-13 — ◆42):
+2. the current Template's parameters,
+3. the Card's `loop` variables,
+4. the bound sheet's columns,
+5. program-scope `let` bindings,
+6. the **built-in generation bindings** (◆42, ◆49):
    - `[row]` — the row's **1-based position in its sheet**, i.e. exactly the
      number shown (and edited) in the grid's row gutter. Every card generated
      from one row shares it.
    - `[card]` — the card's **1-based position within its generated deck**,
      counting loop combinations and `count:` copies. With 2 rows × 3 suits,
      `[row]` runs 1,1,1,2,2,2 while `[card]` runs 1…6.
+   - `[copy]` — the **1-based `count:` copy** within the current row × loop-case
+     combination; it resets to 1 for the next combination.
+   - `[deck]` — Text containing the current **Card declaration name**.
+   - `[deck_card]` — a clearer alias for `[card]`, with exactly the same Number.
+   - `[project_card]` — the card's **1-based position across all emitted Card
+     declarations** in project generation order.
 
-   Both are Numbers, and both are **derived, never stored**: position IS row
-   order, so nothing enters the sheet payload, the autosave slot, or the
-   project file. They resolve LAST, so a sheet that declares its own `row` or
-   `card` column shadows the built-in (with the usual shadowing warning) — an
+   Except for Text-valued `[deck]`, these are Numbers. All are **derived, never
+   stored**: nothing enters the sheet payload, autosave slot, or project file.
+   They resolve LAST, so a sheet that declares a same-named column shadows the
+   built-in (with the usual shadowing warning) — an
    existing project's COLUMN can never be silently reinterpreted. (The one
    narrow exception, not a column: a template that put an unresolvable
    `row`/`card` name in a position only Number ever satisfies — e.g.
@@ -528,7 +558,8 @@ useful total order on Text or enum cases a game designer should rely on.
    rows; a card's `[row]` is always the number its designer would point at in
    the grid.
 
-   A face that reads `[card]` can't share one evaluation across its `count:`
+   A face that reads `[card]`, `[deck_card]`, `[copy]`, or `[project_card]` can't
+   share one evaluation across its `count:`
    copies the way every other face still does (§3.7) — each copy resolves on
    its own and earns its own `contentHash` (two copies differing only in a
    printed `[card]` number ARE different cards). Front and Back are tracked
@@ -541,23 +572,29 @@ useful total order on Text or enum cases a game designer should rely on.
    actually failed ("… (copy 3 of 3)"), since the group's other inputs would
    otherwise read as if copy 1 had caused it.
 
-   `count:` may itself read `[card]`: a combination's `[card]` is fixed
-   BEFORE its own `count:` runs (the position its first copy would occupy),
+   `count:` and other Card-context roots may read every built-in. During
+   `count:`, the context is the prospective first copy of that row × loop
+   combination: `[copy]` is 1, `[card]`/`[deck_card]` are the next deck
+   position, and `[project_card]` is the next project position. Those positions are fixed
+   BEFORE its own `count:` runs,
    so `count: [card]` is legal and self-referential — four rows request
    counts 1, 2, 4, 8 (each group's size equals the position it started at),
    still bounded by the same 2,000-instance cap as any other `count:` (◆27†).
+   A legal `count: 0` emits nothing and consumes neither a deck nor project position.
 
 Shadowing produces a warning. Because templates are checked **per using Card**, every
 `[ref]` in a template is statically known-good or squiggled — the README's "error
 prevention" promise, delivered by ⚑3 + ⚑5.
 
 Bindings in one lexical block are hoisted and visible throughout that block and its
-descendants. Local lets are cached once per activation of their Template call,
+descendants. Direct Template parameters are likewise hoisted, immutable, and cached
+once per activation; their arguments evaluate in the caller's scope. Local lets are cached once per activation of their Template call,
 selected branch, or `Repeat` iteration; globals are cached once per evaluation root
 (`count:`, each face, and each `[card]`-divergent copy). Values are lazy: unused lets
 read no cells and an untaken branch evaluates nothing. References in either branch
 still count for static use checks. A called Template starts its own lexical frame and
-does not capture caller locals or caller Repeat indices.
+does not capture caller parameters, locals, or caller Repeat indices; only declared,
+explicitly passed arguments cross that boundary.
 
 Same-scope duplicate lets are E005. A narrower local let, Repeat variable, or Card
 loop hiding an outer binding is W001; when an existing sheet column hides a new global,
@@ -574,19 +611,24 @@ For each `Card` block, in declaration order:
 for each edited row of the bound sheet (grid order; pristine rows excluded, ◆29)
   for each combination of loop cases (loops nested in declaration order, cases in enum order)
     n = evaluate count (default 1; must be integer ≥ 0 — else D006, one placeholder card)
-    emit n card instances with context {row, loop bindings, card}
+    emit n card instances with context {row, loop bindings, copy, deck, deck_card/card, project_card}
 ```
 
-The `n` instances are identical in content UNLESS a face reads the built-in `[card]`
-binding (§3.6, ◆42) — a printed run number is resolved data like any other, so a face
-that reads it resolves independently per instance instead of sharing one evaluation.
+The `n` instances are identical in content UNLESS a face reads a per-instance built-in
+(`[card]`, `[deck_card]`, `[copy]`, or `[project_card]`) — a printed run number is
+resolved data like any other, so a face that reads it resolves independently per
+instance instead of sharing one evaluation. `[deck]` alone is invariant within a Card
+declaration and does not force per-copy evaluation.
 
 Generation for a Card stops at **2,000 instances** (◆27†) with a D007 entry — a bad
 `count` cell must not freeze the tab any more than a bad `Repeat` may.
 
 Front and back element trees evaluate in that context; `Repeat` expands; the output is
 a fully resolved **RenderModel** (concrete numbers/strings/colors only — the renderer
-never sees an expression).
+never sees an expression). Each instance also carries an immutable export-data record:
+the bound Sheet's declared physical cell text plus its virtual-column results evaluated
+for that exact instance. This record is metadata, not rendered content, and therefore
+does not affect `contentHash`.
 
 ### 3.8 Diagnostics catalog (⚑8)
 
@@ -965,12 +1007,13 @@ warning has been enough in practice — §9.)
   `lastGoodSchema`, so suggestions track every keystroke without re-registration.
 - **No clean compile required:** the cursor's *context* comes from a cheap textual
   scan of the document — indentation + nearest block headers walking upward,
-  hoisted global/local lets, `If`/`Else`, `Repeat`/`loop` `as`-variables, and a
+  hoisted Template parameters/global/local lets, explicit call-argument blocks,
+  `If`/`Else`, `Repeat`/`loop` `as`-variables, and a
   transitive whole-document Template-call→using-Card scan
   (completions follow §3.6's per-using-Card rule). Unrecognizable ancestors are
   stepped over; when the scan cannot place the cursor at all, bracket completions
   degrade to the union of all sheets' columns rather than to silence.
-- **What completes where:** `[` → local lets/Repeat variables, the enclosing Card's
+- **What completes where:** `[` → Template parameters/local lets/Repeat variables, the enclosing Card's
   (or the using Cards' union) loops and sheet columns, globals, then built-ins, inside
   string interpolation too
   (◆30); property-key positions → the block kind's key set with type-hint details
@@ -983,7 +1026,9 @@ warning has been enough in practice — §9.)
   with each code's source-list section header as detail (`DICIER_CODE_CATEGORIES`,
   generated alongside `DICIER_CODES`); `Enum.` → that enum's cases; bare cases where
   ◆14 makes them legal (expected type first, otherwise globally-unique only);
-  expression keywords at low priority. Template-node indentation offers `let`,
+  expression keywords at low priority. Direct Template indentation additionally offers
+  `param` and its built-in/enum types; call-argument blocks offer the callee's declared
+  names and use their types for value suggestions. Template-node indentation offers `let`,
   `If:`, a pairing `Else:`, built-in nodes, and lowercase-or-uppercase Template calls;
   call suggestions omit the compatibility-only names `If` and `Else`. Comments
   complete nothing.
@@ -1456,6 +1501,32 @@ behaves exactly as it does today.
   Local editing is unaffected either way (the failure posture above still
   holds) — this is a "cloud sync itself stays stuck" gap, not a data-loss
   one.
+
+### 7.7 Generated data CSV — agreed spec (2026-08-20)
+
+- **Unit of export:** one record per emitted `CardInstance`, in Card/row/loop/copy
+  generation order. Legal error-placeholder instances are records too because they
+  still occupy a printable position; `count: 0` emits none and the 2,000-card cap
+  limits the CSV exactly as it limits preview/PDF.
+- **Provenance columns:** `@card`, `@sheet`, `@row`, `@card_number`, `@project_card`,
+  `@copy`, then one `@loop.<variable>` per encountered Card loop. `@row`,
+  `@card_number`, `@project_card`, and `@copy` are 1-based. `@card_number` equals
+  `[card]`/`[deck_card]`; `@project_card` equals `[project_card]`. `@` is outside
+  Goblin's identifier alphabet, guaranteeing
+  these cannot collide with declared columns.
+- **Data columns:** declared physical cells, verbatim, then virtual-column results.
+  A multi-Card/multi-Sheet project takes their stable first-seen union; fields absent
+  from an instance are empty. Orphaned row keys are not declarations and stay out.
+- **Virtual evaluation:** each virtual initializer is evaluated independently for
+  each emitted instance. A data-time failure blanks that virtual field and reports
+  the ordinary D-code, but does not replace an otherwise printable card: an export
+  formula is metadata, not a face. Virtual results and physical export metadata are
+  deliberately excluded from `contentHash`.
+- **Encoding/UI:** RFC 4180 comma-separated fields, CRLF records, UTF-8
+  `text/csv;charset=utf-8`. Exactly one Card block names `<Card>.csv`; otherwise
+  `cardgoblin-data.csv`. **Export Data** lives in the status bar, is disabled with
+  zero last-good instances, flushes pending compilation, and exports the same
+  last-good model owned by preview/PDF.
 
 ## 8. Open questions (explicitly deferred, not blocking the slice)
 

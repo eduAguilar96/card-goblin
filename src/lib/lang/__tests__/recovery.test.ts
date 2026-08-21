@@ -107,12 +107,12 @@ describe("multi-error recovery", () => {
     }
   });
 
-  it("a call child block is one error and does not swallow the next valid sibling", () => {
+  it("a malformed call argument block is one error and does not swallow the next valid sibling", () => {
     const { program, diagnostics } = parse(
       "Template: T\n  Child:\n    Rectangle:\n      x: 1\n  Text:\n    text: \"alive\"\n",
     );
     expect(diagnostics).toHaveLength(1);
-    expect(diagnostics[0].message).toContain("cannot have indented children");
+    expect(diagnostics[0].message).toContain("Expected end of line");
     const template = program.declarations[0] as TemplateDecl;
     expect(template.children.map((node) => node.kind)).toEqual([
       "TemplateCall",

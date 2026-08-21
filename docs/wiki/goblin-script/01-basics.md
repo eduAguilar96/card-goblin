@@ -51,10 +51,10 @@ are ordinary identifiers — so `column count: Number` is perfectly legal, and `
 reads that column. Meaning comes from position, and `[brackets]` always mean a data
 reference.
 
-Three newer forms are contextual, not reserved names: `let` is special only in
-`let name: value`, and capitalized `If:`/`Else:` are special only where a Template
-node can appear. `column let: Text`, `Template: If`, and `Front: If` are therefore
-still legal.
+Several newer forms are contextual, not reserved names: `let` is special only in
+`let name: value`, `param` only in `param name: Type` directly inside a Template,
+and capitalized `If:`/`Else:` only where a Template node can appear. `column let: Text`,
+`column param: Text`, `Template: If`, and `Front: If` are therefore still legal.
 
 ## Labels
 
@@ -77,7 +77,8 @@ color: if [current_suit] == Suit.Rock then grey
        else mediumpurple
 ```
 
-This works for property lines and `let name:` initializers. Block headers like
+This works for property lines (including explicit Template call arguments) and
+`let name:` initializers. Block headers like
 `Repeat:` and `If:` never continue — their indented lines are children, so their
 expressions have to fit on one line.
 

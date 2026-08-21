@@ -47,7 +47,10 @@ import type {
   RepeatNode,
   SheetDecl,
   TemplateCallNode,
+  TemplateArgumentNode,
   TemplateNode,
+  TemplateParamDecl,
+  VirtualColumnDecl,
 } from "./ast";
 import type { Diagnostic, Range } from "./diagnostics";
 import { spanRanges, syntaxError } from "./diagnostics";
@@ -406,6 +409,7 @@ class Parser {
           kind: "SheetDecl",
           name,
           columns: [],
+          virtualColumns: [],
           range: head.range,
         };
         this.parseBlockChildren(() => this.parseColumn(decl));
@@ -413,14 +417,26 @@ class Parser {
         return decl;
       }
       case "Template": {
+        const params: TemplateParamDecl[] = [];
         const children: TemplateNode[] = [];
         this.parseBlockChildren(() => {
+          const t = this.peek();
+          if (
+            t.kind === "identifier" &&
+            t.text === "param" &&
+            this.peekAt(1).kind === "identifier"
+          ) {
+            const param = this.parseTemplateParam();
+            if (param) params.push(param);
+            return;
+          }
           const node = this.parseTemplateNode();
           if (node) children.push(node);
         });
         return {
           kind: "TemplateDecl",
           name,
+          params,
           children,
           range: spanRanges(head.range, this.lastRange),
         };
@@ -507,6 +523,15 @@ class Parser {
       this.recoverOrphanElse();
       return;
     }
+    if (
+      t.kind === "identifier" &&
+      t.text === "virtual" &&
+      this.peekAt(1).kind === "keyword" &&
+      (this.peekAt(1) as Token & { kind: "keyword" }).word === "column"
+    ) {
+      this.parseVirtualColumn(sheet);
+      return;
+    }
     if (t.kind === "keyword" && t.word === "column") {
       this.next();
       // The column name is an ordinary identifier — `column count: Number`
@@ -546,10 +571,79 @@ class Parser {
       return;
     }
     this.error(
-      `Expected 'column <name>: <Type>' inside Sheet, found ${this.describe(t)}`,
+      `Expected 'column <name>: <Type>' or 'virtual column <name>: <Type> = <expression>' inside Sheet, found ${this.describe(t)}`,
       t.range,
     );
     this.sync(0);
+  }
+
+  /** ◆48: a typed expression included in CSV export but absent from the grid. */
+  private parseVirtualColumn(sheet: SheetDecl): void {
+    const head = this.next(); // contextual `virtual`
+    this.next(); // `column`
+    const name = this.expectDeclaredName("Expected a virtual column name after 'virtual column'");
+    if (!name) {
+      this.skipToEol();
+      return;
+    }
+    if (!this.atOp(":")) {
+      const bad = this.peek();
+      this.error(`Expected ':' after the virtual column name, found ${this.describe(bad)}`, bad.range);
+      this.skipToEol();
+      return;
+    }
+    this.next();
+    const columnType = this.expectIdent(
+      "Expected a virtual column type (Text, Number, or an enum name)",
+    );
+    if (!columnType) {
+      this.skipToEol();
+      return;
+    }
+    if (!this.atOp("=")) {
+      const bad = this.peek();
+      this.error(
+        `Expected '=' after virtual column type '${columnType.name}', found ${this.describe(bad)}`,
+        bad.range,
+      );
+      this.skipToEol();
+      return;
+    }
+    this.next();
+
+    this.exprCtx = { multiline: true, contDepth: 0 };
+    this.exprHadError = false;
+    const initializer = this.parseExpr();
+    const endLook = this.lookahead();
+    const ctx = this.exprCtx;
+    if (endLook.found) {
+      if (!this.exprHadError) {
+        this.error(
+          `Expected end of line, found ${this.describe(endLook.token)} — indented lines after a virtual column continue its expression`,
+          endLook.token.range,
+        );
+      }
+      this.exprCtx = null;
+      this.sync(ctx.contDepth);
+    } else {
+      this.exprCtx = null;
+      if (this.peek().kind === "newline") this.next();
+      let depth = ctx.contDepth;
+      while (depth > 0 && this.peek().kind === "dedent") {
+        this.next();
+        depth--;
+      }
+    }
+    this.exprHadError = false;
+
+    const virtualColumn: VirtualColumnDecl = {
+      kind: "VirtualColumnDecl",
+      name,
+      columnType,
+      initializer,
+      range: spanRanges(head.range, initializer.range),
+    };
+    sheet.virtualColumns.push(virtualColumn);
   }
 
   // -- immutable bindings --------------------------------------------------
@@ -607,6 +701,37 @@ class Parser {
   }
 
   // -- template nodes (§3.3) ------------------------------------------------
+
+  /** `param <name>: <Type>` — direct Template children only, hoisted later. */
+  private parseTemplateParam(): TemplateParamDecl | null {
+    const head = this.next(); // contextual `param`
+    const name = this.expectDeclaredName("Expected a parameter name after 'param'");
+    if (!name) {
+      this.skipToEol();
+      return null;
+    }
+    if (!this.atOp(":")) {
+      const bad = this.peek();
+      this.error(`Expected ':' after parameter '${name.name}', found ${this.describe(bad)}`, bad.range);
+      this.skipToEol();
+      return null;
+    }
+    this.next();
+    const paramType = this.expectIdent(
+      "Expected a parameter type (Text, Number, Bool, Color, or an enum name)",
+    );
+    if (!paramType) {
+      this.skipToEol();
+      return null;
+    }
+    this.finishLine();
+    return {
+      kind: "TemplateParam",
+      name,
+      paramType,
+      range: spanRanges(head.range, paramType.range),
+    };
+  }
 
   private parseTemplateNode(): TemplateNode | null {
     const t = this.peek();
@@ -812,19 +937,45 @@ class Parser {
     const template: NameRef = { name: nameTok.text, range: nameTok.range };
     this.next(); // ':'
     this.finishLine();
+    const args = this.parseTemplateArguments();
     const call: TemplateCallNode = {
       kind: "TemplateCall",
       template,
+      arguments: args,
       range: spanRanges(nameTok.range, this.lastRange),
     };
-    if (this.peek().kind === "indent") {
+    return call;
+  }
+
+  /** Argument blocks contain only ordinary `name: expression` lines. */
+  private parseTemplateArguments(): TemplateArgumentNode[] {
+    const args: TemplateArgumentNode[] = [];
+    this.parseBlockChildren(() => {
+      const t = this.peek();
+      if (
+        t.kind === "identifier" &&
+        this.peekAt(1).kind === "op" &&
+        (this.peekAt(1) as Token & { kind: "op" }).op === ":"
+      ) {
+        const property = this.parseProperty();
+        if (property.asVar) {
+          this.error("'as' is not allowed on a Template argument", property.asVar.range);
+        }
+        args.push({
+          kind: "TemplateArgument",
+          name: property.key,
+          value: property.value,
+          range: property.range,
+        });
+        return;
+      }
       this.error(
-        `Template call '${template.name}:' cannot have indented children or arguments`,
-        this.peek().range,
+        `Expected a Template argument ('name: expression'), found ${this.describe(t)}`,
+        t.range,
       );
       this.sync(0);
-    }
-    return call;
+    });
+    return args;
   }
 
   // -- card items (§3.2) ----------------------------------------------------
@@ -867,7 +1018,7 @@ class Parser {
     this.sync(0);
   }
 
-  /** `Front:`/`Back:` take a template name inline (§3.2); no children. */
+  /** `Front:`/`Back:` take a template name inline and optional arguments. */
   private parseFace(face: "Front" | "Back"): FaceNode {
     const head = this.next();
     this.next(); // ':'
@@ -876,24 +1027,13 @@ class Parser {
     );
     if (template) this.finishLine();
     else this.skipToEol();
-    const t = this.peek();
-    if (t.kind === "indent") {
-      // Block headers never continue and Front:/Back: take their template
-      // inline — indented content under them is always an error (◆23†, §3.2).
-      // If the name was already missing, that E001 covers this too — skip the
-      // block silently rather than double-report one mistake.
-      if (template) {
-        this.error(
-          `'${face}:' takes a template name inline; indented content under it is not allowed`,
-          t.range,
-        );
-      }
-      this.sync(0);
-    }
+    const args = template ? this.parseTemplateArguments() : [];
+    if (!template && this.peek().kind === "indent") this.sync(0);
     return {
       kind: "Face",
       face,
       template,
+      arguments: args,
       range: spanRanges(head.range, this.lastRange),
     };
   }
