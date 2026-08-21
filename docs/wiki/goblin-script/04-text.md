@@ -1,7 +1,7 @@
 ---
 title: Text & TextBox
 status: stable
-summary: One line of text, or a wrapped multi-line box — and how wrapping is decided.
+summary: Single-line and wrapped text, reusable aliases, inline icons, colors, and fonts.
 ---
 
 # Text & TextBox
@@ -123,8 +123,6 @@ let damage_icon: "{color:#cc2222}{asset:swords}{/color}"
 Sheet: Attacks
   column desc: Text
 
-# In one desc cell: Deal 2 {alias:damage_icon}.
-
 Template: Front
   TextBox: "Rules"
     x: 2
@@ -135,10 +133,18 @@ Template: Front
     text: [desc]
 ```
 
+Then type this in one `desc` spreadsheet cell:
+
+```text
+Deal 2 {alias:damage_icon}.
+```
+
 Aliases are part of **resolved text**, not string interpolation. After the
 `text:` expression has resolved, each alias can expand a program-level
-`let name:` whose value for that card is Text. The same syntax therefore works
-when `{alias:damage_icon}` comes from a spreadsheet cell. Ordinary
+`let name:` that successfully resolves to Text for that card. `name` follows the
+ordinary declaration-name rules: a letter, then letters, digits, or underscores.
+The same syntax therefore works when `{alias:damage_icon}` comes from a
+spreadsheet cell. Ordinary
 `[damage_icon]` interpolation cannot do this arbitrary placement: interpolation
 is parsed in source strings, not by rescanning the contents of a cell.
 
@@ -146,13 +152,26 @@ Expansion happens **exactly one level**, and then the ordinary scoped-color,
 Dicier, and asset markers are parsed. Those markers can live inside the let's
 value, but another `{alias:other}` produced by that value is not expanded and
 stays visible as raw text. Local lets and Template parameters are not alias
-targets. An unknown name or a top-level let whose value is not Text also leaves
-the original `{alias:name}` visible. It reports the non-fatal data diagnostic
+targets. `{{alias:name}` writes the literal text `{alias:name}`, following the
+same doubled-brace escape as other markers.
+
+An unknown name, a top-level let whose static type is not Text, or a binding the
+compiler could not prepare as a valid alias target leaves the original
+`{alias:name}` visible. It reports the non-fatal data diagnostic
 [D011](09-errors.md), but the card still renders rather than becoming a placeholder.
 
-Top-level Text lets are externally addressable even when no literal alias marker
-appears in code, because one may arrive from cell data. They — and the global lets
-they depend on — therefore do not receive the ordinary W002 "never used" warning.
+D011 is only about finding and preparing the target. Once a binding is a valid
+Text alias, evaluating it uses the ordinary data-error rules. For example, if its
+value reads an empty required Number cell, that remains D003 and the affected card
+becomes a placeholder; it does not turn into raw alias text plus D011.
+
+A top-level let that validly resolves to Text without Card data, or for at least
+one declared Card, is externally addressable even when no literal alias marker
+appears in code: its name may arrive from cell data. It — and the global lets it
+depends on — therefore does not receive the ordinary W002 "never used" warning.
+This exemption does not rewrite the cell or add anything to
+[Export Data](../export-and-project/08-data-export.md); it only makes the let
+available while rendering `Text` and `TextBox`.
 
 ## Scoped colors
 

@@ -19,7 +19,7 @@ kept as small as the mistake.
 | **An amber dot on a card** | A [`TextBox`](04-text.md) on that card had its text clipped or shrunk to fit the box — not an error, just worth a look. |
 | **A dimmed spreadsheet row** | A brand-new, never-edited empty row. It's excluded from the deck until you type into it. |
 | **An icon showing raw text** like `HEARTZ` | An unknown [icon code](../reference/03-icons.md) — on an `Icon`, or an [inline marker](04-text.md#inline-icons) that rendered as its raw `{HEARTZ}` text. Fix the spelling. |
-| **Raw text** like `{alias:damage_icon}` | D011: the [text alias](04-text.md#reusing-resolved-text-with-aliases) is unknown or its top-level let is not Text. The marker stays visible and the card still renders. |
+| **Raw text** like `{alias:damage_icon}` | D011: the [text alias](04-text.md#reusing-resolved-text-with-aliases) is unknown, statically non-Text, or could not be prepared as a valid target. The marker stays visible and the card still renders. |
 
 ## Two kinds of problem
 
@@ -35,8 +35,9 @@ offending cell red where there is one and turn the affected cards into
 placeholders — a row's `count:` copies always fail as ONE group, never
 individually, even when only one of them actually triggered the problem (the
 placeholder message says which one). Two are deliberately diagnostic-only:
-unknown computed icon code D005 and unresolved text alias D011 leave their raw
-text visible on an otherwise rendered card. The rest of the deck renders normally.
+unknown computed icon code D005 and an unavailable text-alias target D011 leave
+their raw text visible on an otherwise rendered card. The rest of the deck renders
+normally.
 
 ## Warnings
 
@@ -53,10 +54,16 @@ Some things are suspicious rather than wrong, and warn instead of erroring:
 
 A failed `{alias:name}` expansion is a non-fatal D011 data diagnostic rather than a
 warning: the original marker stays visible and the rest of the card still renders.
+This applies when the target is unknown, non-Text, or invalid during the compiler's
+alias-preparation pass. A valid Text target that later hits bad row data keeps that
+ordinary diagnostic and recovery posture — for example, D003 still produces a
+placeholder instead of being converted to D011.
 
-A top-level Text let is the exception to "a declaration nothing uses": it can be
-named by `{alias:name}` arriving only from spreadsheet data, so it and its global
-dependencies are treated as externally addressable and do not get W002.
+A top-level let that validly resolves to Text without Card data or for at least one
+declared Card is the exception to "a declaration nothing uses": it can be named by
+`{alias:name}` arriving only from spreadsheet data, so it and its global dependencies
+are treated as externally addressable and do not get W002. Invalid or exclusively
+non-Text lets are not alias exports and keep the ordinary unused-declaration behavior.
 
 ## Composition problems
 

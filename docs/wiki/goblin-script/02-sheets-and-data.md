@@ -155,7 +155,18 @@ text: "Cost: [cost]"      # → "Cost: 5"
 ```
 
 Numbers and enum cases become text automatically here (trailing zeros are trimmed;
-an enum prints its case name). Use `[[` for a literal `[`.
+an enum prints its case name). Use `[[` to write a literal opening bracket.
+
+### Reusable text inside a cell
+
+Cell contents are values, not Goblin source, so a cell containing `[damage_icon]`
+is not interpolated a second time. `Text` and `TextBox` have one purpose-built way
+to place a shared marker-rich fragment anywhere inside cell text: put the fragment
+in a top-level Text-valued let and write `{alias:damage_icon}` in the cell. Alias
+expansion happens after `text: [column]` resolves and before inline asset, icon, and
+color markers are parsed. See the complete
+[damage-and-swords example](04-text.md#reusing-resolved-text-with-aliases), including
+one-level expansion and D011 failure behavior.
 
 ### Zero-padding Number references
 

@@ -40,6 +40,12 @@ Uploads also work *inside text*: `{asset:dragon_art}` in any `Text` or `TextBox`
 `text:` draws the upload as an inline icon in a one-em slot — see
 [Inline icons](../goblin-script/04-text.md#inline-icons).
 
+If the same colored asset fragment belongs at different positions inside many
+spreadsheet descriptions, wrap it in a top-level Text let and place it with
+`{alias:name}`. The [resolved-text alias example](../goblin-script/04-text.md#reusing-resolved-text-with-aliases)
+uses `{color:#cc2222}{asset:swords}{/color}` so each cell can say, for example,
+`Deal 2 {alias:damage_icon}.` without duplicating the asset/color markup.
+
 ## The 2 MB cap
 
 **2 MB** per image — enough for card-sized art at print resolution, not a place

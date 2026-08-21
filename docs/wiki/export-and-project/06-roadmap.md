@@ -71,7 +71,8 @@ arrive from cell data — each in a one-em slot that wraps like a word. See
 
 **Reusable resolved text.** `{alias:name}` expands a top-level Text-valued
 `let name:` once before inline icon, asset, and color markers are parsed — also
-when the alias marker comes from cell data. See
+when the alias marker comes from cell data. A cell such as
+`Deal 2 {alias:damage_icon}.` can insert one shared, tinted swords asset. See
 [Text aliases](../goblin-script/04-text.md#reusing-resolved-text-with-aliases).
 
 **Additive color styling.** Image `color:` multiply-tints artwork (white is the

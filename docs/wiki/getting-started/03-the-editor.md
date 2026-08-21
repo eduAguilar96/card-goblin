@@ -27,7 +27,11 @@ Your Goblin script, in a real code editor (Monaco) with syntax highlighting and
 autocomplete. Suggestions appear as you type (or on **Ctrl+Space**) and fit where
 your cursor is: your column names inside `[brackets]`, the properties a block
 accepts, size presets, [color names](../reference/02-colors.md), enum cases after a `.`, and
-[icon codes](../reference/03-icons.md) inside `code:` strings. They come from your latest compile,
+[icon codes](../reference/03-icons.md) inside `code:` strings. Inside a `Text` or
+`TextBox` string, typing `{` offers color-scope and
+[resolved-text alias](../goblin-script/04-text.md#reusing-resolved-text-with-aliases)
+helpers; after `{alias:`, the editor offers top-level lets that the compiler knows
+can resolve to Text. Suggestions come from your latest compile,
 so they keep working while the code is broken mid-edit — the moment a `Sheet:`
 declares a column, that column is offered everywhere it's legal. Errors appear as
 red squiggles where they happen, and the status bar counts how many.

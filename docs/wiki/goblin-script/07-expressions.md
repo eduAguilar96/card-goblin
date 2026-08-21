@@ -70,9 +70,16 @@ A top-level let that resolves to Text can also be inserted into `Text` or `TextB
 resolved text with `{alias:name}`. This is a one-level reuse mechanism for fragments
 that contain [inline icons, assets, or scoped colors](04-text.md#reusing-resolved-text-with-aliases),
 not another expression lookup: local lets, parameters, non-Text lets, and unknown
-names are left as the raw marker with a non-fatal D011 data diagnostic. Because an
-alias name can arrive from a spreadsheet cell, top-level Text lets and the globals
-they depend on are externally addressable and do not receive W002 "never used".
+or statically invalid/unpreparable targets are left as the raw marker with a
+non-fatal D011 data diagnostic. Runtime data errors from an otherwise valid Text
+alias propagate exactly as they do for an ordinary let reference; D003, for example,
+still makes the affected card a placeholder. Because an alias name can arrive from
+a spreadsheet cell, a top-level let that validly resolves to Text for at least one
+Card (or without Card data), and
+the globals it depends on, are externally addressable and do not receive W002
+"never used". This compiler-level alias-export status makes the let available to
+resolved text and affects unused-binding checks; it does not add the let to
+spreadsheet or CSV data exports.
 
 ## Types
 

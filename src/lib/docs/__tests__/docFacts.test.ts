@@ -620,18 +620,38 @@ describe("the resolved-text alias guide pins ◆52's safety boundaries", () => {
     expect(section![1]).toContain("Deal 2 {alias:damage_icon}.");
     expect(section![1]).toContain("text: [desc]");
     expect(section![1]).toMatch(/ordinary[\s\S]*interpolation cannot do this arbitrary placement/i);
+    expect(section![1]).toMatch(/program-level[\s\S]*successfully resolves to Text/i);
+    expect(section![1]).toContain("`{{alias:name}`");
   });
 
   it("keeps unknown and non-Text targets raw and non-fatal", () => {
-    expect(section![1]).toMatch(/unknown name[\s\S]*not Text[\s\S]*original `\{alias:name\}` visible/i);
-    expect(section![1]).toMatch(/non-fatal data diagnostic[\s\S]*D011/i);
-    expect(section![1]).toMatch(/still renders rather than becoming a placeholder/i);
+    expect(section![1]).toMatch(/unknown name[\s\S]*not Text[\s\S]*original\s+`\{alias:name\}` visible/i);
+    expect(section![1]).toMatch(/non-fatal data\s+diagnostic[\s\S]*D011/i);
+    expect(section![1]).toMatch(/still renders rather than becoming\s+a placeholder/i);
+  });
+
+  it("does not mislabel runtime data errors from valid Text aliases as D011", () => {
+    expect(section![1]).toMatch(/D011 is only about finding and preparing the target/i);
+    expect(section![1]).toMatch(
+      /empty required Number cell[\s\S]*D003[\s\S]*placeholder[\s\S]*does not[\s\S]*D011/i,
+    );
   });
 
   it("documents the W002 exception for data-addressable Text globals", () => {
     expect(section![1]).toMatch(/externally addressable/i);
-    expect(section![1]).toMatch(/do not receive[\s\S]*W002/i);
+    expect(section![1]).toMatch(/does not receive[\s\S]*W002/i);
+    expect(section![1]).toMatch(/does not rewrite the cell or add anything to[\s\S]*Export Data/i);
   });
+});
+
+describe("resolved-text aliases are discoverable from adjacent user workflows", () => {
+  for (const slug of ["sheets-and-data", "assets", "the-editor", "roadmap"]) {
+    it(`${slug} links users to the alias syntax or motivating use case`, () => {
+      const text = pageText(slug);
+      expect(text).toMatch(/alias/i);
+      expect(text).toContain("04-text.md#reusing-resolved-text-with-aliases");
+    });
+  }
 });
 
 describe("the error reference documents non-fatal alias diagnostic D011", () => {
@@ -640,6 +660,7 @@ describe("the error reference documents non-fatal alias diagnostic D011", () => 
     expect(text).toContain("D011");
     expect(text).toMatch(/raw[\s\S]*marker stays visible/i);
     expect(text).toMatch(/card still renders/i);
+    expect(text).toMatch(/D003[\s\S]*placeholder[\s\S]*(?:not remapped|instead of being converted) to D011/i);
   });
 });
 
