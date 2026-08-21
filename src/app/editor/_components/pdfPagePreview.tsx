@@ -26,6 +26,12 @@ import { CardFaceSvg } from "@/app/editor/_components/cardSvg";
 import { DOTTED_DASH_MM } from "@/app/editor/_components/pdfAssemble";
 import {
   GUIDE_STROKES,
+  PAGE_NUMBER_BOX_HEIGHT_MM,
+  PAGE_NUMBER_BOX_WIDTH_MM,
+  PAGE_NUMBER_FONT_SIZE_MM,
+  PAGE_NUMBER_PADDING_MM,
+  pageNumberBoxPosition,
+  pageNumberLabel,
   type FaceRasterSpec,
   type GuideSegment,
   type GuideStyle,
@@ -59,6 +65,9 @@ export interface PdfPagePreviewProps {
   faceSpecs: ReadonlyMap<string, FaceRasterSpec>;
   cutLines: GuideStyle;
   crossMarks: GuideStyle;
+  pageNumbers: boolean;
+  sheetCount: number;
+  marginMm: number;
 }
 
 export function PdfPagePreview({
@@ -66,6 +75,9 @@ export function PdfPagePreview({
   faceSpecs,
   cutLines,
   crossMarks,
+  pageNumbers,
+  sheetCount,
+  marginMm,
 }: PdfPagePreviewProps): ReactElement {
   return (
     <svg
@@ -104,7 +116,47 @@ export function PdfPagePreview({
       })}
       <Guides segments={page.cutLines} style={cutLines} />
       <Guides segments={page.crossMarks} style={crossMarks} />
+      {pageNumbers && (
+        <PageNumber page={page} sheetCount={sheetCount} marginMm={marginMm} />
+      )}
     </svg>
+  );
+}
+
+function PageNumber({
+  page,
+  sheetCount,
+  marginMm,
+}: {
+  page: LayoutPage;
+  sheetCount: number;
+  marginMm: number;
+}): ReactElement {
+  const { xMm: x, yMm: y } = pageNumberBoxPosition(page, marginMm);
+  return (
+    <g data-page-number>
+      <rect
+        x={x}
+        y={y}
+        width={PAGE_NUMBER_BOX_WIDTH_MM}
+        height={PAGE_NUMBER_BOX_HEIGHT_MM}
+        fill="#ffffff"
+        fillOpacity={0.94}
+        stroke="#595959"
+        strokeWidth={0.2}
+      />
+      <text
+        x={x + PAGE_NUMBER_BOX_WIDTH_MM - PAGE_NUMBER_PADDING_MM}
+        y={y + PAGE_NUMBER_BOX_HEIGHT_MM - PAGE_NUMBER_PADDING_MM}
+        textAnchor="end"
+        fontFamily="Arial, Helvetica, sans-serif"
+        fontWeight="bold"
+        fontSize={PAGE_NUMBER_FONT_SIZE_MM}
+        fill="#141414"
+      >
+        {pageNumberLabel(page, sheetCount)}
+      </text>
+    </g>
   );
 }
 

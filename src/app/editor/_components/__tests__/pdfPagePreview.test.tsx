@@ -41,6 +41,9 @@ function renderPage(
       faceSpecs={layout.faceSpecs}
       cutLines={options.cutLines}
       crossMarks={options.crossMarks}
+      pageNumbers={options.pageNumbers}
+      sheetCount={layout.sheetCount}
+      marginMm={options.marginMm}
     />,
   );
 }
@@ -123,5 +126,18 @@ describe("PdfPagePreview", () => {
     // and none of the front's text is on this page.
     expect(markup).toContain('fill="teal"');
     expect(markup).not.toContain("Dragon");
+  });
+
+  it("shows paired logical sheet labels only when enabled", () => {
+    const layout = demoLayout({ pageNumbers: true });
+    const front = renderPage(layout, 0, { ...DEFAULT_PDF_OPTIONS, pageNumbers: true });
+    const back = renderPage(layout, 1, { ...DEFAULT_PDF_OPTIONS, pageNumbers: true });
+    expect(front).toContain("data-page-number");
+    expect(front).toContain("1/2 front");
+    expect(back).toContain("1/2 back");
+
+    const off = renderPage(layout, 0, DEFAULT_PDF_OPTIONS);
+    expect(off).not.toContain("data-page-number");
+    expect(off).not.toContain("1/2 front");
   });
 });

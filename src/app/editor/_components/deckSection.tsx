@@ -37,6 +37,9 @@ export interface DeckSectionProps {
   scrollTop: number;
   /** The shared scroll container's viewport height (or the SSR fallback). */
   viewportH: number;
+  /** Preview-only source-row badges. Kept outside CardFaceSvg so they can
+   * never enter rasterized/PDF output. */
+  showRowNumbers?: boolean;
 }
 
 export default function DeckSection({
@@ -46,6 +49,7 @@ export default function DeckSection({
   layout,
   scrollTop,
   viewportH,
+  showRowNumbers = false,
 }: DeckSectionProps): ReactElement {
   const { cols, rows, rowH } = layout;
   const range = visibleRange(
@@ -73,7 +77,11 @@ export default function DeckSection({
           // The key includes the side: cardSvgPropsEqual memoizes on
           // contentHash, which covers BOTH faces, so a front↔back toggle
           // must remount rather than rely on the comparator (cardSvg.tsx).
-          <div key={`${side}:${r * cols + i}`} style={{ width: cardW }} className="shrink-0">
+          <div
+            key={`${side}:${r * cols + i}`}
+            style={{ width: cardW }}
+            className="relative shrink-0"
+          >
             <CardSVG
               xUnits={deck.xUnits}
               yUnits={deck.yUnits}
@@ -83,6 +91,15 @@ export default function DeckSection({
               contentHash={card.contentHash}
               error={card.error}
             />
+            {showRowNumbers && (
+              <span
+                data-card-row-overlay
+                title={`Source sheet row ${card.meta.rowIndex + 1}`}
+                className="pointer-events-none absolute left-1 top-1 z-10 rounded border border-white bg-red-700 px-1.5 py-0.5 text-sm font-black leading-none text-white shadow-lg"
+              >
+                Row {card.meta.rowIndex + 1}
+              </span>
+            )}
           </div>
         ))}
       </div>,

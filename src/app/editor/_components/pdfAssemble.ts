@@ -12,9 +12,22 @@
  * direct unit tests).
  */
 
-import { PDFDocument, rgb, type PDFImage, type PDFPage } from "pdf-lib";
+import {
+  PDFDocument,
+  StandardFonts,
+  rgb,
+  type PDFFont,
+  type PDFImage,
+  type PDFPage,
+} from "pdf-lib";
 import {
   GUIDE_STROKES,
+  PAGE_NUMBER_BOX_HEIGHT_MM,
+  PAGE_NUMBER_BOX_WIDTH_MM,
+  PAGE_NUMBER_FONT_SIZE_MM,
+  PAGE_NUMBER_PADDING_MM,
+  pageNumberBoxPosition,
+  pageNumberLabel,
   type GuideSegment,
   type GuideStyle,
   type LayoutPage,
@@ -62,6 +75,8 @@ function drawPage(
   layoutPage: LayoutPage,
   embedded: ReadonlyMap<string, PDFImage>,
   options: PdfExportOptions,
+  sheetCount: number,
+  pageNumberFont?: PDFFont,
 ): void {
   const page = doc.addPage([layoutPage.widthMm * MM_TO_PT, layoutPage.heightMm * MM_TO_PT]);
 
@@ -80,6 +95,41 @@ function drawPage(
   // and must stay visible on top of them.
   drawSegments(page, layoutPage.heightMm, layoutPage.cutLines, options.cutLines);
   drawSegments(page, layoutPage.heightMm, layoutPage.crossMarks, options.crossMarks);
+
+  if (options.pageNumbers && pageNumberFont !== undefined) {
+    const { xMm: boxX, yMm: boxTopY } = pageNumberBoxPosition(
+      layoutPage,
+      options.marginMm,
+    );
+    const boxBottomY = yFlipMmToPt(
+      layoutPage.heightMm,
+      boxTopY,
+      PAGE_NUMBER_BOX_HEIGHT_MM,
+    );
+    const label = pageNumberLabel(layoutPage, sheetCount);
+    const fontSize = PAGE_NUMBER_FONT_SIZE_MM * MM_TO_PT;
+    const textWidth = pageNumberFont.widthOfTextAtSize(label, fontSize);
+    page.drawRectangle({
+      x: boxX * MM_TO_PT,
+      y: boxBottomY,
+      width: PAGE_NUMBER_BOX_WIDTH_MM * MM_TO_PT,
+      height: PAGE_NUMBER_BOX_HEIGHT_MM * MM_TO_PT,
+      color: rgb(1, 1, 1),
+      borderColor: rgb(0.35, 0.35, 0.35),
+      borderWidth: 0.2 * MM_TO_PT,
+      opacity: 0.94,
+      borderOpacity: 0.94,
+    });
+    page.drawText(label, {
+      x:
+        (boxX + PAGE_NUMBER_BOX_WIDTH_MM - PAGE_NUMBER_PADDING_MM) * MM_TO_PT -
+        textWidth,
+      y: boxBottomY + PAGE_NUMBER_PADDING_MM * MM_TO_PT,
+      size: fontSize,
+      font: pageNumberFont,
+      color: rgb(0.08, 0.08, 0.08),
+    });
+  }
 }
 
 /**
@@ -94,6 +144,9 @@ export async function assemblePdf(
   options: PdfExportOptions,
 ): Promise<Uint8Array> {
   const doc = await PDFDocument.create();
+  const pageNumberFont = options.pageNumbers
+    ? await doc.embedFont(StandardFonts.HelveticaBold)
+    : undefined;
 
   const embedded = new Map<string, PDFImage>();
   for (const [key] of layout.faceSpecs) {
@@ -102,7 +155,9 @@ export async function assemblePdf(
     embedded.set(key, await doc.embedPng(bytes));
   }
 
-  for (const layoutPage of layout.pages) drawPage(doc, layoutPage, embedded, options);
+  for (const layoutPage of layout.pages) {
+    drawPage(doc, layoutPage, embedded, options, layout.sheetCount, pageNumberFont);
+  }
 
   return doc.save();
 }

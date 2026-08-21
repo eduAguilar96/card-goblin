@@ -7,6 +7,8 @@ import {
   faceKey,
   GUIDE_STROKES,
   layoutPdf,
+  pageNumberBoxPosition,
+  pageNumberLabel,
   PAGE_SIZES,
   type PdfExportOptions,
 } from "../pdfLayout";
@@ -57,6 +59,16 @@ describe("computeGrid (§6.1 formula)", () => {
   });
 });
 
+describe("page number placement", () => {
+  it("stays inside the configured right margin and centers in the bottom margin", () => {
+    const page = { widthMm: 215.9, heightMm: 279.4 };
+    expect(pageNumberBoxPosition(page, 10)).toEqual({ xMm: 175.9, yMm: 271.4 });
+    const zeroMargin = pageNumberBoxPosition(page, 0);
+    expect(zeroMargin.xMm).toBe(182.9); // 3 mm minimum print inset
+    expect(zeroMargin.yMm).toBe(271.4); // centered in a 10 mm fallback band
+  });
+});
+
 describe("layoutPdf on the real demo model", () => {
   it("duplex: interleaved F/B pages with horizontally mirrored backs", () => {
     const layout = layoutPdf(demoModel(), opts({}));
@@ -65,6 +77,14 @@ describe("layoutPdf on the real demo model", () => {
     expect(layout.placedCards).toBe(9); // copies count individually
     // 9 cards at 6/page → 2 front pages, interleaved with their back pages.
     expect(layout.pages.map((p) => p.side)).toEqual(["front", "back", "front", "back"]);
+    expect(layout.sheetCount).toBe(2);
+    expect(layout.pages.map((p) => p.sheetIndex)).toEqual([0, 0, 1, 1]);
+    expect(layout.pages.map((p) => pageNumberLabel(p, layout.sheetCount))).toEqual([
+      "1/2 front",
+      "1/2 back",
+      "2/2 front",
+      "2/2 back",
+    ]);
     const [front, back] = layout.pages;
     expect(front.cards).toHaveLength(6);
     expect(back.cards).toHaveLength(6);
@@ -87,6 +107,7 @@ describe("layoutPdf on the real demo model", () => {
   it("separate: back pages appended after all front pages; none: fronts only", () => {
     const separate = layoutPdf(demoModel(), opts({ backs: "separate" }));
     expect(separate.pages.map((p) => p.side)).toEqual(["front", "front", "back", "back"]);
+    expect(separate.pages.map((p) => p.sheetIndex)).toEqual([0, 1, 0, 1]);
     const none = layoutPdf(demoModel(), opts({ backs: "none" }));
     expect(none.pages.map((p) => p.side)).toEqual(["front", "front"]);
   });
@@ -284,6 +305,13 @@ describe("assemblePdf (node smoke with stub images)", () => {
   it("throws on a missing face image instead of emitting a broken document", async () => {
     const layout = layoutPdf(demoModel(), opts({ backs: "none" }));
     await expect(assemblePdf(layout, new Map(), opts({}))).rejects.toThrow(/missing PNG/);
+  });
+
+  it("adds native text labels only when page numbering is enabled", async () => {
+    const without = await pageOperators(await assembleDemo({ pageNumbers: false }), 0);
+    const withNumbers = await pageOperators(await assembleDemo({ pageNumbers: true }), 0);
+    expect(without).not.toMatch(/\bTj\b/);
+    expect(withNumbers).toMatch(/\bTj\b/);
   });
 
   it("faceKey distinguishes sides of one card", () => {

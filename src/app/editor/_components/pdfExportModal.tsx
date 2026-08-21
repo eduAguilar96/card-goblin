@@ -495,6 +495,17 @@ export function PdfExportModal({
                   ))}
                 </select>
               </label>
+
+              <label className="col-span-2 flex items-center gap-2 rounded border border-gray-700 bg-gray-900 px-2 py-2 text-xs text-gray-300">
+                <input
+                  type="checkbox"
+                  checked={options.pageNumbers}
+                  disabled={working}
+                  onChange={(e) => update({ pageNumbers: e.currentTarget.checked })}
+                  className="accent-gray-400"
+                />
+                Print page numbers
+              </label>
             </div>
 
             <Notices
@@ -561,6 +572,9 @@ export function PdfExportModal({
                   faceSpecs={layout.faceSpecs}
                   cutLines={options.cutLines}
                   crossMarks={options.crossMarks}
+                  pageNumbers={options.pageNumbers}
+                  sheetCount={layout.sheetCount}
+                  marginMm={options.marginMm}
                 />
               )}
             </div>

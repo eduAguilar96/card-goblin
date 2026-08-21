@@ -639,6 +639,7 @@ describe("the PDF options table matches the export defaults", () => {
     spacingMm: "Card spacing (mm)",
     cutLines: "Cut lines",
     crossMarks: "Cross marks",
+    pageNumbers: "Print page numbers",
   };
 
   const optionKeys = Object.keys(DEFAULT_PDF_OPTIONS) as (keyof PdfExportOptions)[];
@@ -654,6 +655,10 @@ describe("the PDF options table matches the export defaults", () => {
     const actual =
       key === "pageSize"
         ? PAGE_SIZES[DEFAULT_PDF_OPTIONS.pageSize].name
+        : key === "pageNumbers"
+          ? DEFAULT_PDF_OPTIONS.pageNumbers
+            ? "On"
+            : "Off"
         : String(DEFAULT_PDF_OPTIONS[key]);
     it(`states the ${label} default as "${actual}"`, () => {
       const stated = documented.get(label);

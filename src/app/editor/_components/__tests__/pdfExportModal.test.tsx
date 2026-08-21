@@ -58,6 +58,9 @@ describe("PdfExportModal — page preview", () => {
     expect(markup).toContain("Dragon");
     // And it is pageable.
     expect(markup).toContain('aria-label="Next page"');
+    expect(markup).toContain("Print page numbers");
+    expect(markup).toContain('type="checkbox"');
+    expect(markup).not.toContain("data-page-number");
   });
 
   it("warns how many cards are skipped while keeping Export enabled (§6.1)", () => {

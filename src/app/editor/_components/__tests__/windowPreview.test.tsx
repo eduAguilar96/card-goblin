@@ -52,6 +52,8 @@ describe("PreviewContent — single view (default)", () => {
     expect(markup).toContain("63.5×88.9 mm");
     // Zoom belongs to the grid view.
     expect(markup).not.toContain('type="range"');
+    expect(markup).not.toContain('aria-label="Show sheet row numbers"');
+    expect(markup).not.toContain("data-card-row-overlay");
     // Mode toggle present, single pressed.
     expect(markup).toContain('aria-label="Single card view"');
     expect(markup).toContain('aria-label="Grid view"');
@@ -122,6 +124,24 @@ describe("PreviewContent — grid view", () => {
     expect(markup).toContain('type="range"');
     expect(markup).not.toContain("1 / 9");
     expect(markup).not.toContain('aria-label="Next card"');
+    expect(markup).toContain('aria-label="Show sheet row numbers"');
+    expect(markup).toContain('aria-pressed="false"');
+    expect(markup).not.toContain("data-card-row-overlay");
+  });
+
+  it("optionally overlays each card's one-based source sheet row", () => {
+    const markup = renderToStaticMarkup(
+      <PreviewContent
+        lastGood={demoLastGood()}
+        isStale={false}
+        initialMode="grid"
+        initialShowRowNumbers
+      />,
+    );
+    expect(markup.match(/data-card-row-overlay/g)).toHaveLength(9);
+    expect(markup).toContain("Row 1");
+    expect(markup).toContain("Row 2");
+    expect(markup).toContain('aria-pressed="true"');
   });
 });
 

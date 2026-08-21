@@ -92,6 +92,7 @@ the section that elaborates it:
 | ◆48 | Printable data export and virtual columns (§3.2, §7.7) | `virtual column name: Type = expression` adds a typed, read-only, export-only value to a Sheet; **Export Data** emits one RFC 4180 CSV row per generated card instance, with provenance, loop values, physical cells, and virtual values | Generated instances—not source rows—are the print manifest: loops and `count:` can multiply one row, while `[card]` can make each copy distinct. Keeping virtuals out of the grid preserves code-owned formulas and avoids a second stored value that can drift from its expression |
 | ◆49 | Parameterized composition and generated identity (§3.2–§3.7) | Direct, typed `param name: Type` declarations on Templates; explicit indented arguments on `Front:`/`Back:` and Template calls; new `[copy]`, `[deck]`, `[deck_card]`, and `[project_card]` built-ins while `[card]` remains deck-relative | Parameters let one layout accept semantic variants without ambient caller capture: arguments evaluate in caller scope and forwarding stays explicit. Separate row/copy/deck/project identities describe the actual generation hierarchy without changing `[card]` under existing scripts; semantic IDs remain stable while project ordinals are deliberately positional |
 | ◆50 | Numeric interpolation padding (§3.5) | Quoted strings accept Number-only `[name:0N]`, where canonical decimal width `N` is 1..64; zero padding is sign-aware and sets a total **minimum** width without rounding or truncation | Fixed-width generated IDs are common enough to justify one small format, while a general formatting language would add grammar and policy far beyond the requirement. Keeping the form inside string interpolation preserves ordinary `[name]` and every non-string expression unchanged |
+| ◆51 | Preview row provenance and print pairing (§4.2, §6.1) | Grid view has an optional red one-based source-row overlay outside card SVGs; PDF export has an off-by-default native page label where matching fronts/backs share a project-wide logical sheet number | Row provenance makes generated cards traceable without contaminating artwork/export, while paired sheet numbers solve physical front/back sorting in both duplex and separate page orders |
 
 ---
 
@@ -938,7 +939,12 @@ warning has been enough in practice — §9.)
 - **Modal options (defaults bold):** page size **Letter** (215.9×279.4 mm) / A4
   (210×297 mm); outer margin mm (**10**); card spacing mm (**0**); cut lines
   **dotted**/off/red/bold; cross marks **off**/dotted/red/bold; backs
-  **duplex**/none/separate.
+  **duplex**/none/separate; print page numbers off by default.
+- **Optional print pairing label (◆51):** a native PDF corner label reads
+  `k/N front` or `k/N back`. `N` counts logical front sheets across the project,
+  and a matching front/back pair shares `k` even when Separate mode reorders all
+  backs after all fronts. The live page preview draws the same label. It is a page
+  layer, never part of a card raster.
 - **Engine:** each *distinct* card face (by contentHash) is rasterized at 300 DPI
   through the browser's own SVG renderer (canvas → PNG) so fonts/ligatures match the
   preview exactly; each distinct image is embedded once and reused. Page frame,

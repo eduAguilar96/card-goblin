@@ -66,6 +66,8 @@ export interface PdfExportOptions {
   cutLines: GuideStyle;
   crossMarks: GuideStyle;
   backs: BacksMode;
+  /** Add a native-PDF logical sheet label to each page. */
+  pageNumbers: boolean;
 }
 
 /** §6.1 defaults (bold in the spec text). */
@@ -76,7 +78,16 @@ export const DEFAULT_PDF_OPTIONS: PdfExportOptions = {
   cutLines: "dotted",
   crossMarks: "off",
   backs: "duplex",
+  pageNumbers: false,
 };
+
+/** Shared native-PDF / modal-preview geometry for the optional label. */
+export const PAGE_NUMBER_BOX_WIDTH_MM = 30;
+export const PAGE_NUMBER_BOX_HEIGHT_MM = 6;
+export const PAGE_NUMBER_MIN_EDGE_MM = 3;
+export const PAGE_NUMBER_PADDING_MM = 1;
+export const PAGE_NUMBER_FONT_SIZE_MM = 2.8;
+const PAGE_NUMBER_MIN_VERTICAL_EDGE_MM = 2;
 
 /** Stroke spec of a non-"off" guide style (§6.1): dotted = 0.2 mm dotted
  * black; red = 0.2 mm solid #cc0000; bold = 0.5 mm solid black. Colors are
@@ -187,6 +198,8 @@ export interface LayoutPage {
   /** The deck this page belongs to — decks never share pages (§6.1). */
   deckName: string;
   side: PdfSide;
+  /** Zero-based logical sheet position. A matching front/back pair shares it. */
+  sheetIndex: number;
   cards: PlacedCard[];
   /** Edge-to-edge cut lines at every card boundary; always computed (cheap,
    * directly testable) — the assembler draws them only when the style ≠ off. */
@@ -213,6 +226,31 @@ export interface PdfLayoutResult {
   fitErrors: DeckFitError[];
   /** Printable card instances placed (fronts; copies count individually). */
   placedCards: number;
+  /** Number of logical front sheets; also the page-label denominator. */
+  sheetCount: number;
+}
+
+/** The physical pairing label shown on a numbered export page. */
+export function pageNumberLabel(page: LayoutPage, sheetCount: number): string {
+  return `${page.sheetIndex + 1}/${sheetCount} ${page.side}`;
+}
+
+/** Top-left position for the label box. It stays inside the configured right
+ * margin (important for non-borderless printers) and is vertically centered
+ * in the bottom margin. Very small margins get a modest minimum inset. */
+export function pageNumberBoxPosition(
+  page: Pick<LayoutPage, "widthMm" | "heightMm">,
+  marginMm: number,
+): { xMm: number; yMm: number } {
+  const rightInsetMm = Math.max(marginMm, PAGE_NUMBER_MIN_EDGE_MM);
+  const bottomBandMm = Math.max(
+    marginMm,
+    PAGE_NUMBER_BOX_HEIGHT_MM + 2 * PAGE_NUMBER_MIN_VERTICAL_EDGE_MM,
+  );
+  return {
+    xMm: page.widthMm - rightInsetMm - PAGE_NUMBER_BOX_WIDTH_MM,
+    yMm: page.heightMm - (bottomBandMm + PAGE_NUMBER_BOX_HEIGHT_MM) / 2,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -373,6 +411,7 @@ export function layoutPdf(model: RenderModel, options: PdfExportOptions): PdfLay
 
     for (let start = 0; start < printable.length; start += grid.perPage) {
       const chunk = printable.slice(start, start + grid.perPage);
+      const sheetIndex = fronts.length;
 
       const frontCards = chunk.map((card, i): PlacedCard => ({
         xMm: cellX(i % grid.cols),
@@ -388,6 +427,7 @@ export function layoutPdf(model: RenderModel, options: PdfExportOptions): PdfLay
         heightMm: page.heightMm,
         deckName: deck.cardName,
         side: "front",
+        sheetIndex,
         cards: frontCards,
         cutLines: computeCutLines(frontCards, page.widthMm, page.heightMm),
         crossMarks: computeCrossMarks(frontCards, page.widthMm, page.heightMm),
@@ -411,6 +451,7 @@ export function layoutPdf(model: RenderModel, options: PdfExportOptions): PdfLay
           heightMm: page.heightMm,
           deckName: deck.cardName,
           side: "back",
+          sheetIndex,
           cards: backCards,
           // §6.1: guides render on back pages too, from the mirrored grid.
           cutLines: computeCutLines(backCards, page.widthMm, page.heightMm),
@@ -425,5 +466,12 @@ export function layoutPdf(model: RenderModel, options: PdfExportOptions): PdfLay
   const pages =
     backs === "duplex" ? interleaved : backs === "separate" ? [...fronts, ...backs_] : fronts;
 
-  return { pages, faceSpecs, skippedErrorCards, fitErrors, placedCards };
+  return {
+    pages,
+    faceSpecs,
+    skippedErrorCards,
+    fitErrors,
+    placedCards,
+    sheetCount: fronts.length,
+  };
 }

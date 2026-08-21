@@ -88,16 +88,20 @@ export interface PreviewContentProps {
    * markup tests pass "grid" to exercise the virtualized tree. Real usage
    * takes the default. */
   initialMode?: PreviewMode;
+  /** Static-markup test seam for the grid-only row provenance overlay. */
+  initialShowRowNumbers?: boolean;
 }
 
 export function PreviewContent({
   lastGood,
   isStale,
   initialMode = "single",
+  initialShowRowNumbers = false,
 }: PreviewContentProps): ReactElement {
   const [side, setSide] = useState<CardSide>("front");
   const [mode, setMode] = useState<PreviewMode>(initialMode);
   const [cardW, setCardW] = useState(ZOOM_DEFAULT_PX);
+  const [showRowNumbers, setShowRowNumbers] = useState(initialShowRowNumbers);
   // The single view's position. Never clamped in state — clamping happens at
   // render (see `index` below), so a shrinking model doesn't erase where the
   // user was.
@@ -207,19 +211,35 @@ export function PreviewContent({
             />
           )
         ) : (
-          <label className="flex items-center gap-2 text-xs text-gray-400">
-            Zoom
-            <input
-              type="range"
-              min={ZOOM_MIN_PX}
-              max={ZOOM_MAX_PX}
-              step={ZOOM_STEP_PX}
-              value={cardW}
-              onChange={(e) => setCardW(Number(e.currentTarget.value))}
-              aria-label="Card width"
-              className="w-32 accent-gray-400"
-            />
-          </label>
+          <>
+            <label className="flex items-center gap-2 text-xs text-gray-400">
+              Zoom
+              <input
+                type="range"
+                min={ZOOM_MIN_PX}
+                max={ZOOM_MAX_PX}
+                step={ZOOM_STEP_PX}
+                value={cardW}
+                onChange={(e) => setCardW(Number(e.currentTarget.value))}
+                aria-label="Card width"
+                className="w-32 accent-gray-400"
+              />
+            </label>
+            <button
+              type="button"
+              aria-label="Show sheet row numbers"
+              aria-pressed={showRowNumbers}
+              title="Overlay each card's source sheet row (preview only)"
+              onClick={() => setShowRowNumbers((shown) => !shown)}
+              className={
+                showRowNumbers
+                  ? "rounded border border-red-500 bg-red-900 px-2 py-1 text-xs font-semibold text-white"
+                  : "rounded border border-gray-600 bg-gray-800 px-2 py-1 text-xs text-gray-300 hover:bg-gray-700"
+              }
+            >
+              Row numbers
+            </button>
+          </>
         )}
         {/* M2 §6.1: export lives in the preview toolbar — it prints what the
             preview shows (see pdfExportModal.tsx for the placement note). */}
@@ -270,6 +290,7 @@ export function PreviewContent({
               layout={layouts[deckIndex]}
               scrollTop={scrollTop}
               viewportH={viewportH}
+              showRowNumbers={showRowNumbers}
             />
           ))
         )}
