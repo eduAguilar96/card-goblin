@@ -14,6 +14,7 @@
 import type { ReactElement } from "react";
 import type { Deck } from "@/lib/lang";
 import { CardSVG } from "@/app/editor/_components/cardSvg";
+import CardRowOverlay from "@/app/editor/_components/cardRowOverlay";
 import {
   CARD_GAP_PX,
   OVERSCAN_ROWS,
@@ -92,13 +93,7 @@ export default function DeckSection({
               error={card.error}
             />
             {showRowNumbers && (
-              <span
-                data-card-row-overlay
-                title={`Source sheet row ${card.meta.rowIndex + 1}`}
-                className="pointer-events-none absolute left-1 top-1 z-10 rounded border border-white bg-red-700 px-1.5 py-0.5 text-sm font-black leading-none text-white shadow-lg"
-              >
-                Row {card.meta.rowIndex + 1}
-              </span>
+              <CardRowOverlay rowIndex={card.meta.rowIndex} />
             )}
           </div>
         ))}

@@ -92,7 +92,7 @@ the section that elaborates it:
 | ◆48 | Printable data export and virtual columns (§3.2, §7.7) | `virtual column name: Type = expression` adds a typed, read-only, export-only value to a Sheet; **Export Data** emits one RFC 4180 CSV row per generated card instance, with provenance, loop values, physical cells, and virtual values | Generated instances—not source rows—are the print manifest: loops and `count:` can multiply one row, while `[card]` can make each copy distinct. Keeping virtuals out of the grid preserves code-owned formulas and avoids a second stored value that can drift from its expression |
 | ◆49 | Parameterized composition and generated identity (§3.2–§3.7) | Direct, typed `param name: Type` declarations on Templates; explicit indented arguments on `Front:`/`Back:` and Template calls; new `[copy]`, `[deck]`, `[deck_card]`, and `[project_card]` built-ins while `[card]` remains deck-relative | Parameters let one layout accept semantic variants without ambient caller capture: arguments evaluate in caller scope and forwarding stays explicit. Separate row/copy/deck/project identities describe the actual generation hierarchy without changing `[card]` under existing scripts; semantic IDs remain stable while project ordinals are deliberately positional |
 | ◆50 | Numeric interpolation padding (§3.5) | Quoted strings accept Number-only `[name:0N]`, where canonical decimal width `N` is 1..64; zero padding is sign-aware and sets a total **minimum** width without rounding or truncation | Fixed-width generated IDs are common enough to justify one small format, while a general formatting language would add grammar and policy far beyond the requirement. Keeping the form inside string interpolation preserves ordinary `[name]` and every non-string expression unchanged |
-| ◆51 | Preview row provenance and print pairing (§4.2, §6.1) | Grid view has an optional red one-based source-row overlay outside card SVGs; PDF export has an off-by-default native page label where matching fronts/backs share a project-wide logical sheet number | Row provenance makes generated cards traceable without contaminating artwork/export, while paired sheet numbers solve physical front/back sorting in both duplex and separate page orders |
+| ◆51 | Preview row provenance and print pairing (§4.2, §6.1) | Single-card and grid views share an optional red one-based source-row overlay outside card SVGs; PDF export has an off-by-default native page label where matching fronts/backs share a project-wide logical sheet number | Row provenance makes generated cards traceable without contaminating artwork/export, while paired sheet numbers solve physical front/back sorting in both duplex and separate page orders |
 | ◆52 | Resolved-text aliases (§3.3.2, §7.5) | `{alias:name}` in resolved `Text`/`TextBox` content expands a top-level Text-valued `let name:` **exactly one level**, before existing color/icon/asset markers parse; unknown, non-Text, and non-global targets remain raw with non-fatal D011 | Shared marker-rich fragments need reuse even when the alias marker comes from sheet data. One level avoids a second recursive language, alias cycles, and surprising local-scope capture; raw fallback plus a data-time notice preserves the gentle marker behavior of ◆44/◆47 without hiding a misspelling |
 
 ---
@@ -863,8 +863,10 @@ input, §7.4) rather than owning it.
   **Grid** is the **virtualized** grid (†) of `CardSVG` components (SVG `viewBox`
   in card units — free scaling), grouped by Card block, with the zoom slider —
   which renders only in grid view, single view sizing the card to the panel
-  instead. Both views share the front/back toggle, the stale banner, and the
-  error-placeholder card for D-errors. `CardSVG` is memoized on the
+  instead. Both views share the front/back toggle, the stale banner, the optional
+  preview-only red source-row badge, and the error-placeholder card for D-errors.
+  The badge is rendered outside `CardSVG`, so it never enters PDF output.
+  `CardSVG` is memoized on the
   RenderModel's per-card content hash (†) so an edit re-renders only affected cards
   — this, not raw compute, is what makes 500-card decks interactive. Text `y` is
   realized via per-font ascent constants (§3.4). Dicier loaded as a webfont — all ten

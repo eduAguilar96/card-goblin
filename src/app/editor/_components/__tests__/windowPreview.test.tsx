@@ -52,7 +52,10 @@ describe("PreviewContent — single view (default)", () => {
     expect(markup).toContain("63.5×88.9 mm");
     // Zoom belongs to the grid view.
     expect(markup).not.toContain('type="range"');
-    expect(markup).not.toContain('aria-label="Show sheet row numbers"');
+    expect(markup).toContain('aria-label="Show sheet row numbers"');
+    expect(markup).toContain(
+      'aria-label="Show sheet row numbers" aria-pressed="false"',
+    );
     expect(markup).not.toContain("data-card-row-overlay");
     // Mode toggle present, single pressed.
     expect(markup).toContain('aria-label="Single card view"');
@@ -89,6 +92,22 @@ describe("PreviewContent — single view (default)", () => {
     );
     expect(markup).toContain("showing last good result — fix errors to update");
     expect(countCards(markup)).toBe(1); // last good keeps rendering
+  });
+
+  it("optionally overlays the current card's one-based source sheet row", () => {
+    const markup = renderToStaticMarkup(
+      <PreviewContent
+        lastGood={demoLastGood()}
+        isStale={false}
+        initialShowRowNumbers
+      />,
+    );
+    expect(markup.match(/data-card-row-overlay/g)).toHaveLength(1);
+    expect(markup).toContain("Row 1");
+    expect(markup).toContain('title="Source sheet row 1"');
+    expect(markup).toContain(
+      'aria-label="Show sheet row numbers" aria-pressed="true"',
+    );
   });
 
   it("the toolbar wraps instead of clipping at narrow panel widths — Export PDF always renders (item 1)", () => {

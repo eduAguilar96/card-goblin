@@ -46,9 +46,12 @@ toolbar, and pick one of two views with the pair of icon buttons next to them:
   `Card:` blocks declare them, so the arrows carry you from the end of one deck
   into the start of the next. A line above the card says which deck you're in.
 - **Grid** — every card at once, grouped by the `Card:` block that made them, with
-  a **zoom** slider for card size. Long decks scroll. Turn on **Row numbers** to
-  place a high-contrast red badge over each card showing the one-based sheet row
-  that generated it. These badges are preview aids only and never enter PDF output.
+  a **zoom** slider for card size. Long decks scroll.
+
+Turn on **Row numbers** in either view to place a high-contrast red badge over the
+current card—or every visible grid card—showing the one-based sheet row that
+generated it. The setting stays on when you switch views. These badges are preview
+aids only and never enter PDF output.
 
 The zoom slider only appears in grid view; in single view the card is already
 sized to the panel, so making the panel bigger (drag the divider) is the zoom.

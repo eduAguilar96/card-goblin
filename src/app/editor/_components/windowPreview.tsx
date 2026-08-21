@@ -46,6 +46,7 @@ import {
   useEditorStore,
   type LastGoodModel,
 } from "@/app/editor/_store/editorStore";
+import CardRowOverlay from "@/app/editor/_components/cardRowOverlay";
 import { CardSVG } from "@/app/editor/_components/cardSvg";
 import DeckSection, { type CardSide } from "@/app/editor/_components/deckSection";
 import ExportPdfButton from "@/app/editor/_components/pdfExportModal";
@@ -88,7 +89,7 @@ export interface PreviewContentProps {
    * markup tests pass "grid" to exercise the virtualized tree. Real usage
    * takes the default. */
   initialMode?: PreviewMode;
-  /** Static-markup test seam for the grid-only row provenance overlay. */
+  /** Static-markup test seam for the row provenance overlay in either view. */
   initialShowRowNumbers?: boolean;
 }
 
@@ -156,7 +157,8 @@ export function PreviewContent({
   return (
     <div className="flex h-full w-full flex-col overflow-hidden bg-gray-900 text-sm text-gray-200">
       {/* Toolbar: front/back, view mode, then the mode's own control —
-          nav in single view, zoom in grid view (§4.2). `flex-wrap` (item 1,
+          nav in single view, zoom in grid view — followed by the shared row
+          provenance toggle (§4.2). `flex-wrap` (item 1,
           adversarial review): this row used to be a single non-wrapping
           line inside the panel's `overflow-hidden` — below ~460px of panel
           width (any monitor, just drag the divider) Back / the grid-view
@@ -211,36 +213,34 @@ export function PreviewContent({
             />
           )
         ) : (
-          <>
-            <label className="flex items-center gap-2 text-xs text-gray-400">
-              Zoom
-              <input
-                type="range"
-                min={ZOOM_MIN_PX}
-                max={ZOOM_MAX_PX}
-                step={ZOOM_STEP_PX}
-                value={cardW}
-                onChange={(e) => setCardW(Number(e.currentTarget.value))}
-                aria-label="Card width"
-                className="w-32 accent-gray-400"
-              />
-            </label>
-            <button
-              type="button"
-              aria-label="Show sheet row numbers"
-              aria-pressed={showRowNumbers}
-              title="Overlay each card's source sheet row (preview only)"
-              onClick={() => setShowRowNumbers((shown) => !shown)}
-              className={
-                showRowNumbers
-                  ? "rounded border border-red-500 bg-red-900 px-2 py-1 text-xs font-semibold text-white"
-                  : "rounded border border-gray-600 bg-gray-800 px-2 py-1 text-xs text-gray-300 hover:bg-gray-700"
-              }
-            >
-              Row numbers
-            </button>
-          </>
+          <label className="flex items-center gap-2 text-xs text-gray-400">
+            Zoom
+            <input
+              type="range"
+              min={ZOOM_MIN_PX}
+              max={ZOOM_MAX_PX}
+              step={ZOOM_STEP_PX}
+              value={cardW}
+              onChange={(e) => setCardW(Number(e.currentTarget.value))}
+              aria-label="Card width"
+              className="w-32 accent-gray-400"
+            />
+          </label>
         )}
+        <button
+          type="button"
+          aria-label="Show sheet row numbers"
+          aria-pressed={showRowNumbers}
+          title="Overlay cards' source sheet rows (preview only)"
+          onClick={() => setShowRowNumbers((shown) => !shown)}
+          className={
+            showRowNumbers
+              ? "rounded border border-red-500 bg-red-900 px-2 py-1 text-xs font-semibold text-white"
+              : "rounded border border-gray-600 bg-gray-800 px-2 py-1 text-xs text-gray-300 hover:bg-gray-700"
+          }
+        >
+          Row numbers
+        </button>
         {/* M2 §6.1: export lives in the preview toolbar — it prints what the
             preview shows (see pdfExportModal.tsx for the placement note). */}
         <div className="ml-auto">
@@ -278,6 +278,7 @@ export function PreviewContent({
               side={side}
               viewportW={viewportW}
               viewportH={viewportH}
+              showRowNumbers={showRowNumbers}
             />
           )
         ) : (
@@ -308,11 +309,18 @@ interface SingleCardProps {
   side: CardSide;
   viewportW: number;
   viewportH: number;
+  showRowNumbers: boolean;
 }
 
 /** The card, centered and fitted, under a caption naming where it comes from
  * (the flat `n / X` counter can't say which deck you're in — this can). */
-function SingleCard({ located, side, viewportW, viewportH }: SingleCardProps): ReactElement {
+function SingleCard({
+  located,
+  side,
+  viewportW,
+  viewportH,
+  showRowNumbers,
+}: SingleCardProps): ReactElement {
   const { deck, card, cardIndex } = located;
   const width = singleCardWidthPx(viewportW, viewportH, deck.widthMm, deck.heightMm);
   return (
@@ -326,7 +334,7 @@ function SingleCard({ located, side, viewportW, viewportH }: SingleCardProps): R
         {" · "}
         {deck.widthMm}×{deck.heightMm} mm
       </div>
-      <div style={{ width }}>
+      <div className="relative" style={{ width }}>
         <CardSVG
           // Keyed on the side for the same reason deckSection.tsx is: the
           // memo comparator sees one contentHash covering BOTH faces, so a
@@ -340,6 +348,7 @@ function SingleCard({ located, side, viewportW, viewportH }: SingleCardProps): R
           contentHash={card.contentHash}
           error={card.error}
         />
+        {showRowNumbers && <CardRowOverlay rowIndex={card.meta.rowIndex} />}
       </div>
     </div>
   );
