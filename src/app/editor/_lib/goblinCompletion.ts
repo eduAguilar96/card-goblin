@@ -998,6 +998,42 @@ function colorScopeSuggestion(): CompletionSuggestion {
   };
 }
 
+/** One deliberately narrow formatting helper rather than a general format
+ * vocabulary. The width tab stop defaults to 3; the compiler enforces 1..64
+ * and Number-only use. */
+function zeroPadInterpolationSuggestion(insertText: string): CompletionSuggestion {
+  return {
+    label: "zero-pad Number (:0N)",
+    insertText,
+    snippet: true,
+    kind: "hint",
+    detail: "[name:0N] — minimum total width 1..64; sign included; never truncates",
+    group: 0,
+  };
+}
+
+/** Suppress the format helper when the textual completion snapshot already
+ * proves the ref is nonnumeric. Inferred lets remain eligible: determining
+ * their type belongs to the compiler, and computed Number lets are a primary
+ * use case. First label wins, matching normal shadowing/deduplication. */
+function mayBeNumberInterpolation(name: string, scope: RefScope): boolean {
+  const ref = bracketSuggestions(scope).find((suggestion) => suggestion.label === name);
+  if (!ref) return true;
+  if (ref.kind === "column") return ref.detail?.startsWith("Number") ?? false;
+  if (ref.detail?.startsWith("loop — enum")) return false;
+  if (ref.detail?.startsWith("Template parameter — immutable")) {
+    return ref.detail.endsWith("Number");
+  }
+  if (ref.detail?.startsWith("built-in")) return name !== "deck";
+  return true;
+}
+
+function isRealInterpolationOpen(source: string, openIndex: number): boolean {
+  let count = 0;
+  for (let i = openIndex; i >= 0 && source[i] === "["; i--) count++;
+  return count % 2 === 1;
+}
+
 function geometrySuggestions(includeMiddle: boolean): CompletionSuggestion[] {
   const out: CompletionSuggestion[] = [
     { label: "full", insertText: "full", kind: "value", detail: "the axis's unit count", group: 0 },
@@ -1252,6 +1288,40 @@ export function computeCompletions(
   const globalLetContext =
     (indent === 0 && /^[ \t]*let[ \t]+[A-Za-z][A-Za-z0-9_]*[ \t]*:/.test(line)) ||
     (ancestors.topKind === null && ancestors.continuationKey === "let");
+
+  // -- Number interpolation format helper ----------------------------------
+  // After a complete `[name]`, replace only its closing bracket so accepting
+  // the snippet produces `[name:03]`. After `:`, replace the whole in-progress
+  // numeric token. Escaped `[[name]` is literal text and stays silent.
+  if (state.inString) {
+    const closedRef = /\[([A-Za-z][A-Za-z0-9_]*)\]$/.exec(before);
+    const formatScope = () =>
+      resolveRefScope(lines, ancestors, currentSnapshot, globalLetContext);
+    if (
+      closedRef &&
+      isRealInterpolationOpen(before, closedRef.index) &&
+      mayBeNumberInterpolation(closedRef[1], formatScope())
+    ) {
+      return {
+        suggestions: [zeroPadInterpolationSuggestion(":0${1:3}]")],
+        replaceStart: lineStart + col - 1,
+        replaceEnd: lineStart + col,
+      };
+    }
+    const openFormat = /\[([A-Za-z][A-Za-z0-9_]*):([0-9]*)$/.exec(before);
+    if (
+      openFormat &&
+      isRealInterpolationOpen(before, openFormat.index) &&
+      mayBeNumberInterpolation(openFormat[1], formatScope())
+    ) {
+      const followingDigits = /^[0-9]*/.exec(line.slice(col))?.[0].length ?? 0;
+      return {
+        suggestions: [zeroPadInterpolationSuggestion("0${1:3}")],
+        replaceStart: lineStart + col - openFormat[2].length,
+        replaceEnd: lineStart + col + followingDigits,
+      };
+    }
+  }
 
   // -- inside [brackets] — data refs, in or out of strings (◆30) ------------
   // `[[` is the literal-`[` escape (§3.5): pairs cancel, so only an ODD run

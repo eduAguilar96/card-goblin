@@ -114,6 +114,40 @@ describe("bindings, structural conditionals, and template composition", () => {
     ]);
   });
 
+  it("formats numeric Template parameters and Repeat indices", () => {
+    const result = compileProject(
+      source(
+        "Sheet: Sh",
+        "Template: Root",
+        "  param serial: Number",
+        "  Text:",
+        "    x: 0",
+        "    y: 0",
+        "    size: 1",
+        '    text: "P[serial:03]"',
+        "  Repeat: 2 as i",
+        "    Text:",
+        "      x: 0",
+        "      y: 0",
+        "      size: 1",
+        '      text: "R[i:02]"',
+        "Card: C",
+        "  sheet: Sh",
+        "  size: poker",
+        "  x_units: 20",
+        "  y_units: auto",
+        "  Front: Root",
+        "    serial: 7",
+      ),
+      { Sh: [{}] },
+    );
+
+    expect(result.diagnostics.filter((d) => d.severity === "error")).toEqual([]);
+    expect(
+      result.model.decks[0].cards[0].front.map((shape) => (shape as TextShape).text),
+    ).toEqual(["P007", "R00", "R01"]);
+  });
+
   it("uses fresh global caches for Front and Back so [card] divergence is face-specific", () => {
     const result = compileProject(
       source(

@@ -157,6 +157,27 @@ text: "Cost: [cost]"      # → "Cost: 5"
 Numbers and enum cases become text automatically here (trailing zeros are trimmed;
 an enum prints its case name). Use `[[` for a literal `[`.
 
+### Zero-padding Number references
+
+Inside a quoted string, write `[name:0N]` to pad a Number with zeroes to a minimum
+width. `N` is a decimal width from 1 through 64, written without a leading zero:
+`01`, `04`, and `064` are valid formats; `00`, `001`, and `065` are not.
+
+```goblin
+text: "[deck]-[deck_card:03]"  # BlackCards-007
+
+let shifted_id: [project_card] + 100
+text: "CG-[shifted_id:06]"     # CG-000107
+```
+
+The width includes a minus sign, and zeroes follow that sign: `-7` with `:04` becomes
+`-007`. Width is only a minimum. A longer value is never truncated, and a fractional
+value is never rounded (`1.25` with `:06` becomes `001.25`).
+
+This format is Number-only and string-only. A Text or enum reference with `:0N` is a
+type error, and `[name:04]` cannot be used as a standalone expression. Ordinary
+`[name]` interpolation works exactly as before.
+
 ## Rows
 
 Rows live in the grid, not in your code — editing a cell never rewrites your script.

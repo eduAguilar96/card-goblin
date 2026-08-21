@@ -2114,6 +2114,16 @@ class Checker {
         for (const part of expr.parts) {
           if (part.kind !== "ref") continue;
           const t = this.resolveRef(part.name, part.range, ctx, part);
+          if (part.padWidth !== undefined) {
+            if (t.kind !== "Number" && t.kind !== "Unknown") {
+              this.error(
+                "E003",
+                `Formatted interpolation [${part.name}:0${part.padWidth}] requires Number, got ${typeName(t)}`,
+                part.range,
+              );
+            }
+            continue;
+          }
           if (t.kind === "Bool" || t.kind === "Color") {
             this.error(
               "E003",

@@ -80,6 +80,11 @@ The one automatic conversion: in a text position (`text:`, `code:`, or inside st
 interpolation) numbers and enum cases become text. That's what makes `text: [cost]`
 work.
 
+Quoted strings have one Number-specific formatting form: `[name:0N]` zero-pads to a
+minimum total width `N` from 1 through 64. It includes a minus sign in that width and
+never rounds or truncates. See [Interpolation](sheets-and-data.md) for examples and
+the exact spelling rules. It does not change ordinary `[name]` coercion.
+
 ## Bare names
 
 A bare word resolves against whatever type is expected in that position:

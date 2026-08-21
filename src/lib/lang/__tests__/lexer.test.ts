@@ -46,6 +46,57 @@ describe("string literals and interpolation (§3.5 ◆)", () => {
     ]);
   });
 
+  it("lexes formatted Number interpolation with its bounded width", () => {
+    const t = firstString('x: "[card:03]/[project_card:010]"');
+    expect(t.parts).toEqual([
+      {
+        kind: "ref",
+        name: "card",
+        padWidth: 3,
+        range: { startLine: 0, startCol: 4, endLine: 0, endCol: 13 },
+      },
+      { kind: "text", value: "/", range: { startLine: 0, startCol: 13, endLine: 0, endCol: 14 } },
+      {
+        kind: "ref",
+        name: "project_card",
+        padWidth: 10,
+        range: { startLine: 0, startCol: 14, endLine: 0, endCol: 32 },
+      },
+    ]);
+  });
+
+  it("targets malformed, unsupported, and out-of-range interpolation formats", () => {
+    for (const source of [
+      'x: "[n:00]"',
+      'x: "[n:001]"',
+      'x: "[n:065]"',
+      'x: "[n:3]"',
+      'x: "[n:0]"',
+      'x: "[n:03x]"',
+      'x: "[n:]"',
+      'x: "[n:03"',
+    ]) {
+      const { diagnostics } = lex(source);
+      expect(diagnostics, source).toHaveLength(1);
+      expect(diagnostics[0].code).toBe("E001");
+      expect(diagnostics[0].message).toMatch(/format|width/i);
+    }
+    expect(firstString('x: "a[n:bad]b"').parts).toEqual([
+      { kind: "text", value: "a[n:bad]b", range: expect.anything() },
+    ]);
+  });
+
+  it("rejects formatted references outside quoted strings with a targeted error", () => {
+    const result = lex("x: [n:03]");
+    expect(result.diagnostics).toHaveLength(1);
+    expect(result.diagnostics[0].message).toContain("only allowed inside a quoted string");
+    expect(result.tokens.filter((token) => token.kind === "op" && token.op === ":")).toHaveLength(1);
+    expect(result.tokens.find((token) => token.kind === "ref")).toMatchObject({
+      kind: "ref",
+      name: "n",
+    });
+  });
+
   it("[[ escapes a literal [ and merges into surrounding text", () => {
     const t = firstString('x: "a[[b]c"');
     expect(t.parts.map((p) => (p.kind === "text" ? p.value : `<${p.name}>`))).toEqual(["a[b]c"]);

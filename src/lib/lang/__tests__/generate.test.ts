@@ -2398,6 +2398,39 @@ describe("built-in [row]/[card] bindings", () => {
 // -- generated-instance identity built-ins --------------------------------
 
 describe("[copy]/[deck]/[deck_card]/[project_card] identity", () => {
+  it("formats the deck-relative card number in a conditional global ID", () => {
+    const code = src(
+      'let card_code: if [deck] == "BlackCards" then "black|[card:03]" else "white|[card:03]"',
+      "Sheet: Sh",
+      ...textTemplate("[card_code]"),
+      "Card: BlackCards",
+      "  sheet: Sh",
+      "  size: poker",
+      "  x_units: 20",
+      "  y_units: auto",
+      "  count: 2",
+      "  Front: T",
+      "Card: WhiteCards",
+      "  sheet: Sh",
+      "  size: poker",
+      "  x_units: 20",
+      "  y_units: auto",
+      "  count: 3",
+      "  Front: T",
+    );
+    const p = projectOf(code, { Sh: [{}] });
+
+    expect(p.diagnostics.filter((diagnostic) => diagnostic.severity === "error")).toEqual([]);
+    expect(
+      p.model.decks.map((deck) =>
+        deck.cards.map((card) => (card.front[0] as TextShape).text),
+      ),
+    ).toEqual([
+      ["black|001", "black|002"],
+      ["white|001", "white|002", "white|003"],
+    ]);
+  });
+
   it("uses prospective count-time identities and count: 0 consumes no position", () => {
     const code = src(
       "Sheet: Sh",

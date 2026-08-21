@@ -276,6 +276,8 @@ export interface StringTextPart {
 export interface StringRefPart {
   kind: "ref";
   name: string;
+  /** `[name:0N]`: sign-aware zero-padding to minimum total width N. */
+  padWidth?: number;
   range: Range;
 }
 

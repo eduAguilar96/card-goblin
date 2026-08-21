@@ -223,6 +223,13 @@ describe("a parse never throws (⚑8)", () => {
     expect(diagnostics[0].message).toContain("requires a condition");
     expect(diagnostics[0].message).toContain("Front: or Back:");
   });
+
+  it("recovers an out-of-string formatted ref as one ordinary ref token", () => {
+    const { diagnostics } = parse("Card: C\n  count: [n:03]\n");
+    expect(diagnostics).toHaveLength(1);
+    expect(diagnostics[0]).toMatchObject({ code: "E001", severity: "error" });
+    expect(diagnostics[0].message).toContain("only allowed inside a quoted string");
+  });
 });
 
 describe("diagnostics ordering", () => {

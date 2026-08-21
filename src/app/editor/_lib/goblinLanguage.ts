@@ -5,7 +5,8 @@
  * - `#` starts a comment UNLESS followed by exactly 6 hex digits and no
  *   further identifier character — then it is a `#RRGGBB` color literal
  *   (matches the lexer's disambiguation exactly, §3.1).
- * - Strings are single-line with `[ref]` interpolation highlighted inside
+ * - Strings are single-line with `[ref]` and Number-only `[ref:0N]`
+ *   interpolation highlighted inside
  *   (`[[` is the literal-`[` escape, §3.5; `\n` and `\\` are the M3 §3.1
  *   escapes — anything else after `\` paints invalid, matching E001).
  * - Block openers (`Enum: … Repeat: Front: Back:`), contextual node openers
@@ -54,6 +55,10 @@ export const GOBLIN_CONTEXTUAL_PARAM_RE =
 export const GOBLIN_CONTEXTUAL_BRANCH_RE = /^(\s*)(If|Else)(?=\s*:)/;
 export const GOBLIN_CONTEXTUAL_VIRTUAL_RE =
   /^(\s*)(virtual)(?=\s+column\s+[A-Za-z][A-Za-z0-9_]*\s*:)/;
+/** Canonical numeric interpolation format: `0` + width 1..64, with no
+ * leading zero in the width itself. The checker owns the Number-only rule. */
+export const GOBLIN_ZERO_PAD_INTERPOLATION_RE =
+  /^\[[A-Za-z][A-Za-z0-9_]*:0(?:[1-9]|[1-5][0-9]|6[0-4])\]$/;
 /** The open-tag highlighter uses the compiler's ACTUAL named-color
  * vocabulary, case-insensitively, rather than painting any identifier as a
  * valid color. Scope pairing is deliberately not claimed here: Monarch
@@ -123,6 +128,10 @@ const monarchLanguage: languages.IMonarchLanguage = {
       [/\\[n\\]/, "string.escape"],
       [/\\./, "string.invalid"],
       [/\\/, "string.invalid"],
+      [
+        /(\[[A-Za-z][A-Za-z0-9_]*)(:0(?:[1-9]|[1-5][0-9]|6[0-4]))(\])/,
+        ["variable", "number", "variable"],
+      ],
       [/\[[A-Za-z][A-Za-z0-9_]*\]/, "variable"],
       [GOBLIN_COLOR_SCOPE_OPEN_RE, "tag"],
       [GOBLIN_COLOR_SCOPE_CLOSE_RE, "tag"],
@@ -217,7 +226,7 @@ export function registerGoblinCompletions(
   if (completionsRegistered.has(monaco)) return;
   completionsRegistered.add(monaco);
   monaco.languages.registerCompletionItemProvider(GOBLIN_LANGUAGE_ID, {
-    triggerCharacters: ["[", ".", '"', ":", "{"],
+    triggerCharacters: ["[", "]", ".", '"', ":", "{"],
     provideCompletionItems(model, position) {
       const { bindings, schema } = getSource();
       const snapshot = buildCompletionSnapshot(bindings, schema);

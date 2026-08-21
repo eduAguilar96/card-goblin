@@ -336,6 +336,18 @@ function lexRef(
     return j + 1;
   }
   const close = line.indexOf("]", start + 1);
+  if (name !== "" && line[j] === ":" && close !== -1) {
+    diagnostics.push(
+      syntaxError(
+        `Formatted interpolation is only allowed inside a quoted string; use [${name}] for an ordinary expression reference`,
+        range(start, close + 1),
+      ),
+    );
+    // Recover as the ordinary [name] expression so the parser still receives
+    // one value token and does not cascade with a second "missing value" E001.
+    out.push({ kind: "ref", name, range: range(start, close + 1) });
+    return close + 1;
+  }
   if (close === -1) {
     diagnostics.push(
       syntaxError(
@@ -355,7 +367,8 @@ function lexRef(
 }
 
 /**
- * Lex a double-quoted, single-line string with `[ref]` interpolation (§3.5)
+ * Lex a double-quoted, single-line string with `[ref]` and Number-only
+ * `[ref:0N]` formatted interpolation (§3.5)
  * and the M3 escapes (§3.1): `\n` is a newline character and `\\` a literal
  * backslash — the lexer's ONLY backslash escapes (besides `[[` for a literal
  * `[`). Any other `\`-sequence is E001 with a hint listing the valid ones;
@@ -442,6 +455,62 @@ function lexString(
         });
         j = k + 1;
         textStart = j;
+        continue;
+      }
+      if (k > j + 1 && line[k] === ":") {
+        const name = line.slice(j + 1, k);
+        const formatStart = k + 1;
+        let close = line.indexOf("]", formatStart);
+        const quote = line.indexOf('"', formatStart);
+        if (close !== -1 && quote !== -1 && quote < close) close = -1;
+        if (close === -1) {
+          diagnostics.push(
+            syntaxError(
+              `Unclosed formatted interpolation '[${name}:…': expected ']' after a :0N format`,
+              range(j, Math.min(quote === -1 ? line.length : quote, line.length)),
+            ),
+          );
+          text += "[";
+          j++;
+          continue;
+        }
+
+        const format = line.slice(formatStart, close);
+        // Canonical `0` + non-zero decimal width: 01…064. The width itself
+        // has no leading zero (`001` is rejected rather than normalized).
+        const match = /^0([1-9][0-9]*)$/.exec(format);
+        if (match) {
+          const width = Number(match[1]);
+          if (width >= 1 && width <= 64) {
+            flushText(j);
+            parts.push({
+              kind: "ref",
+              name,
+              padWidth: width,
+              range: range(j, close + 1),
+            });
+            j = close + 1;
+            textStart = j;
+            continue;
+          }
+          diagnostics.push(
+            syntaxError(
+              `Formatted interpolation width must be from 1 to 64, got ${match[1]}`,
+              range(formatStart, close),
+            ),
+          );
+        } else {
+          diagnostics.push(
+            syntaxError(
+              `Unsupported interpolation format ':${format}' — expected ':0N' with a decimal width from 1 to 64 (for example [${name}:03])`,
+              range(k, close),
+            ),
+          );
+        }
+        // One malformed formatted interpolation is recovered as literal text
+        // as a unit, avoiding cascaded errors from characters inside it.
+        text += line.slice(j, close + 1);
+        j = close + 1;
         continue;
       }
       diagnostics.push(

@@ -91,6 +91,7 @@ the section that elaborates it:
 | ◆47 | Additive color styling (§3.3.2–§3.3.5) | Optional Image `color:` is an RGB **multiply** tint (white/default = identity); resolved text gains nested `{color:red}…{/color}` scopes for text, Dicier markers, and inline asset markers | Multiplication recolors white artwork while preserving black detail and source alpha, and makes white an exact compatibility default. Scoped tags extend ◆44's post-interpolation marker pass without changing wrap widths: color is paint-only run data, not content geometry. Malformed or unbalanced scopes remain raw text with no diagnostic, preserving the marker grammar's gentle failure posture |
 | ◆48 | Printable data export and virtual columns (§3.2, §7.7) | `virtual column name: Type = expression` adds a typed, read-only, export-only value to a Sheet; **Export Data** emits one RFC 4180 CSV row per generated card instance, with provenance, loop values, physical cells, and virtual values | Generated instances—not source rows—are the print manifest: loops and `count:` can multiply one row, while `[card]` can make each copy distinct. Keeping virtuals out of the grid preserves code-owned formulas and avoids a second stored value that can drift from its expression |
 | ◆49 | Parameterized composition and generated identity (§3.2–§3.7) | Direct, typed `param name: Type` declarations on Templates; explicit indented arguments on `Front:`/`Back:` and Template calls; new `[copy]`, `[deck]`, `[deck_card]`, and `[project_card]` built-ins while `[card]` remains deck-relative | Parameters let one layout accept semantic variants without ambient caller capture: arguments evaluate in caller scope and forwarding stays explicit. Separate row/copy/deck/project identities describe the actual generation hierarchy without changing `[card]` under existing scripts; semantic IDs remain stable while project ordinals are deliberately positional |
+| ◆50 | Numeric interpolation padding (§3.5) | Quoted strings accept Number-only `[name:0N]`, where canonical decimal width `N` is 1..64; zero padding is sign-aware and sets a total **minimum** width without rounding or truncation | Fixed-width generated IDs are common enough to justify one small format, while a general formatting language would add grammar and policy far beyond the requirement. Keeping the form inside string interpolation preserves ordinary `[name]` and every non-string expression unchanged |
 
 ---
 
@@ -517,7 +518,15 @@ useful total order on Text or enum cases a game designer should rely on.
   resolves only if globally unique across enums; otherwise E004 tells you to qualify.
 - **String interpolation:** `[ref]` inside a string literal substitutes the value
   (`"Cost: [cost]"`), with the Text coercions above. `[[` escapes a literal `[`
-  (◆†); a `[` not opening a valid `[identifier]` is E001 with a hint about `[[`.
+  (◆†); a `[` not opening a valid plain or formatted interpolation is E001 with a
+  hint about `[[`.
+  A Number reference may instead use `[ref:0N]` (◆50), where `N` is a canonical
+  decimal width from 1 through 64 (`01` … `064`, no leading zero in `N`). The result
+  is left-padded with zeroes to that minimum **total** width; a minus sign counts
+  toward the width and padding follows it (`-7` at width 4 → `-007`). Values already
+  at least that wide are unchanged, including their fractional text: the format never
+  truncates or rounds. It is legal only inside a quoted string and only for Number;
+  Enum/Text/Bool/Color references are E003. Plain `[ref]` behavior is unchanged.
 
 ### 3.6 Binding and scoping (⚑5)
 
@@ -1028,7 +1037,10 @@ warning has been enough in practice — §9.)
   ◆14 makes them legal (expected type first, otherwise globally-unique only);
   expression keywords at low priority. Direct Template indentation additionally offers
   `param` and its built-in/enum types; call-argument blocks offer the callee's declared
-  names and use their types for value suggestions. Template-node indentation offers `let`,
+  names and use their types for value suggestions. After a completed string
+  interpolation or its format colon, one focused snippet offers `[name:0N]` zero
+  padding (default width 3); this is not a general format vocabulary.
+  Template-node indentation offers `let`,
   `If:`, a pairing `Else:`, built-in nodes, and lowercase-or-uppercase Template calls;
   call suggestions omit the compatibility-only names `If` and `Else`. Comments
   complete nothing.

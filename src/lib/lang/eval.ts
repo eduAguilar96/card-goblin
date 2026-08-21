@@ -275,7 +275,12 @@ function evalExprInner(expr: Expr, ctx: EvalContext, axisUnits: number | null): 
       let out = "";
       for (const part of expr.parts) {
         if (part.kind === "text") out += part.value;
-        else out += valueToText(resolveName(part.name, part, ctx));
+        else {
+          const value = resolveName(part.name, part, ctx);
+          out += part.padWidth === undefined
+            ? valueToText(value)
+            : zeroPadNumber(value, part.padWidth);
+        }
       }
       return text(out);
     }
@@ -406,6 +411,18 @@ export function valueToText(v: Value): string {
     default:
       return poisoned();
   }
+}
+
+/** `[name:0N]`: preserve String(number) exactly and only add zeroes. Width
+ * counts the sign, while padding belongs after it (`-7` at width 3 → `-07`). */
+function zeroPadNumber(value: Value, width: number): string {
+  if (value.kind !== "number") return poisoned();
+  const rendered = String(value.value);
+  if (rendered.length >= width) return rendered;
+  if (rendered.startsWith("-")) {
+    return `-${rendered.slice(1).padStart(width - 1, "0")}`;
+  }
+  return rendered.padStart(width, "0");
 }
 
 // ---------------------------------------------------------------------------

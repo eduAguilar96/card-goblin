@@ -101,6 +101,102 @@ describe("string interpolation (§3.5)", () => {
   it("[[ escapes a literal bracket", () => {
     expect(text('"a [[b]"')).toBe("a [b]");
   });
+
+  it("zero-pads Numbers to a sign-aware total minimum width", () => {
+    expect(text('"[n:03]"', { rows: [{ n: "7", t: "x" }] })).toBe("007");
+    expect(text('"[n:03]"', { rows: [{ n: "-7", t: "x" }] })).toBe("-07");
+    expect(text('"[n:03]"', { rows: [{ n: "-0", t: "x" }] })).toBe("000");
+    expect(text('"[n:03]"', { rows: [{ n: "1234", t: "x" }] })).toBe("1234");
+    expect(text('"[n:01]"', { rows: [{ n: "7", t: "x" }] })).toBe("7");
+  });
+
+  it("preserves decimal/scientific Number text and pads only after a sign", () => {
+    expect(text('"[n:06]"', { rows: [{ n: "5.50", t: "x" }] })).toBe("0005.5");
+    expect(text('"[n:06]"', { rows: [{ n: "-5.5", t: "x" }] })).toBe("-005.5");
+    expect(text('"[n:08]"', { rows: [{ n: "1e21", t: "x" }] })).toBe("0001e+21");
+    expect(text('"[n:064]"', { rows: [{ n: "2", t: "x" }] })).toHaveLength(64);
+  });
+
+  it("requires formatted interpolation references to be Number-typed", () => {
+    const result = compileProject(
+      src(
+        "Sheet: Sh",
+        "  column label: Text",
+        "Template: T",
+        "  Text:",
+        "    x: 0",
+        "    y: 0",
+        "    size: 1",
+        '    text: "[label:03]"',
+        "Card: C",
+        "  sheet: Sh",
+        "  size: poker",
+        "  x_units: 20",
+        "  y_units: auto",
+        "  Front: T",
+      ),
+      { Sh: [{ label: "seven" }] },
+    );
+    expect(result.diagnostics).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        code: "E003",
+        message: expect.stringContaining("requires Number, got Text"),
+      }),
+    ]));
+  });
+
+  it.each([
+    { type: "Edition", display: "enum Edition", extra: ["Enum: Edition", "  case First"] },
+    { type: "Bool", display: "Bool", extra: [] },
+    { type: "Color", display: "Color", extra: [] },
+  ])("rejects a formatted $type reference with one E003", ({ type, display, extra }) => {
+    const result = compileProject(
+      src(
+        ...extra,
+        "Template: T",
+        `  param value: ${type}`,
+        "  Text:",
+        "    x: 0",
+        "    y: 0",
+        "    size: 1",
+        '    text: "[value:03]"',
+      ),
+      {},
+    );
+    const errors = result.diagnostics.filter((d) => d.severity === "error");
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toMatchObject({
+      code: "E003",
+      message: expect.stringContaining(`requires Number, got ${display}`),
+    });
+  });
+
+  it("reports an unknown formatted reference once without a format-type cascade", () => {
+    const result = compileProject(
+      src(
+        "Sheet: Sh",
+        "Template: T",
+        "  Text:",
+        "    x: 0",
+        "    y: 0",
+        "    size: 1",
+        '    text: "[missing:03]"',
+        "Card: C",
+        "  sheet: Sh",
+        "  size: poker",
+        "  x_units: 20",
+        "  y_units: auto",
+        "  Front: T",
+      ),
+      { Sh: [{}] },
+    );
+    const errors = result.diagnostics.filter((d) => d.severity === "error");
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toMatchObject({
+      code: "E002",
+      message: expect.stringContaining("missing"),
+    });
+  });
 });
 
 describe("arithmetic (§3.5 — JS float semantics)", () => {

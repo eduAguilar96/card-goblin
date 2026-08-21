@@ -7,6 +7,7 @@ import {
   GOBLIN_CONTEXTUAL_LET_RE,
   GOBLIN_CONTEXTUAL_PARAM_RE,
   GOBLIN_CONTEXTUAL_VIRTUAL_RE,
+  GOBLIN_ZERO_PAD_INTERPOLATION_RE,
 } from "../goblinLanguage";
 
 describe("Goblin contextual highlighting", () => {
@@ -36,6 +37,15 @@ describe("Goblin contextual highlighting", () => {
     expect(GOBLIN_CONTEXTUAL_VIRTUAL_RE.test("  virtual column code: Text = [name]")).toBe(true);
     expect(GOBLIN_CONTEXTUAL_VIRTUAL_RE.test("  column virtual: Text")).toBe(false);
     expect(GOBLIN_CONTEXTUAL_VIRTUAL_RE.test("let virtual: 1")).toBe(false);
+  });
+
+  it("recognizes only canonical zero-pad interpolation widths 1..64", () => {
+    for (const source of ["[card:01]", "[card:04]", "[project_card:064]"]) {
+      expect(GOBLIN_ZERO_PAD_INTERPOLATION_RE.test(source), source).toBe(true);
+    }
+    for (const source of ["[card]", "[card:00]", "[card:001]", "[card:065]", "[card:0x]"]) {
+      expect(GOBLIN_ZERO_PAD_INTERPOLATION_RE.test(source), source).toBe(false);
+    }
   });
 
   it("recognizes only actual named/hex colors, case-insensitively", () => {

@@ -90,7 +90,9 @@ Square brackets always mean *look this value up*:
 text: [name]
 x: 1.5 + [i] * 2
 text: "Cost: [cost]"     # interpolated inside a string
+text: "Card [card:03]"   # Number zero-padded to a minimum width of 3
 ```
 
-Where those values come from is [Sheets and data](sheets-and-data.md). To write a
-literal `[` inside a string, double it: `[[`.
+Where those values come from is [Sheets and data](sheets-and-data.md), including the
+Number-only `[name:0N]` interpolation format. To write a literal `[` inside a string,
+double it: `[[`.

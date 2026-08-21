@@ -295,6 +295,85 @@ describe("bracket refs", () => {
     expect(labels(r)).toContain("cost");
   });
 
+  it("offers one narrow zero-pad snippet after a completed string interpolation", () => {
+    const doc = src("Template: T", "  Text:", "    text: \"ID [card]¦\"");
+    const r = at(doc);
+    expect(labels(r)).toEqual(["zero-pad Number (:0N)"]);
+    expect(r.suggestions[0].insertText).toBe(":0${1:3}]");
+    expect(r.suggestions[0].snippet).toBe(true);
+    expect(r.suggestions[0].detail).toContain("sign included");
+    const clean = doc.replace("¦", "");
+    expect(r.replaceStart).toBe(clean.indexOf("]\""));
+    expect(r.replaceEnd).toBe(r.replaceStart + 1);
+  });
+
+  it("offers/replaces the zero-pad token after its colon without disturbing the ref", () => {
+    const direct = at(src("Template: T", "  Text:", "    text: \"ID [card:¦]\""));
+    expect(labels(direct)).toEqual(["zero-pad Number (:0N)"]);
+    expect(direct.suggestions[0].insertText).toBe("0${1:3}");
+    expect(direct.replaceStart).toBe(direct.replaceEnd);
+
+    const doc = src("Template: T", "  Text:", "    text: \"ID [card:0¦3]\"");
+    const mid = at(doc);
+    const clean = doc.replace("¦", "");
+    expect(clean.slice(mid.replaceStart, mid.replaceEnd)).toBe("03");
+  });
+
+  it("does not offer numeric formatting for escaped text or unquoted refs", () => {
+    for (const result of [
+      at(src("Template: T", "  Text:", "    text: \"[[card]¦\"")),
+      at(src("Template: T", "  Text:", "    text: [card]¦")),
+    ]) {
+      expect(labels(result)).not.toContain("zero-pad Number (:0N)");
+    }
+  });
+
+  it("suppresses the helper for known non-Numbers but keeps inferred computed lets eligible", () => {
+    for (const name of ["name", "suit", "deck"]) {
+      const r = at(src(
+        "Template: MonsterFront",
+        "  Text:",
+        `    text: \"[${name}]¦\"`,
+        "Card: M",
+        "  sheet: Monsters",
+        "  Front: MonsterFront",
+      ));
+      expect(labels(r), name).not.toContain("zero-pad Number (:0N)");
+    }
+
+    const computed = at(src(
+      "let serial: [project_card] + 100",
+      "Template: T",
+      "  Text:",
+      "    text: \"[serial]¦\"",
+    ));
+    expect(labels(computed)).toEqual(["zero-pad Number (:0N)"]);
+  });
+
+  it("offers formatting for a Number parameter but respects a Text column shadowing a built-in", () => {
+    const parameter = at(src(
+      "Template: Face",
+      "  param serial: Number",
+      "  Text:",
+      '    text: "[serial]¦"',
+    ));
+    expect(labels(parameter)).toEqual(["zero-pad Number (:0N)"]);
+
+    const shadowed = buildCompletionSnapshot(
+      compileSource(src("Sheet: Sh", "  column card: Text")).bindings,
+      null,
+    );
+    const column = at(src(
+      "Template: Face",
+      "  Text:",
+      '    text: "[card]¦"',
+      "Card: C",
+      "  sheet: Sh",
+      "  Front: Face",
+    ), shadowed);
+    expect(labels(column)).not.toContain("zero-pad Number (:0N)");
+  });
+
   it("enclosing Repeat variables rank first", () => {
     const r = at(
       src(
