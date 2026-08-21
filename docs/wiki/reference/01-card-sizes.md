@@ -6,7 +6,7 @@ summary: The built-in physical card presets — and custom millimetre sizes — 
 
 # Card sizes
 
-`size:` on a [Card block](cards-and-generation.md) picks the physical card. Sizes are
+`size:` on a [Card block](../goblin-script/08-cards-and-generation.md) picks the physical card. Sizes are
 exact millimetres, which is what makes PDF export print true to size.
 
 | `size:` | Physical | Inches | Good for |
@@ -68,6 +68,6 @@ fine — `poker` itself is 63.5 wide), precise to two decimal places with a
 combining either with `size:`, is an error.
 
 Everything else works exactly as with a preset — `x_units:` divides the custom
-width, `y_units: auto` keeps units square, and [PDF export](pdf-export.md)
+width, `y_units: auto` keeps units square, and [PDF export](../export-and-project/01-pdf-export.md)
 prints true to size. A card too large for the selected paper is reported when
 you export.

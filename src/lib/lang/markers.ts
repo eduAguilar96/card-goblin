@@ -35,11 +35,18 @@ import type { InlineIcon } from "./model";
  * SAME color is merged; a color boundary deliberately remains a run boundary. */
 export type MarkerSegment =
   | { kind: "text"; text: string; color?: string }
-  | { kind: "icon"; icon: InlineIcon; color?: string };
+  | {
+      kind: "icon";
+      icon: InlineIcon;
+      color?: string;
+      /** Evaluator-only provenance: the marker spelling came from a runtime
+       * alias replacement rather than the literal host text. */
+      computed?: boolean;
+    };
 
 type ParsedPiece =
   | { kind: "text"; text: string }
-  | { kind: "icon"; icon: InlineIcon }
+  | { kind: "icon"; icon: InlineIcon; computed?: boolean }
   | { kind: "color-open"; color: string; raw: string }
   | { kind: "color-close"; raw: string };
 
@@ -58,7 +65,10 @@ const ASSET_MARKER_RE = /^asset:([A-Za-z][A-Za-z0-9_]*)$/;
  * parsed icon, everything else verbatim, `{{` as one `{`). Empty input →
  * empty array.
  */
-export function parseInlineMarkers(text: string): MarkerSegment[] {
+export function parseInlineMarkers(
+  text: string,
+  computedAt?: (start: number, end: number) => boolean,
+): MarkerSegment[] {
   const pieces: ParsedPiece[] = [];
   let plain = "";
   const flushPlain = (): void => {
@@ -97,7 +107,13 @@ export function parseInlineMarkers(text: string): MarkerSegment[] {
     }
     flushPlain();
     const raw = text.slice(i, close + 1);
-    if (icon !== null) pieces.push({ kind: "icon", icon });
+    if (icon !== null) {
+      pieces.push({
+        kind: "icon",
+        icon,
+        ...(computedAt?.(i, close + 1) ? { computed: true } : {}),
+      });
+    }
     else if (color !== null) pieces.push({ kind: "color-open", color, raw });
     else pieces.push({ kind: "color-close", raw });
     i = close + 1;
@@ -143,7 +159,12 @@ export function parseInlineMarkers(text: string): MarkerSegment[] {
       pushText(piece.text);
     } else {
       const colorNow = activeColor();
-      segments.push({ kind: "icon", icon: piece.icon, ...(colorNow ? { color: colorNow } : {}) });
+      segments.push({
+        kind: "icon",
+        icon: piece.icon,
+        ...(colorNow ? { color: colorNow } : {}),
+        ...(piece.computed ? { computed: true } : {}),
+      });
     }
   }
   return normalizeScalarBoundaries(segments);

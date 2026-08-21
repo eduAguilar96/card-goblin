@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import HomePage from "@/app/_components/homePage";
-import { SITE_DESCRIPTION, SITE_NAME, SITE_URL } from "@/lib/site";
+import { SITE_DESCRIPTION, SITE_NAME, SITE_TAGLINE, SITE_URL } from "@/lib/site";
 
 /**
  * The landing page owns its full title (no "— Card Goblin" suffix) and carries
@@ -13,6 +13,17 @@ export const metadata: Metadata = {
   },
   description: SITE_DESCRIPTION,
   alternates: { canonical: SITE_URL },
+  openGraph: {
+    type: "website",
+    url: SITE_URL,
+    title: `${SITE_NAME} — free print-and-play card generator for board game designers`,
+    description: SITE_DESCRIPTION,
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: SITE_NAME,
+    description: SITE_TAGLINE,
+  },
 };
 
 const STRUCTURED_DATA = JSON.stringify({

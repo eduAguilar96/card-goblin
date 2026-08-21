@@ -76,7 +76,7 @@ function Hero(): ReactElement {
             Get the whole deck.
           </h1>
           <p className="mx-auto mt-6 max-w-2xl text-lg text-gray-400">
-            CardGoblin turns a small script plus a spreadsheet into print-ready cards.
+            CardGoblin turns a small script plus a spreadsheet into print-at-home cards.
             Describe a card once, let your data fill in the rest, and export a PDF that
             prints true to size.
           </p>
@@ -95,7 +95,8 @@ function Hero(): ReactElement {
             </Link>
           </div>
           <p className="mt-4 text-sm text-gray-500">
-            No account, no install. Your project never leaves the browser.
+            No account required, no install. Your project stays in this browser&apos;s
+            local storage unless you export it.
           </p>
         </div>
 
@@ -125,8 +126,9 @@ function ScriptToDeck(): ReactElement {
           eyebrow="The idea"
           title="Your layout is code. Your content is a spreadsheet."
         >
-          Write what a card looks like once. Every row of your sheet becomes a card,
-          and a number in a cell can become the number of icons drawn on it.
+          Write what a card looks like once. Every row of your sheet can generate one
+          or more cards, and a number in a cell can become the number of icons drawn
+          on them.
         </SectionHeading>
 
         <div className="mt-12 grid items-start gap-8 lg:grid-cols-[1.15fr_1fr]">
@@ -236,7 +238,7 @@ const FEATURES = [
   },
   {
     title: "Mistakes stay local",
-    body: "A bad cell turns one card into a labelled placeholder — never a blank deck. Typos squiggle in the editor before they ever reach a card.",
+    body: "A bad cell turns only the cards generated from that row into labelled placeholders — never a blank deck. Typos squiggle before they reach a card.",
     href: "/docs/errors",
   },
   {

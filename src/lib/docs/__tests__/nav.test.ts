@@ -128,11 +128,11 @@ describe("adjacentPages", () => {
 
 describe("resolveDocHref", () => {
   it("maps a same-section relative link to its /docs slug", () => {
-    expect(resolveDocHref("errors.md", "goblin-script", REPO)).toBe("/docs/errors");
+    expect(resolveDocHref("09-errors.md", "goblin-script", REPO)).toBe("/docs/errors");
   });
 
   it("maps a cross-section relative link to its /docs slug", () => {
-    expect(resolveDocHref("../reference/colors.md", "goblin-script", REPO)).toBe(
+    expect(resolveDocHref("../reference/02-colors.md", "goblin-script", REPO)).toBe(
       "/docs/colors",
     );
   });

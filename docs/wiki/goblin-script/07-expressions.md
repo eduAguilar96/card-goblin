@@ -50,11 +50,14 @@ shapes or data errors. Put a nested `If:` inside `Else:` for else-if.
 ```goblin
 let accent: #cc0000
 
-Template: Front
+Template: CardFront
   let title_size: 3.5
   Text:
+    x: 0
+    y: 0
     color: [accent]
     size: [title_size]
+    text: "Title"
 ```
 
 A `let` is immutable and type-inferred. Global lets can use the current Card's data;
@@ -62,6 +65,14 @@ local lets can use their lexical parents. Same-block lets may refer forward. Val
 are lazy, so an unused let and a let in an unselected branch do not read cells or
 produce data errors. Use a self-typing color (`#RRGGBB`) or qualified enum case
 (`Suit.Rock`) when no surrounding property supplies an expected type.
+
+A top-level let that resolves to Text can also be inserted into `Text` or `TextBox`
+resolved text with `{alias:name}`. This is a one-level reuse mechanism for fragments
+that contain [inline icons, assets, or scoped colors](04-text.md#reusing-resolved-text-with-aliases),
+not another expression lookup: local lets, parameters, non-Text lets, and unknown
+names are left as the raw marker with a non-fatal D011 data diagnostic. Because an
+alias name can arrive from a spreadsheet cell, top-level Text lets and the globals
+they depend on are externally addressable and do not receive W002 "never used".
 
 ## Types
 
@@ -82,14 +93,14 @@ work.
 
 Quoted strings have one Number-specific formatting form: `[name:0N]` zero-pads to a
 minimum total width `N` from 1 through 64. It includes a minus sign in that width and
-never rounds or truncates. See [Interpolation](sheets-and-data.md) for examples and
+never rounds or truncates. See [Interpolation](02-sheets-and-data.md) for examples and
 the exact spelling rules. It does not change ordinary `[name]` coercion.
 
 ## Bare names
 
 A bare word resolves against whatever type is expected in that position:
 
-- in a `color:` property → a [CSS color name](colors.md),
+- in a `color:` property → a [CSS color name](../reference/02-colors.md),
 - compared against an enum-typed reference → that enum's cases,
 - in a geometry position → `full`, `half`, `middle`, `auto`.
 

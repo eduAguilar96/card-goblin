@@ -171,10 +171,10 @@ export interface EvalContext {
   repeatStack: { name: string; value: number }[];
   /** Remaining Repeat iterations for this instance (◆27). */
   budget: { remaining: number };
-  /** D005 icon-code diagnostics collected during face evaluation — the
-   * icons still render (§3.8 †); generate.ts fills in cardRef. Keyed by
-   * code, so one combination reports each unknown code ONCE no matter how
-   * many Repeat iterations draw it (mirrors the D001–D003 sharing rule). */
+  /** Non-fatal rendering diagnostics collected during face evaluation —
+   * currently D005 icon codes and D011 text aliases. generate.ts fills in
+   * cardRef. Keyed by site and value so one combination reports each issue
+   * once even when Repeat or count draws it multiple times. */
   iconIssues: Map<string, DataDiagnostic>;
   /** Fresh for each root expression/face evaluation, while every existing
    * per-instance field above retains its lifetime (especially Repeat budget
@@ -794,13 +794,14 @@ function evalElement(el: ElementNode, ctx: EvalContext): Shape {
       // the resolved text (escapes or cell data) render as SPACES; hard
       // breaks belong to TextBox. Resolved here so the model, the hash,
       // and every renderer agree on the visible text.
-      const text = valueToText(evalExpr(textExpr, ctx, null)).replace(/\n/g, " ");
+      const aliasResult = expandTextAliases(valueToText(evalExpr(textExpr, ctx, null)), ctx);
+      const text = aliasResult.text.replace(/\n/g, " ");
       const size = numberProp(el, "size", ctx, ctx.xUnits);
       const font = fontOf(el, ctx);
       // Inline icons (◆44, §7.5): markers parse AFTER interpolation — a
       // marker from a sheet cell works identically to a literal — and the
       // shape carries laid-out runs with absolute x-offsets. Single line.
-      const segments = markerSegments(textExpr, text, ctx);
+      const segments = markerSegments(textExpr, text, ctx, aliasResult.computedRanges);
       return {
         kind: "text",
         x,
@@ -830,12 +831,13 @@ function evalElement(el: ElementNode, ctx: EvalContext): Shape {
       const lineHeight = lineHeightOf(el);
       const font = fontOf(el, ctx);
       const textExpr = requireProp(el, "text");
-      const text = valueToText(evalExpr(textExpr, ctx, null));
+      const aliasResult = expandTextAliases(valueToText(evalExpr(textExpr, ctx, null)), ctx);
+      const text = aliasResult.text;
       // Inline icons (◆44, §7.5): the same post-interpolation markers as
       // Text, fed through the wrap engine — a marker is one atomic token
       // that wraps like a word in its 1-em slot.
       const layout = layoutTextBoxRuns({
-        segments: markerSegments(textExpr, text, ctx),
+        segments: markerSegments(textExpr, text, ctx, aliasResult.computedRanges),
         width,
         height,
         size,
@@ -1148,15 +1150,41 @@ function qrLevelOf(el: ElementNode, ctx: EvalContext): QrLevel {
  * Asset markers are never data-errors — the renderer owns missing-asset
  * states (§3.3), exactly like Image `src:`.
  */
-function markerSegments(expr: Expr, resolved: string, ctx: EvalContext): MarkerSegment[] {
-  const segments = parseInlineMarkers(resolved);
-  if (literalText(expr) !== null) return segments;
+function markerSegments(
+  expr: Expr,
+  resolved: string,
+  ctx: EvalContext,
+  aliasRanges: readonly AliasRange[] = [],
+): MarkerSegment[] {
+  let aliasRangeIndex = 0;
+  const segments = parseInlineMarkers(
+    resolved,
+    aliasRanges.length === 0
+      ? undefined
+      : (start, end) => {
+          // Marker and alias ranges are both source-ordered. Advance once
+          // through the alias ranges rather than rescanning them per marker.
+          while (
+            aliasRangeIndex < aliasRanges.length &&
+            aliasRanges[aliasRangeIndex].end <= start
+          ) {
+            aliasRangeIndex++;
+          }
+          const range = aliasRanges[aliasRangeIndex];
+          return range !== undefined && start < range.end && end > range.start;
+        },
+  );
+  const literalSource = literalText(expr) !== null;
   let downgraded = false;
   const out = segments.map((segment): MarkerSegment => {
     if (
       segment.kind !== "icon" ||
       segment.icon.kind !== "dicier" ||
-      DICIER_CODES.has(segment.icon.code)
+      DICIER_CODES.has(segment.icon.code) ||
+      // Literal host markers stay in compile-time W004 territory even when a
+      // neighboring alias also expanded. Only the alias-produced marker is
+      // runtime-computed in that mixed-origin string.
+      (literalSource && !segment.computed)
     ) {
       return segment;
     }
@@ -1178,6 +1206,101 @@ function markerSegments(expr: Expr, resolved: string, ctx: EvalContext): MarkerS
   // Fuse the downgraded raw text with its neighbors so wrapping sees
   // `x{BAD}y` as one word, never three break-separable tokens.
   return downgraded ? mergeTextSegments(out) : out;
+}
+
+interface AliasExpansion {
+  text: string;
+  /** UTF-16 ranges in `text` whose characters came from alias values. */
+  computedRanges: AliasRange[];
+}
+
+interface AliasRange {
+  start: number;
+  end: number;
+}
+
+/**
+ * Expand `{alias:name}` in one resolved Text/TextBox value before the ordinary
+ * inline marker grammar runs. Appended replacement text is never scanned by
+ * this loop, which makes expansion exactly one level while still allowing an
+ * alias value's Dicier/asset/color markers to be parsed by markerSegments.
+ * `{{` remains untouched here so parseInlineMarkers continues to own the
+ * existing brace escape and turns `{{alias:name}` into visible raw text.
+ */
+function expandTextAliases(resolved: string, ctx: EvalContext): AliasExpansion {
+  let out = "";
+  const computedRanges: AliasRange[] = [];
+  let i = 0;
+  while (i < resolved.length) {
+    if (resolved[i] !== "{") {
+      out += resolved[i++];
+      continue;
+    }
+    if (resolved[i + 1] === "{") {
+      out += "{{";
+      i += 2;
+      continue;
+    }
+    const close = resolved.indexOf("}", i + 1);
+    if (close === -1) {
+      out += resolved.slice(i);
+      break;
+    }
+    const raw = resolved.slice(i, close + 1);
+    const match = /^\{alias:([A-Za-z][A-Za-z0-9_]*)\}$/.exec(raw);
+    if (!match) {
+      out += resolved[i++];
+      continue;
+    }
+    const name = match[1];
+    const prepared = ctx.card.aliases.get(name);
+    if (!prepared) {
+      reportAliasIssue(ctx, name, `Unknown text alias '${name}' — ${raw} was left unchanged`);
+      out += raw;
+      i = close + 1;
+      continue;
+    }
+    if (prepared.type.kind !== "Text") {
+      reportAliasIssue(
+        ctx,
+        name,
+        `Text alias '${name}' must resolve to Text, got ${prepared.type.kind} — ${raw} was left unchanged`,
+      );
+      out += raw;
+      i = close + 1;
+      continue;
+    }
+    if (!prepared.valid) {
+      reportAliasIssue(
+        ctx,
+        name,
+        `Text alias '${name}' could not be resolved — ${raw} was left unchanged`,
+      );
+      out += raw;
+      i = close + 1;
+      continue;
+    }
+    const value = resolveLet(prepared.binding, "global", ctx);
+    if (value.kind !== "text") {
+      // Defensive only: the prepared static type and evaluator value should
+      // agree. Unknown/non-Text targets are gentle, but a genuine data error
+      // while evaluating a valid Text target intentionally propagates exactly
+      // as it would through an ordinary let reference.
+      reportAliasIssue(ctx, name, `Text alias '${name}' could not resolve — ${raw} was left unchanged`);
+      out += raw;
+    } else {
+      const start = out.length;
+      out += value.value;
+      computedRanges.push({ start, end: out.length });
+    }
+    i = close + 1;
+  }
+  return { text: out, computedRanges };
+}
+
+function reportAliasIssue(ctx: EvalContext, name: string, message: string): void {
+  const key = `alias:${name}`;
+  if (!ctx.iconIssues.has(key)) ctx.iconIssues.set(key, { code: "D011", message });
 }
 
 /** The literal value of a string with NO interpolation parts, else null. */

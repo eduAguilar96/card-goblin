@@ -14,7 +14,10 @@ import { loadDocNav } from "@/lib/docs/pages";
 import DocsSidebar from "./_components/sidebar";
 
 export const metadata: Metadata = {
-  title: "Documentation — Card Goblin",
+  title: {
+    default: "Documentation",
+    template: "%s — Card Goblin docs",
+  },
   description: "How to use CardGoblin: the editor, Goblin script, and PDF export.",
 };
 

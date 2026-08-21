@@ -70,6 +70,9 @@ export interface CompletionSnapshot {
   sheets: SnapshotSheet[];
   enums: SnapshotEnum[];
   templates: string[];
+  /** Top-level lets whose inferred value is Text. These are the only names
+   * eligible for resolved-text `{alias:name}` markers. */
+  textAliases?: string[];
 }
 
 export const EMPTY_SNAPSHOT: CompletionSnapshot = { sheets: [], enums: [], templates: [] };
@@ -127,7 +130,31 @@ export function buildCompletionSnapshot(
       }
     }
   }
-  return { sheets, enums, templates };
+  const textAliases: string[] = [];
+  if (bindings) {
+    for (const [name, binding] of bindings.globals) {
+      // The checker owns both cardless and per-Card validity. In particular,
+      // syntax alone cannot distinguish a context-free computed Text alias
+      // from a string whose `[ref]` is missing or needs a Card's sheet.
+      const contextFree = bindings.contextFreeAliases.get(name);
+      if (
+        (contextFree?.binding === binding &&
+          contextFree.valid &&
+          contextFree.type.kind === "Text") ||
+        bindings.cards.some((card) => {
+          const alias = card.aliases.get(name);
+          return (
+            alias?.binding === binding &&
+            alias.valid &&
+            alias.type.kind === "Text"
+          );
+        })
+      ) {
+        textAliases.push(name);
+      }
+    }
+  }
+  return { sheets, enums, templates, ...(textAliases.length > 0 ? { textAliases } : {}) };
 }
 
 // ---------------------------------------------------------------------------
@@ -998,6 +1025,29 @@ function colorScopeSuggestion(): CompletionSuggestion {
   };
 }
 
+/** A one-level resolved-text alias. The opening `{` is already present; the
+ * compiler expands only top-level Text lets, then parses ordinary markers. */
+function aliasMarkerSuggestion(): CompletionSuggestion {
+  return {
+    label: "text alias",
+    insertText: "alias:${1:name}}",
+    snippet: true,
+    kind: "variable",
+    detail: "{alias:name} — expand a top-level Text let once",
+    group: 0,
+  };
+}
+
+function textAliasSuggestions(snapshot: CompletionSnapshot): CompletionSuggestion[] {
+  return (snapshot.textAliases ?? []).map((name) => ({
+    label: name,
+    insertText: name,
+    kind: "variable" as const,
+    detail: "top-level Text let — one-level resolved-text alias",
+    group: 0 as const,
+  }));
+}
+
 /** One deliberately narrow formatting helper rather than a general format
  * vocabulary. The width tab stop defaults to 3; the compiler enforces 1..64
  * and Number-only use. */
@@ -1377,9 +1427,14 @@ export function computeCompletions(
       const stringBefore = line.slice(state.stringOpenCol, col);
       const braceRun = /\{+$/.exec(stringBefore)?.[0] ?? "";
       if (braceRun.length % 2 === 1) {
-        return result([colorScopeSuggestion()]);
+        return result([colorScopeSuggestion(), aliasMarkerSuggestion()]);
       }
-      if (/(?:^|[^\{])\{color:[A-Za-z0-9_]*$/.test(stringBefore)) {
+      const aliasOpen = /(\{+)alias:[A-Za-z0-9_]*$/.exec(stringBefore);
+      if (aliasOpen && aliasOpen[1].length % 2 === 1) {
+        return result(textAliasSuggestions(currentSnapshot));
+      }
+      const colorOpen = /(\{+)color:[A-Za-z0-9_]*$/.exec(stringBefore);
+      if (colorOpen && colorOpen[1].length % 2 === 1) {
         return result(colorSuggestions());
       }
     }

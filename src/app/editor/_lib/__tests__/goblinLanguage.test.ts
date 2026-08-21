@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { CSS_COLOR_NAMES } from "@/lib/lang";
 import {
+  GOBLIN_ALIAS_MARKER_RE,
   GOBLIN_COLOR_SCOPE_CLOSE_RE,
   GOBLIN_COLOR_SCOPE_OPEN_RE,
   GOBLIN_CONTEXTUAL_BRANCH_RE,
@@ -66,5 +67,14 @@ describe("Goblin contextual highlighting", () => {
     expect(GOBLIN_COLOR_SCOPE_OPEN_RE.test("{color:red}")).toBe(true);
     expect(GOBLIN_COLOR_SCOPE_CLOSE_RE.test("{/color}")).toBe(true);
     expect(GOBLIN_COLOR_SCOPE_CLOSE_RE.test("{/colour}")).toBe(false);
+  });
+
+  it("recognizes resolved-text aliases with declaration-name syntax", () => {
+    for (const source of ["{alias:badge}", "{alias:rules_line}", "{alias:A1}"]) {
+      expect(GOBLIN_ALIAS_MARKER_RE.test(source), source).toBe(true);
+    }
+    for (const source of ["{alias:}", "{alias:1badge}", "{alias:local-name}"]) {
+      expect(GOBLIN_ALIAS_MARKER_RE.test(source), source).toBe(false);
+    }
   });
 });

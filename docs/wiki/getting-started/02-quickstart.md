@@ -38,7 +38,7 @@ are `Text`, `Number`, or any Enum you declared. **The code owns the columns; you
 the rows.** Add a column here and it appears in the grid; rename one and the data
 follows it.
 
-More in [Sheets and data](sheets-and-data.md).
+More in [Sheets and data](../goblin-script/02-sheets-and-data.md).
 
 ## 3. A Template — what a card looks like
 
@@ -89,7 +89,7 @@ Template: PlainBack
     color: teal
 ```
 
-More in [Templates and shapes](templates-and-shapes.md).
+More in [Templates and shapes](../goblin-script/03-templates-and-shapes.md).
 
 ## 4. A Card — tie it together
 
@@ -112,7 +112,7 @@ Cards are generated as **rows × loop options × count**. With 2 rows, 3 suits, 
 counts of 2 and 1, you get 2 × 3 = 6 distinct faces and 9 physical cards. Omit `loop:`
 for one card per row; omit `Back:` for a plain white back.
 
-More in [Cards and generation](cards-and-generation.md).
+More in [Cards and generation](../goblin-script/08-cards-and-generation.md).
 
 ## 5. Try changing things
 
@@ -128,4 +128,4 @@ Each of these exercises a different part of the pipeline:
 | Change `"SWORDS"` to `"D6"` | The icon swaps glyph |
 
 Then hit **Export PDF** in the preview toolbar to get it on paper —
-see [PDF export](pdf-export.md).
+see [PDF export](../export-and-project/01-pdf-export.md).

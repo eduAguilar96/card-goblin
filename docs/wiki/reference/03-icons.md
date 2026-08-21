@@ -55,7 +55,7 @@ not a warning, because there is no "maybe it exists" here.
 
 ## Codes can be computed
 
-`code:` is an [expression](expressions.md), so an icon can depend on the card's data:
+`code:` is an [expression](../goblin-script/07-expressions.md), so an icon can depend on the card's data:
 
 ```goblin
 code: if [hp] > 5 then "CROWN" else "COIN"
@@ -64,7 +64,7 @@ code: if [hp] > 5 then "CROWN" else "COIN"
 ## Repeating icons
 
 The most common use is one icon per point of something —
-see [`Repeat`](templates-and-shapes.md):
+see [`Repeat`](../goblin-script/03-templates-and-shapes.md):
 
 ```goblin
 Repeat: [health] as i
@@ -95,7 +95,7 @@ Repeat: [health] as i
 
 The complete list ships with the project at
 [`docs/vendor/dicier-v1.5.4/Dicier codes v1_5_4.txt`](../../vendor/dicier-v1.5.4/Dicier%20codes%20v1_5_4.txt).
-A browsable icon picker is on the [roadmap](roadmap.md).
+A browsable icon picker is on the [roadmap](../export-and-project/06-roadmap.md).
 
 ## Why unknown codes only warn
 

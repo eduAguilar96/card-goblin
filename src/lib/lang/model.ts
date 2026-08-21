@@ -21,7 +21,7 @@
 // ---------------------------------------------------------------------------
 
 /**
- * D001–D010 are the §3.8 catalog. D000 is OUTSIDE the catalog by design,
+ * D001–D011 are the §3.8 catalog. D000 is OUTSIDE the catalog by design,
  * mirroring the checker's E000: it never marks a data-entry mistake. It is
  * used (a) per card, when a card cannot be evaluated because its code has
  * compile errors (the squiggles own the surface; the model just marks the
@@ -39,7 +39,9 @@ export type DataDiagnosticCode =
   | "D007"
   | "D008"
   | "D009"
-  | "D010";
+  | "D010"
+  /** A `{alias:name}` could not expand; the raw marker remains visible. */
+  | "D011";
 
 /** Cell provenance — the grid flags this cell red (§3.8 D001–D003). */
 export interface CellRef {
@@ -71,7 +73,7 @@ export interface DataDiagnostic {
    */
   cell?: CellRef;
   /**
-   * Present for card-scoped diagnostics (D004–D006, D008–D010, and per-card
+   * Present for card-scoped diagnostics (D004–D006, D008–D011, and per-card
    * D000). D007 and the model-level D000 carry neither `cell` nor `cardRef`
    * — they are deck/model-level (the message names the deck).
    */

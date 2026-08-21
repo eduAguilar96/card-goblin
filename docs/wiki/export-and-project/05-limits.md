@@ -13,7 +13,7 @@ to read them now than to discover them three hours into a deck.
 
 - **`Text` is one line by design** — long text runs off the card rather than
   flowing. Wrapped, multi-line text is what
-  [`TextBox`](text.md) is for.
+  [`TextBox`](../goblin-script/04-text.md) is for.
 - **No bold/italic spans yet.** A `TextBox` can mix scoped colors and inline
   Dicier/uploaded-asset icons, but font face and size still apply to the whole
   element.
@@ -22,32 +22,21 @@ to read them now than to discover them three hours into a deck.
 
 ## Images
 
-- **2 MB** per uploaded asset. The [Assets drawer](assets.md) caps
+- **2 MB** per uploaded asset. The [Assets drawer](04-assets.md) caps
   each upload — plenty for print-resolution card art, not a place for
   full-resolution photography.
 - **PDF embedding needs CORS for URL art.** An image displays in the preview from
   any URL, but embedding a URL image into an exported PDF requires the host to
-  allow cross-origin use — see [PDF export](pdf-export.md). Hosts that don't
+  allow cross-origin use — see [PDF export](01-pdf-export.md). Hosts that don't
   cooperate print as placeholder boxes. Uploaded assets don't have this
   limitation — they always embed, since the art never leaves your browser.
 
 ## Persistence
 
-- **One save slot per browser.** Your project [autosaves](autosave.md) and survives
-  reloads, and [project files](project-files.md) cover backup and moving between
+- **One save slot per browser.** Your project [autosaves](02-autosave.md) and survives
+  reloads, and [project files](03-project-files.md) cover backup and moving between
   browsers — but the autosave slot is singular, so two open editor tabs overwrite
   each other (the last one to change wins).
-
-## Cloud sync
-
-- **One password, not accounts.** [Cloud sync](cloud-sync.md), if the site has it
-  turned on, has a single shared password — no per-person identity, no permissions.
-- **One project in the cloud too.** Same "one slot" shape as local autosave — cloud
-  sync doesn't add a project list.
-- **Guarded last-write-wins, not merging.** Two devices editing at once are protected
-  from silently clobbering each other (see [Cloud sync](cloud-sync.md)), but their
-  edits are never combined — one side's changes since the last sync are the ones that
-  don't make it into the version you keep.
 
 ## Size caps
 
@@ -64,7 +53,7 @@ D007 and truncates that Card block with a note.
 
 - Colors are RGB; no CMYK conversion or color management.
 - No bleed or safe-zone guides — cut lines and crop marks only.
-- A card bigger than the page can't be split across sheets — [export](pdf-export.md)
+- A card bigger than the page can't be split across sheets — [export](01-pdf-export.md)
   reports it instead of tiling it.
 
 ## Editing
@@ -72,5 +61,5 @@ D007 and truncates that Card block with a note.
 - **No shared undo.** The code editor and the spreadsheet keep separate undo
   histories — Ctrl+Z in one never rewinds the other.
 
-Most of these are on the [roadmap](roadmap.md) in some form. If one of these is
+Most of these are on the [roadmap](06-roadmap.md) in some form. If one of these is
 blocking you, that's useful signal — say so.

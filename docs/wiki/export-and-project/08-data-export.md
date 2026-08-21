@@ -60,3 +60,15 @@ duplicate a physical or another virtual column in the same Sheet.
 
 For a single Card block the download is named after that Card, such as
 `Monster.csv`; projects with several Card blocks download `cardgoblin-data.csv`.
+
+## Errors and the current preview
+
+CSV follows the current generated RenderModel. A row whose data fails produces the
+same labelled error-placeholder instance in the model, so that instance still gets
+a CSV row and its available identity/source values. PDF export deliberately skips
+error-placeholder cards because there is no printable face to lay out.
+
+While the code editor is broken, the preview holds the last good RenderModel. Export
+Data uses that same last good result; it does not combine stale cards with the
+currently invalid source. If no Card block generates any instances, export is
+disabled.

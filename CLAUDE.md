@@ -1,13 +1,14 @@
 # CardGoblin
 
 A browser tool that turns **Goblin script** (a small declarative language) plus a
-**spreadsheet** into **print-ready cards**. Next.js App Router, React 18, Tailwind 3,
-Zustand, vitest. No backend.
+**spreadsheet** into **print-at-home cards**. Next.js App Router, React 18, Tailwind
+3, Zustand, vitest. The public editor is local-first; admin-only cloud routes and R2
+storage exist but are not a public product surface.
 
 | Command | What it does |
 |---|---|
 | `npm run dev` | dev server → http://localhost:3000 (editor at `/editor`, docs at `/docs`) |
-| `npm test` | full vitest suite (sub-second) |
+| `npm test` | full vitest suite |
 | `npx tsc --noEmit` | strict type check |
 | `npm run build` | production build — must stay green |
 
@@ -19,7 +20,7 @@ not the other way round. Diagnostic codes (E/W/D) are cataloged in §3.8.
 
 ## Documentation contract
 
-There are four doc surfaces. Each owns one thing; a fact lives in exactly one of them.
+These doc surfaces each own one thing; a fact lives in exactly one of them.
 
 | Surface | Owns | Audience |
 |---|---|---|
@@ -27,6 +28,8 @@ There are four doc surfaces. Each owns one thing; a fact lives in exactly one of
 | `content/blog/` → `/blog` | announcements, design logs, releases | prospective users, search |
 | `docs/DESIGN.md` | decisions and **why**; the decision log | future implementers |
 | `docs/development.md` | how to build, test, navigate | contributors |
+| `docs/cloud-sync.md` | behavior and limits of the hidden admin mirror | maintainers/operators |
+| `docs/deployment.md` | setup, security, and recovery for that mirror | operators |
 | code comments | why *this file* works the way it does | whoever opens it |
 
 Wiki vs blog: the wiki is **reference** — always current, edited in place. The
@@ -60,7 +63,8 @@ summary: one line
   [src/lib/docs/nav.ts](src/lib/docs/nav.ts).
 - **Slugs are flat and unique wiki-wide** — the URL is `/docs/<slug>`, so a page can
   move between sections without breaking links.
-- Link between pages with **relative `.md` paths** (`../reference/colors.md`) so files
+- Link between pages with **real relative `.md` paths**
+  (`../reference/02-colors.md`) so files
   stay readable on GitHub; they're rewritten to `/docs/<slug>` at render. Links that
   leave the wiki become GitHub URLs.
 - `status:` describes how settled the **subject** is, not the prose. `evolving` pages
@@ -84,11 +88,10 @@ Posts live at `content/blog/<YYYY-MM-DD>-<slug>.md`.
 
 ### SEO
 
-`src/lib/site.ts` owns every URL and identity string. **`SITE_URL` is a
-placeholder** (`https://cardgoblin.app`) until the real domain is set — override
-with `NEXT_PUBLIC_SITE_URL`. Canonical links, OpenGraph, JSON-LD, the sitemap,
-and the feed all derive from it, so a wrong value silently points search engines
-at the wrong host.
+`src/lib/site.ts` owns every URL and identity string. `SITE_URL` falls back to the
+production domain (`https://www.cardgoblin.com`) and can be overridden with
+`NEXT_PUBLIC_SITE_URL`. Canonical links, OpenGraph, JSON-LD, the sitemap, and the feed
+all derive from it, so a wrong value silently points search engines at the wrong host.
 
 Generated automatically, nothing to hand-maintain: `app/sitemap.ts`,
 `app/robots.ts`, `/blog/rss.xml`, and per-post share images
@@ -121,7 +124,8 @@ matches — the file's import block is the current, authoritative list; the cate
 are card-size and PDF page-size presets, generation/repeat caps, per-element defaults
 and closed vocabularies (icon style, image fit, QR level, anchor, TextBox overflow),
 the Dicier code count, CSS color names, reserved words, and timing/size constants
-(autosave debounce, asset upload cap).
+(autosave debounce, asset upload cap). The hidden cloud feature's timing and literal
+UI-copy checks point to `docs/cloud-sync.md`, never the public wiki.
 
 When it fails there are two honest fixes: update the wiki because the code changed, or
 update the *pattern* because the prose was legitimately reworded. **Never delete a

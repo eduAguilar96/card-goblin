@@ -359,8 +359,8 @@ class Generator {
         // position, whether or not it ends up emitting anything (a failed or
         // zero-count combination simply never advances it). A fresh
         // iconIssues map is hoisted OUTSIDE the per-copy re-evaluation below
-        // so D005 keeps deduping across every copy of one combination, not
-        // just its first, matching the pre-◆42 "once per combination" rule.
+        // so non-fatal render issues (D005/D011) keep deduping across every
+        // copy of one combination, not just its first.
         const iconIssues = new Map<string, DataDiagnostic>();
         const virtualIssues = new Set<string>();
         const firstCardNumber = cards.length + 1;
@@ -620,7 +620,9 @@ class Generator {
         }
       }
       for (const d of iconIssues) {
-        d.cardRef = cardRef; // D005 — diagnostic only, the icon rendered (§3.8 †)
+        // D005/D011 are diagnostic-only: the requested content still rendered
+        // (or, for an alias failure, its raw marker remained visible).
+        d.cardRef = cardRef;
         this.diagnostics.push(d);
       }
       if (!copies || copies.length === 1) {

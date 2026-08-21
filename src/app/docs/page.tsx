@@ -6,10 +6,31 @@
  */
 
 import Link from "next/link";
+import type { Metadata } from "next";
 import type { ReactElement } from "react";
 import { loadDocNav } from "@/lib/docs/pages";
 import { flattenNav } from "@/lib/docs/nav";
+import { absoluteUrl } from "@/lib/site";
 import StatusBadge from "./_components/statusBadge";
+
+const DESCRIPTION =
+  "How to use CardGoblin: the editor, Goblin script, project storage, and PDF export.";
+
+export const metadata: Metadata = {
+  description: DESCRIPTION,
+  alternates: { canonical: absoluteUrl("/docs") },
+  openGraph: {
+    type: "website",
+    url: absoluteUrl("/docs"),
+    title: "Documentation — Card Goblin",
+    description: DESCRIPTION,
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Documentation — Card Goblin",
+    description: DESCRIPTION,
+  },
+};
 
 export default function DocsIndexPage(): ReactElement {
   const nav = loadDocNav();
@@ -22,7 +43,7 @@ export default function DocsIndexPage(): ReactElement {
           Documentation
         </h1>
         <p className="mt-3 max-w-2xl text-lg text-gray-400">
-          CardGoblin turns a small script plus a spreadsheet into print-ready cards.
+          CardGoblin turns a small script plus a spreadsheet into print-at-home cards.
           These pages cover the editor, the language, and getting a deck onto paper.
         </p>
         <div className="mt-6 flex flex-wrap items-center gap-3">

@@ -2,11 +2,9 @@
  * Site-wide identity and URLs — one place, because SEO metadata repeats them
  * everywhere: canonical links, OpenGraph, JSON-LD, the sitemap, the RSS feed.
  *
- * ⚠ `SITE_URL` is a PLACEHOLDER until the real domain is decided. Canonical
- * URLs, share-card images, sitemap entries, and feed links are all built from
- * it, so a wrong value doesn't break the build — it quietly points search
- * engines and social previews at a domain that isn't yours. Set
- * `NEXT_PUBLIC_SITE_URL` in the deployment environment, or edit the fallback.
+ * The production fallback is the canonical public domain. Preview deployments
+ * can override it with `NEXT_PUBLIC_SITE_URL`; otherwise canonical URLs remain
+ * on production instead of fragmenting search signals across preview hosts.
  */
 
 /** Absolute origin, no trailing slash. */
@@ -18,11 +16,11 @@ export const SITE_NAME = "Card Goblin";
 
 /** The default meta description — overridden per page where there's better. */
 export const SITE_DESCRIPTION =
-  "CardGoblin turns a small script plus a spreadsheet into print-ready cards. " +
-  "Design a card once, generate the whole deck, export a print-ready PDF — free, in your browser.";
+  "CardGoblin turns a small script plus a spreadsheet into print-at-home cards. " +
+  "Design a card once, generate the whole deck, and export a true-to-size PDF — free, in your browser.";
 
 /** Short form for OpenGraph/Twitter cards, which truncate aggressively. */
-export const SITE_TAGLINE = "Script + spreadsheet → print-ready cards";
+export const SITE_TAGLINE = "Script + spreadsheet → print-at-home cards";
 
 export const REPO_URL = "https://github.com/eduAguilar96/card-goblin";
 

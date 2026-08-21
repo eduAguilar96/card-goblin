@@ -18,7 +18,7 @@ export default function SiteFooter(): ReactElement {
           <div className="max-w-xs">
             <p className="font-extrabold tracking-tight text-white">Card Goblin</p>
             <p className="mt-2 text-sm text-gray-500">
-              A script plus a spreadsheet becomes a print-ready deck. Free, in your
+              A script plus a spreadsheet becomes a print-at-home deck. Free, in your
               browser.
             </p>
           </div>

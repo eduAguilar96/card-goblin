@@ -223,6 +223,10 @@ export interface CardBindings {
   resolutions: ReadonlyMap<ResolvableNode, Resolution>;
   /** Contextual inferred type of each reachable global/local binding. */
   letTypes: ReadonlyMap<LetNode, ValueType>;
+  /** Program bindings prepared as data-addressable `{alias:name}` targets.
+   * Their initializer resolutions are recorded per Card even when ordinary
+   * GoblinScript expressions never reference them. */
+  aliases: ReadonlyMap<string, { binding: LetNode; type: ValueType; valid: boolean }>;
   /** Per-Card resolution of every reachable composition edge. */
   templateCalls: ReadonlyMap<TemplateCallNode, TemplateDecl>;
 }
@@ -234,6 +238,13 @@ export interface Bindings {
   templates: ReadonlyMap<string, TemplateDecl>;
   /** Program-scope value bindings; separate from the declaration namespace. */
   globals: ReadonlyMap<string, LetNode>;
+  /** Alias targets inferred with no ambient Card/sheet/loop context. This is
+   * the checker-owned source for cardless tooling: `valid` excludes Text-shaped
+   * initializers whose refs only look plausible without a real context. */
+  contextFreeAliases: ReadonlyMap<
+    string,
+    { binding: LetNode; type: ValueType; valid: boolean }
+  >;
   /** One entry per Card declaration, in source order (duplicates included —
    * the generator iterates declarations, not names). */
   cards: readonly CardBindings[];
@@ -289,6 +300,7 @@ export function check(program: Program, assetNames?: ReadonlySet<string>): Check
         sheets: new Map(),
         templates: new Map(),
         globals: new Map(),
+        contextFreeAliases: new Map(),
         cards: [],
         templateUsage: new Map(),
       },
@@ -464,9 +476,23 @@ class Checker {
    * mistake, one diagnostic. */
   private readonly collided = new Set<EnumDecl | SheetDecl | TemplateDecl | CardDecl | LetNode>();
   private readonly usedLets = new Set<LetNode>();
+  /** Text globals are externally addressable through alias markers, including
+   * markers supplied only by sheet data, so they are not W002-unused. */
+  private readonly aliasExports = new Set<LetNode>();
   /** One primary cycle report per dependency SCC across contextual Card passes. */
   private readonly cyclicLets = new Set<LetNode>();
   private readonly cyclicTemplates = new Set<TemplateDecl>();
+  /** A per-Card preparation pass records global initializer resolutions for
+   * data-provided aliases without surfacing errors or marking dependencies as
+   * ordinary source references. */
+  private aliasProbeDepth = 0;
+  /** Direct dependency edges captured while the quiet alias pass infers
+   * globals. Used to retain W002 suppression for transitive dependencies of
+   * Text exports, without blessing globals reachable only from non-Text roots. */
+  private aliasProbeEdges: Map<LetNode, Set<LetNode>> | null = null;
+  private aliasProbeEnums: Map<LetNode, Set<EnumDecl>> | null = null;
+  private aliasProbeInvalid: Set<LetNode> | null = null;
+  private aliasProbeStack: LetNode[] | null = null;
 
   private callPath: TemplateDecl[] = [];
   private activeCalls = 0;
@@ -497,6 +523,23 @@ class Checker {
     }
     this.currentCard = null;
 
+    // Program Text bindings are alias exports even when no Card currently
+    // gives them a sheet context. Probe once with no ambient sheet/loops so
+    // only context-independent, fully valid Text roots (and their dependency
+    // closure) affect W002. Card-specific probes above separately promote
+    // globals that become valid Text in an actual Card context.
+    const contextFreeAliases = this.prepareAliases({
+      sheet: null,
+      loops: new Map(),
+      repeats: [],
+      scopes: [],
+      params: new Map(),
+      letStates: new Map(),
+      letStack: [],
+      blockDepth: 0,
+      record: null,
+    });
+
     // Unused templates: structural checks only (W002 §3.8) — property
     // presence/duplicates, literal types, geometry keywords, icon codes. No
     // Card context exists, so [refs] silently type as Unknown and every
@@ -522,9 +565,15 @@ class Checker {
 
     // Local lets are lexical declarations, so a syntactically referenced one
     // counts even when its owning template has no Card context. Globals only
-    // become used through a reachable Card/count/face/call graph.
+    // become used through a reachable Card/count/face/call graph or through
+    // the context-free/per-Card alias-export probes above.
     for (const decl of program.declarations) {
-      if (decl.kind === "Let" && !this.collided.has(decl) && !this.usedLets.has(decl)) {
+      if (
+        decl.kind === "Let" &&
+        !this.collided.has(decl) &&
+        !this.usedLets.has(decl) &&
+        !this.aliasExports.has(decl)
+      ) {
         this.warn("W002", `Binding '${decl.name.name}' is never used`, decl.name.range);
       }
       if (decl.kind === "TemplateDecl") this.warnUnusedLets(decl.children);
@@ -549,6 +598,7 @@ class Checker {
         sheets: this.sheets,
         templates: this.templates,
         globals: this.globals,
+        contextFreeAliases,
         cards,
         templateUsage: this.templateUsers,
       },
@@ -562,6 +612,13 @@ class Checker {
    * trial pass is running. */
   private report(code: string, severity: Severity, message: string, range: Range): void {
     if (this.silent > 0) return;
+    if (this.aliasProbeDepth > 0) {
+      if (severity === "error") {
+        const current = this.aliasProbeStack?.[this.aliasProbeStack.length - 1];
+        if (current) this.aliasProbeInvalid?.add(current);
+      }
+      return;
+    }
     const key = `${code}|${range.startLine}|${range.startCol}|${range.endLine}|${range.endCol}|${message}`;
     if (this.seen.has(key)) return;
     this.seen.add(key);
@@ -579,7 +636,17 @@ class Checker {
   /** W002 usage marking — inert during trial passes so a speculative
    * resolution can never hide a real unused-enum warning. */
   private markEnumUsed(decl: EnumDecl): void {
-    if (this.silent === 0) this.usedEnums.add(decl);
+    if (this.silent > 0) return;
+    if (this.aliasProbeDepth > 0) {
+      const current = this.aliasProbeStack?.[this.aliasProbeStack.length - 1];
+      if (current) {
+        const enums = this.aliasProbeEnums?.get(current) ?? new Set<EnumDecl>();
+        enums.add(decl);
+        this.aliasProbeEnums?.set(current, enums);
+      }
+      return;
+    }
+    this.usedEnums.add(decl);
   }
 
   private markTemplateUsed(decl: TemplateDecl): void {
@@ -1128,6 +1195,8 @@ class Checker {
     if (front) this.checkFaceTemplate(front, ctx, frontFace);
     if (back) this.checkFaceTemplate(back, ctx, backFace);
 
+    const aliases = this.prepareAliases(ctx);
+
     return {
       decl,
       sheet,
@@ -1143,8 +1212,82 @@ class Checker {
       exprTypes: recorder.exprTypes,
       resolutions: recorder.resolutions,
       letTypes: recorder.letTypes,
+      aliases,
       templateCalls: recorder.templateCalls,
     };
+  }
+
+  /**
+   * Alias names can arrive solely through sheet data, so the checker cannot
+   * discover their targets by scanning source text. Prepare every program
+   * binding in this Card's column/loop context and retain its contextual
+   * initializer resolutions. A fresh let-state graph is essential: a quiet
+   * Unknown must not cache over a later genuine source reference and suppress
+   * that reference's normal diagnostic.
+   */
+  private prepareAliases(
+    ctx: Ctx,
+  ): Map<string, { binding: LetNode; type: ValueType; valid: boolean }> {
+    const aliases = new Map<
+      string,
+      { binding: LetNode; type: ValueType; valid: boolean }
+    >();
+    const savedStates = ctx.letStates;
+    const savedStack = ctx.letStack;
+    const savedScopes = ctx.scopes;
+    const savedRepeats = ctx.repeats;
+    const savedParams = ctx.params;
+    ctx.letStates = new Map();
+    ctx.letStack = [];
+    ctx.scopes = [];
+    ctx.repeats = [];
+    ctx.params = new Map();
+    this.aliasProbeEdges = new Map();
+    this.aliasProbeEnums = new Map();
+    this.aliasProbeInvalid = new Set();
+    this.aliasProbeStack = ctx.letStack;
+    this.aliasProbeDepth++;
+    try {
+      for (const [name, binding] of this.globals) {
+        const type = this.inferLet(binding, "global", binding.name.range, ctx);
+        aliases.set(name, { binding, type, valid: true });
+      }
+      for (const alias of aliases.values()) {
+        const { binding, type } = alias;
+        let valid = true;
+        if (type.kind !== "Text") continue;
+        const pending = [binding];
+        const seen = new Set<LetNode>();
+        const enumDependencies = new Set<EnumDecl>();
+        while (pending.length > 0) {
+          const dependency = pending.pop()!;
+          if (seen.has(dependency)) continue;
+          seen.add(dependency);
+          if (this.aliasProbeInvalid.has(dependency)) valid = false;
+          for (const enumDecl of this.aliasProbeEnums.get(dependency) ?? []) {
+            enumDependencies.add(enumDecl);
+          }
+          for (const next of this.aliasProbeEdges.get(dependency) ?? []) pending.push(next);
+        }
+        alias.valid = valid;
+        if (valid) {
+          for (const dependency of seen) this.aliasExports.add(dependency);
+          for (const enumDecl of enumDependencies) this.usedEnums.add(enumDecl);
+        }
+      }
+    } finally {
+      this.aliasProbeDepth--;
+      this.aliasProbeEdges = null;
+      this.aliasProbeEnums = null;
+      this.aliasProbeInvalid = null;
+      this.aliasProbeStack = null;
+      ctx.letStates = savedStates;
+      ctx.letStack = savedStack;
+      ctx.scopes = savedScopes;
+      ctx.repeats = savedRepeats;
+      ctx.params = savedParams;
+    }
+    return aliases;
   }
 
   private expectedForVirtualColumn(type: ValueType): Expected {
@@ -2367,6 +2510,10 @@ class Checker {
       return name === "deck" ? TEXT : NUMBER;
     }
     if (ctx.sheet) this.error("E002", `Unknown reference [${name}]`, range);
+    if (this.aliasProbeDepth > 0) {
+      const current = this.aliasProbeStack?.[this.aliasProbeStack.length - 1];
+      if (current) this.aliasProbeInvalid?.add(current);
+    }
     return UNKNOWN;
   }
 
@@ -2377,7 +2524,21 @@ class Checker {
     ctx: Ctx,
     node: ResolvableNode,
   ): ValueType {
-    if (this.silent === 0 && (scope === "local" || ctx.record)) this.usedLets.add(binding);
+    if (this.aliasProbeDepth > 0) {
+      const parent = ctx.letStack[ctx.letStack.length - 1];
+      if (parent && parent !== binding) {
+        const dependencies = this.aliasProbeEdges?.get(parent) ?? new Set<LetNode>();
+        dependencies.add(binding);
+        this.aliasProbeEdges?.set(parent, dependencies);
+      }
+    }
+    if (
+      this.silent === 0 &&
+      this.aliasProbeDepth === 0 &&
+      (scope === "local" || ctx.record)
+    ) {
+      this.usedLets.add(binding);
+    }
     const type = this.inferLet(binding, scope, range, ctx);
     this.recordResolution(ctx, node, { kind: "let", binding, scope, type });
     return type;
@@ -2394,9 +2555,16 @@ class Checker {
       const start = Math.max(0, ctx.letStack.indexOf(binding));
       const cycle = [...ctx.letStack.slice(start), binding];
       const members = cycle.slice(0, -1);
+      if (this.aliasProbeDepth > 0) {
+        for (const decl of members) this.aliasProbeInvalid?.add(decl);
+      }
       // Speculative typing suppresses diagnostics and must not permanently
       // mark the SCC: the committed pass still needs to emit its one E009.
-      if (this.silent === 0 && !members.some((decl) => this.cyclicLets.has(decl))) {
+      if (
+        this.silent === 0 &&
+        this.aliasProbeDepth === 0 &&
+        !members.some((decl) => this.cyclicLets.has(decl))
+      ) {
         for (const decl of members) this.cyclicLets.add(decl);
         this.error(
           "E009",

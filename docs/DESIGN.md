@@ -93,6 +93,7 @@ the section that elaborates it:
 | ◆49 | Parameterized composition and generated identity (§3.2–§3.7) | Direct, typed `param name: Type` declarations on Templates; explicit indented arguments on `Front:`/`Back:` and Template calls; new `[copy]`, `[deck]`, `[deck_card]`, and `[project_card]` built-ins while `[card]` remains deck-relative | Parameters let one layout accept semantic variants without ambient caller capture: arguments evaluate in caller scope and forwarding stays explicit. Separate row/copy/deck/project identities describe the actual generation hierarchy without changing `[card]` under existing scripts; semantic IDs remain stable while project ordinals are deliberately positional |
 | ◆50 | Numeric interpolation padding (§3.5) | Quoted strings accept Number-only `[name:0N]`, where canonical decimal width `N` is 1..64; zero padding is sign-aware and sets a total **minimum** width without rounding or truncation | Fixed-width generated IDs are common enough to justify one small format, while a general formatting language would add grammar and policy far beyond the requirement. Keeping the form inside string interpolation preserves ordinary `[name]` and every non-string expression unchanged |
 | ◆51 | Preview row provenance and print pairing (§4.2, §6.1) | Grid view has an optional red one-based source-row overlay outside card SVGs; PDF export has an off-by-default native page label where matching fronts/backs share a project-wide logical sheet number | Row provenance makes generated cards traceable without contaminating artwork/export, while paired sheet numbers solve physical front/back sorting in both duplex and separate page orders |
+| ◆52 | Resolved-text aliases (§3.3.2, §7.5) | `{alias:name}` in resolved `Text`/`TextBox` content expands a top-level Text-valued `let name:` **exactly one level**, before existing color/icon/asset markers parse; unknown, non-Text, and non-global targets remain raw with non-fatal D011 | Shared marker-rich fragments need reuse even when the alias marker comes from sheet data. One level avoids a second recursive language, alias cycles, and surprising local-scope capture; raw fallback plus a data-time notice preserves the gentle marker behavior of ◆44/◆47 without hiding a misspelling |
 
 ---
 
@@ -282,6 +283,18 @@ exactly `size`): Dicier glyphs draw at the text's `color` in the default
 colors. Diagnostics reuse the icon/asset codes: unknown LITERAL Dicier
 marker → W004, unknown literal asset name → W005, computed unknown code →
 D005 at data time (renders as the raw marker text — its own indicator).
+
+**Resolved-text aliases (◆52):** after the `text:` expression resolves (including
+sheet-cell content), `{alias:name}` looks up only the program-scope `let name:` for
+the current Card. If that binding evaluates to Text, the marker is replaced with
+its resolved value. Alias expansion is one pass only: an alias marker introduced
+by the replacement remains raw. The existing scoped-color, Dicier, and asset-marker
+pass then parses the expanded string, so a reusable let may contain any of those
+markers. A missing name, local let/parameter, or non-Text global emits non-fatal
+D011, leaves the original `{alias:name}` visible, and continues rendering. Top-level
+Text lets are externally addressable even when
+no source literal names them (a marker may arrive from a cell), so they and their
+global-let dependencies are exempt from W002 unused-binding warnings.
 
 **Scoped color (◆47):** `{color:red}attack{/color}` changes the paint color of
 only the enclosed resolved text. A six-digit hex color works too; scopes nest,
@@ -611,7 +624,10 @@ loop hiding an outer binding is W001; when an existing sheet column hides a new 
 the warning is anchored once at the global declaration so untouched sheet code does
 not gain a new warning range. W002 applies to lets with no syntactic reference in
 their permitted scope; global use and Template use are followed transitively through
-calls.
+calls. ◆52 adds one data-addressable exception: top-level globals inferred as Text
+for a Card, plus their transitive global-let dependencies, are alias exports and do
+not receive W002 even when source code contains no marker — `{alias:name}` may arrive
+only from that Card's sheet cells.
 
 ### 3.7 Card generation (⚑1)
 
@@ -657,7 +673,7 @@ grid keeps last good schema — §4.2):
 | E009 | cyclic `let` dependency or Template-call dependency (full path, one primary error per cycle) |
 | E010 | Template composition exceeds 64 active calls or 10,000 call-reached node visits per Card face |
 | W001 | shadowed binding |
-| W002 | unused declaration |
+| W002 | unused declaration (except top-level Text alias exports and their global-let dependencies, ◆52) |
 | W003 | explicit `y_units` makes units non-square (suppressed when the value exactly equals the square `auto` value) |
 | W004 | unknown icon code literal (Icon `code:` or an inline `{marker}`, ◆44) — may still be a valid glyph; the curated list is non-exhaustive † |
 | W005 | unknown asset — a literal `asset:` Image `src:` or inline `{asset:name}` marker (◆44) whose name isn't in the current Assets-drawer library (§7.4); never an error, since the asset may be about to be uploaded |
@@ -666,8 +682,10 @@ grid keeps last good schema — §4.2):
 W004 in Revision A because the code list is provably incomplete.)*
 
 **Data-time** (⚑8, ◆19). D001–D003 flag the offending cell red **and** render the
-affected card(s) as error placeholders; D004–D010 arise from computed values with no
-single source cell (◆†), so they mark the placeholder card / problems strip only:
+affected card(s) as error placeholders; D004–D011 arise from computed values with no
+single source cell (◆†), so they appear in the card/problems surfaces. D005 and D011
+are diagnostic-only and keep the affected card rendered; the others use placeholders
+or truncation as stated:
 
 | Code | Meaning |
 |---|---|
@@ -681,6 +699,7 @@ single source cell (◆†), so they mark the placeholder card / problems strip 
 | D008 | non-finite numeric result during evaluation (division by zero) → placeholder card |
 | D009 | QR data is too long for one code (exceeds the `level:`'s capacity, even at the largest QR version) → placeholder card (§7.3) |
 | D010 | Template composition exceeds 64 active calls or 10,000 call-reached node visits while evaluating one face/copy → placeholder card |
+| D011 | `{alias:name}` in resolved Text/TextBox content names no top-level binding or a binding that does not resolve to Text for this Card → raw marker stays visible; diagnostic only, not a placeholder (◆52) |
 
 ### 3.9 The demo project (slice acceptance fixture)
 
@@ -1212,6 +1231,16 @@ only: bold/italic runs remain §8.
   string (after interpolation) — the only design under which cell-borne
   markers work, and it needs no lexer or parser change at all (braces
   are ordinary string characters to §3.1).
+- **Aliases (◆52):** before those markers parse, scan the resolved string once
+  for `{alias:name}`. A target is eligible only when it is the top-level
+  `let name:` and its value in the current Card is Text; replace it with that
+  resolved Text. Do not scan replacements for more aliases. Unknown names,
+  local lets/parameters, and non-Text globals retain their complete raw marker
+  and produce non-fatal D011 once per affected alias/card; the card still renders.
+  Because this pass follows expression/interpolation
+  resolution, alias markers originating in sheet cells behave identically to
+  literal ones; because ordinary marker parsing follows it, expanded fragments
+  may contain color scopes, Dicier codes, and asset markers.
 - **Run model:** the evaluator splits each line into runs and computes
   every run's x-offset in card units; `TextShape` gains `runs`,
   `TextBoxShape.lines` becomes lines-of-runs (each line also carries its

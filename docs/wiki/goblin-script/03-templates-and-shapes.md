@@ -142,7 +142,7 @@ Card: Monster
   y_units: auto    # → 28 units tall, units stay square
 ```
 
-- **`size:`** picks the physical card — see [Card sizes](card-sizes.md).
+- **`size:`** picks the physical card — see [Card sizes](../reference/01-card-sizes.md).
 - **`x_units: N`** slices the card's *width* into N units. One unit = width ÷ N.
 - **`y_units: auto`** keeps units square and derives the vertical count. A poker card
   at 20 wide is exactly 28 tall. You *can* force an integer instead, which stretches
@@ -159,11 +159,11 @@ card, whatever size the card turns out to be.
 | Shape | Required | Optional (default) | Notes |
 |---|---|---|---|
 | `Rectangle` | `x y width height color` | `pivot` (top_left), `rotate` (0) | a filled box |
-| `Text` | `x y size text` | `color` (black), `pivot` (top_left), `rotate` (0) | one line; `size` is text height in units — see [Text & TextBox](text.md) |
-| `TextBox` | `x y width height text size` | `color` (black), `align` (left), `line_height` (1.3), `overflow` (clip), `pivot` (top_left), `rotate` (0) | wrapped multi-line text in a box — see [Text & TextBox](text.md) |
-| `Icon` | `x y size code` | `color` (black), `pivot` (top_left), `style` (flat_dark), `rotate` (0) | a game glyph — see [Icons](icons.md) |
-| `Image` | `x y width height src` | `fit` (contain), `color` (white/unchanged), `pivot` (top_left), `rotate` (0) | your own artwork with optional multiply tint — see [Images](images.md) |
-| `Qr` | `x y size data` | `color` (black), `background` (white), `level` (m), `pivot` (top_left), `rotate` (0) | a scannable QR code — see [QR codes](qr-codes.md) |
+| `Text` | `x y size text` | `color` (black), `font` (geist), `pivot` (top_left), `rotate` (0) | one line; `size` is text height in units — see [Text & TextBox](04-text.md) |
+| `TextBox` | `x y width height text size` | `color` (black), `font` (geist), `align` (left), `line_height` (1.3), `overflow` (clip), `pivot` (top_left), `rotate` (0) | wrapped multi-line text in a box — see [Text & TextBox](04-text.md) |
+| `Icon` | `x y size code` | `color` (black), `pivot` (top_left), `style` (flat_dark), `rotate` (0) | a game glyph — see [Icons](../reference/03-icons.md) |
+| `Image` | `x y width height src` | `fit` (contain), `color` (white/unchanged), `pivot` (top_left), `rotate` (0) | your own artwork with optional multiply tint — see [Images](05-images.md) |
+| `Qr` | `x y size data` | `color` (black), `background` (white), `level` (m), `pivot` (top_left), `rotate` (0) | a scannable QR code — see [QR codes](06-qr-codes.md) |
 | `Repeat: N as i` | — | — | draws its children N times — see below |
 
 ## Pivots — which point of the shape `x`/`y` place
@@ -276,7 +276,7 @@ Repeat: 5 as i
 
 Rotation changes how a shape is **painted, nothing more**: a rotated
 `TextBox` still wraps against its unrotated width, and the
-[exported PDF](pdf-export.md) shows exactly what the preview shows. Angles
+[exported PDF](../export-and-project/01-pdf-export.md) shows exactly what the preview shows. Angles
 outside 0–360 work the obvious way — `rotate: -90` is a quarter-turn
 counter-clockwise, the same as `270`.
 

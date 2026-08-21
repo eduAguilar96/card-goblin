@@ -14,7 +14,7 @@ Qr:
   data: [code]
 ```
 
-`data:` is a text [expression](expressions.md), so the code can come straight from a
+`data:` is a text [expression](07-expressions.md), so the code can come straight from a
 sheet column (`data: [code]`), be interpolated (`data: "https://example.com/[code]"`),
 or be computed with a conditional — the usual coercions apply.
 

@@ -19,14 +19,14 @@ Everything the editor would need to pick up where you left off:
 - every sheet's rows — including which rows you've touched, so dimmed pristine
   rows come back dimmed, and including values from columns you've removed
   (they resurface if the column comes back),
-- every [uploaded asset](assets.md) in your Assets drawer — the
+- every [uploaded asset](04-assets.md) in your Assets drawer — the
   art itself, not a reference to it, so the file is self-contained,
 - a format version, so future versions of CardGoblin can keep reading old files.
 
 The code-and-sheets part is the exact same shape
-[autosave](autosave.md) writes to your browser; assets are the one addition a
+[autosave](02-autosave.md) writes to your browser; assets are the one addition a
 project *file* carries that the autosave slot doesn't (see
-[Autosave](autosave.md) for why). Either way it's plain JSON — readable in any
+[Autosave](02-autosave.md) for why). Either way it's plain JSON — readable in any
 text editor, friendly to version control (art included, as base64 text).
 
 ## Export
@@ -60,7 +60,7 @@ them — a backup silently missing its art isn't a backup.
 
 After you confirm, the imported project is live immediately — and about a
 second later it becomes the autosaved project too, just as if you'd typed it
-(its assets, meanwhile, are already saved — see [Autosave](autosave.md)).
+(its assets, meanwhile, are already saved — see [Autosave](02-autosave.md)).
 Reloading brings back the import, not what you had before.
 
 ### Older files still import
@@ -74,6 +74,7 @@ version.
 ## More than one project
 
 Files are the multi-project story for now: the editor still has a single slot
-(see [Autosave](autosave.md)), so keeping several projects means keeping
+(see [Autosave](02-autosave.md)), so keeping several projects means keeping
 several `.cardgoblin.json` files and importing the one you want to work on.
-Accounts and cloud projects are on the [roadmap](roadmap.md).
+There is no public account or hosted project list; project files are the supported
+way to keep several projects or move one between browsers.

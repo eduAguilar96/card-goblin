@@ -1,93 +1,80 @@
 # CardGoblin
 
-![logo](https://i.imgur.com/p2Fph5X.png)
+![CardGoblin logo](public/card_goblin_logo.svg)
 
----
+CardGoblin is a browser-based tool for turning a small declarative script and a
+spreadsheet into a deck of print-at-home cards. Describe the layout once, keep each
+card's content in rows, preview the generated deck live, and export a true-to-size
+PDF.
 
-CardGoblin is a powerful, browser-based tool for board game designers to create professional-quality cards for games. It combines an intuitive scripting language with a built-in spreadsheet-like cell manager to streamline card generation and customization. Key features include:
+The public editor is local-first: code and rows autosave in this browser, uploaded
+images live in IndexedDB, and project files are the supported backup and transfer
+mechanism.
 
-- A simple, human-readable scripting language with support for attributes, conditional logic, and loops.
-- A built-in cell manager for organizing and referencing data rows, enabling dynamic card creation.
-- Enum-based validation for consistent data references and error prevention.
-- Real-time previews and PDF export for high-quality print-ready outputs.
+## Quick example
 
-Whether you're a seasoned designer or new to game creation, our tool simplifies the process so you can focus on bringing your ideas to life.
-
----
-
-![ui-image](https://i.imgur.com/yB7G85e.png)
-
----
-
-```
-Enum: "Suit"
+```goblin
+Enum: Suit
   case Rock
   case Paper
   case Scissors
 
-Template: "UserDefinedCardFront
-  Rectangle: "Banner"
-    x: 0
-    y: 0
-    width: full
-    height: 10
-    color: if [current_suit] == Rock then grey
-            else if [current_suit] == Paper then yellow
-            else purple
-  Text:
-    x: middle
-    y: 5
-    text: [name]
-  Text:
-    x: 16
-    y: 5
-    text: [cost]
+Sheet: Monsters
+  column name: Text
+  column cost: Number
 
-Template: "UserDefinedCardBack
-  Rectangle: "Back"
+Template: MonsterFront
+  Rectangle:
     x: 0
     y: 0
     width: full
     height: full
-    color: white
+    color: if [current_suit] == Suit.Rock then grey
+           else if [current_suit] == Suit.Paper then gold
+           else mediumpurple
+  Text:
+    x: 2
+    y: 2
+    size: 2
+    text: "[name] — [cost]"
 
-Card:
-  size: square
-  loop: Suit as current_suit
-  cardCount: [card_count]
+Card: MonstersBySuit
+  sheet: Monsters
+  size: poker
   x_units: 20
   y_units: auto
-  Front:
-    UserDefinedCardFront
-  Back:
-    UserDefinedCardBack
-
+  loop: Suit as current_suit
+  Front: MonsterFront
 ```
 
-> Note: the snippet above is the original vision sketch. The current, authoritative
-> language specification lives in [docs/DESIGN.md](docs/DESIGN.md).
-
----
+Each populated row generates one card for every `Suit` case. The editor checks
+references and types as you write, isolates bad row data to its affected cards, and
+keeps the last good preview visible while code is temporarily broken.
 
 ## Documentation
 
-The user-facing docs are a wiki: markdown under [`docs/wiki/`](docs/wiki), rendered
-in the app at **`/docs`**. Same files, both places — edit the markdown and the site
-follows.
+- [What is CardGoblin?](docs/wiki/getting-started/01-what-is-cardgoblin.md)
+- [Five-minute quickstart](docs/wiki/getting-started/02-quickstart.md)
+- [Goblin script reference](docs/wiki/goblin-script/01-basics.md)
+- [Developer guide](docs/development.md)
+- [Design and decision log](docs/DESIGN.md)
 
-- **[Wiki](docs/wiki)** — getting started, the Goblin script language, reference
-  tables (sizes, colors, icons), PDF export, current limits, and the roadmap.
-  Start at [What is CardGoblin](docs/wiki/getting-started/01-what-is-cardgoblin.md).
-- **[Developer Guide](docs/development.md)** — setup, commands, code map, testing
-  approach, and the manual smoke-test walkthrough.
-- **[Design Document](docs/DESIGN.md)** — the full language spec, architecture, and
-  decision log.
+User-facing documentation lives under [`docs/wiki/`](docs/wiki) and is rendered at
+`/docs`. Wiki links use their real numbered filenames so they work both on GitHub and
+on the generated documentation site.
 
-Adding a wiki page is one file: drop `docs/wiki/<section>/<NN>-<slug>.md` with
-`title`/`status`/`summary` frontmatter and it appears in the sidebar. Sections are
-declared in `src/lib/docs/nav.ts`.
+## Development
 
----
+Requires Node.js 22+.
+
+```bash
+npm install
+npm test
+npm run dev
+```
+
+See [the developer guide](docs/development.md) for type checking, linting, builds,
+architecture, and the manual smoke test.
 
 ## Credits
 

@@ -1872,6 +1872,7 @@ describe("never throws (⚑8)", () => {
       sheets: new Map(),
       templates: new Map(),
       globals: new Map(),
+      contextFreeAliases: new Map(),
       cards: [],
       templateUsage: new Map(),
     };
@@ -2743,6 +2744,275 @@ describe("virtual-column export data (◆48)", () => {
     expect(make('"first"').model.decks[0].cards[0].contentHash).toBe(
       make('"second"').model.decks[0].cards[0].contentHash,
     );
+  });
+});
+
+// -- top-level Text aliases --------------------------------------------------
+
+describe("{alias:name} expansion in Text/TextBox", () => {
+  const aliasProject = (
+    globals: string[],
+    textExpr: string,
+    rows: Record<string, string>[] = [{ t: "x" }],
+    cardExtra: string[] = [],
+  ): ProjectResult =>
+    projectOf(
+      src(
+        ...globals,
+        ...sheetLines(["t: Text"]),
+        ...textTemplate(textExpr),
+        ...CARD_LINES,
+        ...cardExtra.map((line) => `  ${line}`),
+        "  Front: T",
+      ),
+      { Sh: rows },
+    );
+
+  const shapeOf = (p: ProjectResult, card = 0): TextShape =>
+    p.model.decks[0].cards[card].front[0] as TextShape;
+
+  it("expands a Text global when the alias marker arrives from a sheet cell", () => {
+    const p = aliasProject(['let greeting: "Hello"'], "[t]", [{ t: "Say {alias:greeting}!" }]);
+    expect(p.dataDiagnostics).toEqual([]);
+    expect(shapeOf(p).text).toBe("Say Hello!");
+    expect(shapeOf(p).runs).toEqual([{ kind: "text", text: "Say Hello!", x: 0 }]);
+    // Text globals are data-addressable exports even when source code cannot
+    // reveal which alias name a row will supply.
+    expect(p.diagnostics.some((d) => d.code === "W002" && d.message.includes("greeting"))).toBe(
+      false,
+    );
+  });
+
+  it("parses ordinary color, Dicier, and asset markers after alias expansion", () => {
+    const p = aliasProject(
+      ['let decorated: "{color:red}hit {HEARTS}{asset:skull}{/color}"'],
+      '"{alias:decorated}"',
+    );
+    expect(p.dataDiagnostics).toEqual([]);
+    expect(shapeOf(p).runs.map((run) => run.kind)).toEqual(["text", "icon", "icon"]);
+    expect(shapeOf(p).runs.map((run) => run.color)).toEqual(["red", "red", "red"]);
+    expect(shapeOf(p).runs[1]).toMatchObject({
+      icon: { kind: "dicier", code: "HEARTS" },
+    });
+    expect(shapeOf(p).runs[2]).toMatchObject({
+      icon: { kind: "asset", name: "skull" },
+    });
+  });
+
+  it("keeps literal-host W004 markers distinct from alias-produced D005 markers", () => {
+    const p = aliasProject(
+      ['let fragment: "{ALIAS_BAD}"'],
+      '"{HOST_BAD} {alias:fragment}"',
+    );
+    expect(p.diagnostics.filter((d) => d.code === "W004")).toHaveLength(1);
+    const d005 = p.dataDiagnostics.filter((d) => d.code === "D005");
+    expect(d005).toHaveLength(1);
+    expect(d005[0].message).toContain("ALIAS_BAD");
+    expect(shapeOf(p).runs[0]).toMatchObject({
+      kind: "icon",
+      icon: { kind: "dicier", code: "HOST_BAD" },
+    });
+    expect(shapeOf(p).runs.some((run) => run.kind === "text" && run.text.includes("{ALIAS_BAD}"))).toBe(
+      true,
+    );
+  });
+
+  it("treats a marker assembled across an alias boundary as computed", () => {
+    const p = aliasProject(['let suffix: "ST_BAD}"'], '"{HO{alias:suffix}"');
+    expect(p.diagnostics.filter((d) => d.code === "W004")).toEqual([]);
+    expect(p.dataDiagnostics.filter((d) => d.code === "D005")).toHaveLength(1);
+    expect(shapeOf(p).text).toBe("{HOST_BAD}");
+    expect(shapeOf(p).runs).toEqual([{ kind: "text", text: "{HOST_BAD}", x: 0 }]);
+  });
+
+  it("expands exactly one level and keeps alias-produced aliases visible", () => {
+    const p = aliasProject(
+      ['let inner: "second"', 'let outer: "{alias:inner}"'],
+      '"{alias:outer}"',
+    );
+    expect(shapeOf(p).text).toBe("{alias:inner}");
+    expect(shapeOf(p).runs).toEqual([{ kind: "text", text: "{alias:inner}", x: 0 }]);
+    expect(p.dataDiagnostics).toEqual([]);
+  });
+
+  it("preserves brace escaping while allowing the following real alias", () => {
+    const p = aliasProject(['let value: "ok"'], '"{{{alias:value}"');
+    expect(shapeOf(p).text).toBe("{{ok");
+    expect(shapeOf(p).runs).toEqual([{ kind: "text", text: "{ok", x: 0 }]);
+  });
+
+  it("leaves unknown and non-Text aliases raw with non-fatal D011 diagnostics", () => {
+    const p = aliasProject(
+      ["let amount: 7"],
+      "[t]",
+      [{ t: "{alias:missing}/{alias:amount}" }],
+    );
+    const card = p.model.decks[0].cards[0];
+    expect(card.error).toBeUndefined();
+    expect(shapeOf(p).text).toBe("{alias:missing}/{alias:amount}");
+    expect(p.dataDiagnostics.map((d) => d.code)).toEqual(["D011", "D011"]);
+    expect(p.dataDiagnostics.every((d) => d.cardRef?.cardIndex === 0)).toBe(true);
+    expect(p.dataDiagnostics.map((d) => d.message).join(" ")).toContain("Unknown text alias");
+    expect(p.dataDiagnostics.map((d) => d.message).join(" ")).toContain("got Number");
+    // Only Text globals are alias exports; a non-Text global remains unused.
+    expect(p.diagnostics.some((d) => d.code === "W002" && d.message.includes("amount"))).toBe(
+      true,
+    );
+  });
+
+  it("keeps an invalid prepared Text alias raw instead of producing an unexplained D000", () => {
+    const p = aliasProject(['let broken: "[missing]"'], "[t]", [
+      { t: "{alias:broken}" },
+    ]);
+    expect(p.model.decks[0].cards[0].error).toBeUndefined();
+    expect(shapeOf(p).text).toBe("{alias:broken}");
+    expect(dataCodes(p)).toEqual(["D011"]);
+  });
+
+  it("keeps a Text alias with a cyclic dependency raw and non-fatal", () => {
+    const p = aliasProject(
+      ["let a: b", "let b: a", 'let wrapper: "[a]"'],
+      '"{alias:wrapper}"',
+    );
+    expect(p.model.decks[0].cards[0].error).toBeUndefined();
+    expect(shapeOf(p).text).toBe("{alias:wrapper}");
+    expect(dataCodes(p)).toEqual(["D011"]);
+  });
+
+  it("dedupes a repeated bad alias within one card combination", () => {
+    const p = aliasProject([], '"{alias:nope}/{alias:nope}"');
+    expect(p.dataDiagnostics.filter((d) => d.code === "D011")).toHaveLength(1);
+    expect(shapeOf(p).text).toBe("{alias:nope}/{alias:nope}");
+  });
+
+  it("uses the program namespace even when a parameter and column shadow the name", () => {
+    const p = projectOf(
+      src(
+        'let label: "global"',
+        ...sheetLines(["label: Text"]),
+        "Template: T",
+        "  param label: Text",
+        "  Text:",
+        "    x: 0",
+        "    y: 0",
+        "    size: 1",
+        '    text: "[label]|{alias:label}"',
+        ...CARD_LINES,
+        "  Front: T",
+        '    label: "parameter"',
+      ),
+      { Sh: [{ label: "column" }] },
+    );
+    expect(shapeOf(p).text).toBe("parameter|global");
+  });
+
+  it("prepares transitive Text dependencies without false W002 warnings", () => {
+    const p = aliasProject(
+      ['let prefix: "hit"', 'let decorated: "[prefix] {HEARTS}"'],
+      "[t]",
+      [{ t: "{alias:decorated}" }],
+    );
+    expect(shapeOf(p).text).toBe("hit {HEARTS}");
+    expect(p.diagnostics.filter((d) => d.code === "W002" && d.message.includes("Binding"))).toEqual(
+      [],
+    );
+  });
+
+  it("keeps [card] in a Text alias copy-varying", () => {
+    const p = aliasProject(
+      ['let numbered: "Card [card]"'],
+      '"{alias:numbered}"',
+      [{ t: "x" }],
+      ["count: 2"],
+    );
+    const [first, second] = p.model.decks[0].cards;
+    expect((first.front[0] as TextShape).text).toBe("Card 1");
+    expect((second.front[0] as TextShape).text).toBe("Card 2");
+    expect(first.front).not.toBe(second.front);
+  });
+
+  it("propagates data errors from a valid Text alias like an ordinary let reference", () => {
+    const p = projectOf(
+      src(
+        'let fragment: "[n]"',
+        ...sheetLines(["t: Text", "n: Number"]),
+        ...textTemplate("[t]"),
+        ...CARD_LINES,
+        "  Front: T",
+      ),
+      { Sh: [{ t: "{alias:fragment}", n: "" }] },
+    );
+    expect(errorCodes(p)).toEqual(["D003"]);
+    expect(dataCodes(p)).toEqual(["D003"]);
+    expect(dataCodes(p)).not.toContain("D011");
+  });
+
+  it("expands before TextBox wrapping", () => {
+    const p = projectOf(
+      src(
+        'let label: "alpha beta"',
+        ...sheetLines(["t: Text"]),
+        "Template: T",
+        "  TextBox:",
+        "    x: 0",
+        "    y: 0",
+        "    width: 3",
+        "    height: 10",
+        "    size: 1",
+        "    text: [t]",
+        ...CARD_LINES,
+        "  Front: T",
+      ),
+      { Sh: [{ t: "{alias:label}" }] },
+    );
+    const box = p.model.decks[0].cards[0].front[0] as TextBoxShape;
+    expect(box.lines.map(lineText)).toEqual(["alpha", "beta"]);
+  });
+
+  it("does not W002-warn an unconditional Text alias export in a cardless file", () => {
+    const p = compileProject('let fragment: "hello"\n', {});
+    expect(p.diagnostics).toEqual([]);
+  });
+
+  it("recognizes computed and transitive context-free Text exports without a Card", () => {
+    const p = compileProject(
+      src(
+        "let base: 7",
+        'let fragment: "value [base]"',
+        'let conditional: if 1 == 1 then "yes" else "no"',
+      ),
+      {},
+    );
+    expect(p.diagnostics).toEqual([]);
+  });
+
+  it("keeps W002 for invalid or sheet-context-dependent cardless Text-shaped globals", () => {
+    const p = compileProject(
+      src(
+        "Sheet: OnlyWithACard",
+        "  column value: Text",
+        'let missing_ref: "[missing]"',
+        'let sheet_ref: "[value]"',
+      ),
+      {},
+    );
+    const bindingWarnings = p.diagnostics
+      .filter((d) => d.code === "W002" && d.message.startsWith("Binding"))
+      .map((d) => d.message);
+    expect(bindingWarnings).toEqual([
+      "Binding 'missing_ref' is never used",
+      "Binding 'sheet_ref' is never used",
+    ]);
+  });
+
+  it("does not let a probe-only non-Text global hide an enum's W002", () => {
+    const p = aliasProject(
+      ["Enum: Suit\n  case Rock", "let pick: Suit.Rock"],
+      '"face"',
+    );
+    const unused = p.diagnostics.filter((d) => d.code === "W002").map((d) => d.message);
+    expect(unused.some((message) => message.includes("Binding 'pick'"))).toBe(true);
+    expect(unused.some((message) => message.includes("Enum 'Suit'"))).toBe(true);
   });
 });
 

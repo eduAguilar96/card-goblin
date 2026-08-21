@@ -73,6 +73,9 @@ export const GOBLIN_COLOR_SCOPE_OPEN_RE = new RegExp(
   "i",
 );
 export const GOBLIN_COLOR_SCOPE_CLOSE_RE = /\{\/color\}/;
+/** Resolved-text aliases use declaration-name grammar. Whether the named
+ * top-level let is Text-valued is semantic and remains the compiler's job. */
+export const GOBLIN_ALIAS_MARKER_RE = /(\{alias:)([A-Za-z][A-Za-z0-9_]*)(\})/;
 
 /** Extra fields (keyword lists) are referenced from `cases` via `@name`. */
 const monarchLanguage: languages.IMonarchLanguage = {
@@ -133,6 +136,7 @@ const monarchLanguage: languages.IMonarchLanguage = {
         ["variable", "number", "variable"],
       ],
       [/\[[A-Za-z][A-Za-z0-9_]*\]/, "variable"],
+      [GOBLIN_ALIAS_MARKER_RE, ["tag", "variable", "tag"]],
       [GOBLIN_COLOR_SCOPE_OPEN_RE, "tag"],
       [GOBLIN_COLOR_SCOPE_CLOSE_RE, "tag"],
       [/[^"[\\{]+/, "string"],

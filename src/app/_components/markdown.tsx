@@ -49,8 +49,9 @@ function Anchored({
   children: ReactNode;
 }): ReactElement {
   const id = headingId(children);
+  const label = flattenText(children);
   return (
-    <Tag id={id} className={`group scroll-mt-24 ${className}`}>
+    <Tag id={id} aria-label={label} className={`group scroll-mt-24 ${className}`}>
       {children}
       <a
         href={`#${id}`}

@@ -23,7 +23,7 @@ Rectangle:
 
 ## Colors from data
 
-`color:` is an [expression](expressions.md) like any other, so it can depend on the
+`color:` is an [expression](../goblin-script/07-expressions.md) like any other, so it can depend on the
 card:
 
 ```goblin
@@ -38,13 +38,13 @@ color: if [current_suit] == Suit.Rock then grey
 
 ## Images and part of a text
 
-On an [`Image`](images.md), `color:` is a multiply tint rather than a flat fill:
+On an [`Image`](../goblin-script/05-images.md), `color:` is a multiply tint rather than a flat fill:
 `white` (the default) leaves the art unchanged, white source pixels become the chosen
 color, and darker source detail stays darker. Source transparency is preserved.
 
 Inside `Text` or `TextBox`, nested `{color:red}…{/color}` tags can override the
 element's whole-text `color:` for selected words and inline icons without affecting
-wrapping. See [Scoped colors](text.md#scoped-colors) for the syntax and its raw-text
+wrapping. See [Scoped colors](../goblin-script/04-text.md#scoped-colors) for the syntax and its raw-text
 failure behavior.
 
 ## Names only mean colors in color positions
@@ -73,4 +73,4 @@ it's a color literal. Don't open a comment with something like `#ff0000`.
 Colors are emitted to PDF as-is in RGB. There's no CMYK conversion, no color
 management, and no bleed handling yet — for home printing and prototypes that's fine;
 for a print shop, check with them first. Print specifics are on the
-[roadmap](roadmap.md).
+[roadmap](../export-and-project/06-roadmap.md).

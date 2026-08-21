@@ -26,8 +26,8 @@ The editor lives at [`/editor`](/editor). Three panels and a status bar:
 Your Goblin script, in a real code editor (Monaco) with syntax highlighting and
 autocomplete. Suggestions appear as you type (or on **Ctrl+Space**) and fit where
 your cursor is: your column names inside `[brackets]`, the properties a block
-accepts, size presets, [color names](colors.md), enum cases after a `.`, and
-[icon codes](icons.md) inside `code:` strings. They come from your latest compile,
+accepts, size presets, [color names](../reference/02-colors.md), enum cases after a `.`, and
+[icon codes](../reference/03-icons.md) inside `code:` strings. They come from your latest compile,
 so they keep working while the code is broken mid-edit — the moment a `Sheet:`
 declares a column, that column is offered everywhere it's legal. Errors appear as
 red squiggles where they happen, and the status bar counts how many.
@@ -66,6 +66,11 @@ One tab per `Sheet:` you declare in code. The **columns come from your code**; t
   in.
 - Your data survives schema edits. Rename a column in code (same position, same type)
   and its data comes with it.
+- **Sheets can be renamed from the tab bar.** Select a tab and use **Rename**, or
+  double-click the tab. CardGoblin updates the `Sheet:` declaration and every
+  `Card`'s `sheet:` reference as one edit while preserving the rows. Renaming is
+  disabled while the code is broken, and invalid names or collisions are rejected
+  without changing the project.
 - **Columns are resizable.** Drag the right edge of a column header, or focus its
   resize handle and use the left/right arrow keys. Turn on **Wrap text** in the tab
   bar when you want long Text cells (such as card descriptions) to wrap and grow
@@ -76,7 +81,7 @@ One tab per `Sheet:` you declare in code. The **columns come from your code**; t
   yields A J B C D E F G H I; a number ≤ 0 or past the end clamps to the first or last
   row). Typing something that isn't a number, or the row's own current position,
   leaves the grid untouched. This number is exactly what
-  [`[row]`](../goblin-script/sheets-and-data.md) resolves to inside your templates —
+  [`[row]`](../goblin-script/02-sheets-and-data.md) resolves to inside your templates —
   reordering rows in the grid is how you reorder what your cards print.
 
 ## Status bar
@@ -86,13 +91,13 @@ indicator when the preview is showing an older render because the current code
 doesn't compile. To its right sit the editor's project-lifecycle controls:
 
 - **Assets** — opens the drawer of images uploaded from your machine (see
-  [Uploaded assets](assets.md)), with a count badge.
+  [Uploaded assets](../export-and-project/04-assets.md)), with a count badge.
 - **Export project** / **Import project** — download the whole project as a
-  file, or load one back — see [Project files](project-files.md).
+  file, or load one back — see [Project files](../export-and-project/03-project-files.md).
 - **Export Data** — download one CSV row per generated card, including virtual
-  columns — see [Data export](data-export.md).
+  columns — see [Data export](../export-and-project/08-data-export.md).
 - **Reset to demo** — wipes your saved project and loads the demo back. It
-  asks first (see [Autosave](autosave.md)).
+  asks first (see [Autosave](../export-and-project/02-autosave.md)).
 
 ## The compile loop
 
@@ -114,6 +119,6 @@ Two rules make it feel stable rather than twitchy:
 
 ## Saving your work
 
-The editor [autosaves](autosave.md) your code and rows to this browser and restores
+The editor [autosaves](../export-and-project/02-autosave.md) your code and rows to this browser and restores
 them when you come back — one save slot, one browser. For anything precious, export
-a [project file](project-files.md) too — it's a proper backup that travels.
+a [project file](../export-and-project/03-project-files.md) too — it's a proper backup that travels.

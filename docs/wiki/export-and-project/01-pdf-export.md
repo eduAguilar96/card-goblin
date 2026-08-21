@@ -70,7 +70,7 @@ the export — reduce the margin or spacing, or choose a larger page.
   before you export. If *every* card is a placeholder there's nothing to print and
   export is blocked.
 - **Images are checked before you export.** When the deck uses
-  [`Image`](images.md) shapes, the modal probes their URLs as it opens.
+  [`Image`](../goblin-script/05-images.md) shapes, the modal probes their URLs as it opens.
   Embedding an image into the PDF needs the host's permission (the file is fetched
   with `crossorigin=anonymous`, so the server must allow cross-origin use — CORS). Any
   image that can't be embedded is warned about in the modal — "N images could not be
@@ -85,5 +85,5 @@ Your option choices are remembered until you reload the page.
 ## Not yet
 
 Bleed, safe zones, CMYK, and per-deck page settings aren't there yet — see the
-[roadmap](roadmap.md). For a professional print run, check the printer's requirements
+[roadmap](06-roadmap.md). For a professional print run, check the printer's requirements
 before committing.

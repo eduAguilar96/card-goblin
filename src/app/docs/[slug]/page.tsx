@@ -12,6 +12,7 @@ import type { ReactElement } from "react";
 import { adjacentPages } from "@/lib/docs/nav";
 import { stripLeadingHeading } from "@/lib/docs/frontmatter";
 import { loadDocNav, loadDocPage, loadDocPages } from "@/lib/docs/pages";
+import { absoluteUrl } from "@/lib/site";
 import DocMarkdown from "../_components/docMarkdown";
 import StatusBadge from "../_components/statusBadge";
 
@@ -27,9 +28,23 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
   const { slug } = await params;
   const page = loadDocPage(slug);
   if (page === null) return {};
+  const url = absoluteUrl(`/docs/${page.slug}`);
+  const title = `${page.title} — Card Goblin docs`;
   return {
-    title: `${page.title} — Card Goblin docs`,
+    title: page.title,
     description: page.summary,
+    alternates: { canonical: url },
+    openGraph: {
+      type: "article",
+      url,
+      title,
+      description: page.summary,
+    },
+    twitter: {
+      card: "summary_large_image",
+      title,
+      description: page.summary,
+    },
   };
 }
 

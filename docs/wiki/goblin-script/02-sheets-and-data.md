@@ -53,7 +53,7 @@ An enum is a named, fixed set of cases. Two uses:
 1. **As a column type** — `column suit: Suit` makes those cells dropdowns, so a cell
    can never hold a value the code doesn't know about.
 2. **As a generator** — `loop: Suit as current_suit` on a Card produces one card per
-   case. See [Cards and generation](cards-and-generation.md).
+   case. See [Cards and generation](08-cards-and-generation.md).
 
 Refer to a case as `Suit.Rock`. Bare `Rock` also works wherever the expected type
 makes it unambiguous — comparing against an enum-typed reference, for instance.
@@ -72,12 +72,12 @@ Inside a template, `[name]` is looked up in this order, innermost first:
 
 ```goblin
 Card: Monster
-  sheet: Monsters              # 3. [name], [cost], [health], [count]
-  loop: Suit as current_suit   # 2. [current_suit]
+  sheet: Monsters              # sheet columns: [name], [cost], [health], [count]
+  loop: Suit as current_suit   # Card loop variable: [current_suit]
   ...
 
 Template: MonsterFront
-  Repeat: [health] as i        # 1. [i]
+  Repeat: [health] as i        # nearest local binding: [i]
     Icon:
       x: 1.5 + [i] * 2
 ```
@@ -94,7 +94,7 @@ These derived bindings are available anywhere a Card context exists, including
 Templates, `count:`, program lets, and virtual columns — no sheet column to declare:
 
 - **`[row]`** — the row's 1-based position in its sheet. It's exactly the number
-  shown (and edited — see [The editor](../getting-started/the-editor.md)) in the
+  shown (and edited — see [The editor](../getting-started/03-the-editor.md)) in the
   grid's row gutter, so every card generated from one row shares it.
 - **`[card]`** — the card's 1-based position within its *generated deck*, counting
   every `loop:` combination and `count:` copy. It increments once per physical card.
@@ -139,7 +139,7 @@ If you need an ID that survives sheet reordering, store it in a column such as `
 `[row]` is a visible position, not a hidden persistent row UUID.
 
 All generation bindings are derived, not stored: nothing about them lives in your rows,
-your autosave, or an exported [project file](../export-and-project/project-files.md) —
+your autosave, or an exported [project file](../export-and-project/03-project-files.md) —
 moving a row in the grid is what changes what `[row]` (and, downstream, `[card]`)
 resolve to for it.
 If a sheet declares a column with one of these names, that column **shadows** the
@@ -187,14 +187,14 @@ Two rules worth knowing:
   and left out of the deck. It joins as soon as you type into it.
 - **Bad cells are local.** A cell that doesn't fit its column flags red, and only the
   cards built from that row become placeholders. See
-  [Errors and diagnostics](errors.md).
+  [Errors and diagnostics](09-errors.md).
 
 ## Virtual columns
 
 Use `virtual column name: Type = expression` inside a `Sheet:` when an exported
 print manifest needs a computed value that users should not edit. Virtual columns
 do not appear in the grid or row storage; they are evaluated for each generated card
-and included by [Export Data](../export-and-project/data-export.md). Because they run
+and included by [Export Data](../export-and-project/08-data-export.md). Because they run
 in the Card context, formulas can use ordinary columns, loop variables, every
 generation binding (`[row]`, `[copy]`, `[deck]`, `[deck_card]`, `[card]`, and
 `[project_card]`), and program `let` bindings.

@@ -20,6 +20,8 @@
  * no check is a claim that will be wrong eventually.
  */
 
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { SIZE_PRESETS } from "@/lib/lang/check";
 import { CSS_COLOR_NAMES } from "@/lib/lang/css-colors";
@@ -61,6 +63,10 @@ import { SESSION_DURATION_MS } from "@/lib/cloud/session";
 import { loadDocPages } from "@/lib/docs/pages";
 
 const pages = loadDocPages();
+
+/** Cloud sync is an admin-only capability, so its guarded facts live in an
+ * operator document that is deliberately outside the public wiki. */
+const CLOUD_SYNC_TEXT = readFileSync(join(process.cwd(), "docs/cloud-sync.md"), "utf8");
 
 /** One page's prose, including its summary (summaries make claims too). */
 function pageText(slug: string): string {
@@ -189,14 +195,16 @@ const NUMERIC_CLAIMS: {
     expected: PERSIST_DEBOUNCE_MS / 1000,
   },
   {
-    label: "Cloud sync push debounce (stated in seconds, §7.6)",
+    label: "Admin cloud push debounce (stated in seconds, §7.6)",
     patterns: [/about \*\*(\d[\d,]*) seconds\*\* after your last change/g],
     expected: PUSH_DEBOUNCE_MS / 1000,
+    text: () => CLOUD_SYNC_TEXT,
   },
   {
-    label: "Cloud sync session length (stated in days, §7.6)",
+    label: "Admin cloud session length (stated in days, §7.6)",
     patterns: [/session lasts \*\*(\d[\d,]*) days\*\*/g],
     expected: SESSION_DURATION_MS / (24 * 60 * 60 * 1000),
+    text: () => CLOUD_SYNC_TEXT,
   },
   {
     label: "PDF raster DPI",
@@ -273,15 +281,15 @@ describe("generation-limit prose distinguishes placeholder from truncation", () 
 });
 
 // ---------------------------------------------------------------------------
-// Cloud sync: the sign-in collision prompt's copy (§7.6 FIX 4). Guard added
-// after an independent review caught the wiki saying "Your DEVICE has work
-// that isn't in the cloud" (three places, including the section heading)
+// Admin-only cloud sync: the sign-in collision prompt's copy (§7.6 FIX 4).
+// Guard added after an independent review caught the operator documentation
+// saying "Your DEVICE has work that isn't in the cloud"
 // while the code actually renders "Your EDITOR has work..." — exactly the
 // silent-paraphrase drift this whole file exists to catch, just for a
 // literal STRING rather than a number.
 // ---------------------------------------------------------------------------
 
-describe("the collision-prompt wiki text matches cloudStatusLabel's 'conflict' copy", () => {
+describe("the collision-prompt operator text matches cloudStatusLabel's 'conflict' copy", () => {
   const CONFLICT_SNAPSHOT: CloudSyncSnapshot = {
     status: "conflict",
     lastSyncedAt: null,
@@ -293,7 +301,7 @@ describe("the collision-prompt wiki text matches cloudStatusLabel's 'conflict' c
     syncGate: null,
   };
   const label = cloudStatusLabel(CONFLICT_SNAPSHOT, 0);
-  const text = pageText("cloud-sync");
+  const text = CLOUD_SYNC_TEXT;
 
   it("has a section heading naming the EXACT label, quoted", () => {
     expect(text, `no heading for "${label}" — it moved, was reworded, or drifted`).toContain(
@@ -592,6 +600,46 @@ describe("the inline-icons section (◆44) states the code's fixed Dicier face",
     // renderer's hardcoded ICON_FONT_FAMILIES[DEFAULT_ICON_STYLE] choice —
     // if inline markers ever gain a style choice, this prose must change.
     expect(section![1]).toContain(`\`${DEFAULT_ICON_STYLE}\``);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Resolved-text aliases (◆52)
+// ---------------------------------------------------------------------------
+
+describe("the resolved-text alias guide pins ◆52's safety boundaries", () => {
+  const text = pageText("text");
+  const section = /## Reusing resolved text with aliases([\s\S]*?)\n## /.exec(text);
+
+  it("documents cell-borne aliases, one-level expansion, and marker ordering", () => {
+    expect(section, "the resolved-text alias section moved or was retitled").not.toBeNull();
+    expect(section![1]).toMatch(/spreadsheet cell/i);
+    expect(section![1]).toMatch(/exactly one level/i);
+    expect(section![1]).toMatch(/then the ordinary scoped-color,[\s\S]*Dicier,[\s\S]*asset markers are parsed/i);
+    expect(section![1]).toContain('let damage_icon: "{color:#cc2222}{asset:swords}{/color}"');
+    expect(section![1]).toContain("Deal 2 {alias:damage_icon}.");
+    expect(section![1]).toContain("text: [desc]");
+    expect(section![1]).toMatch(/ordinary[\s\S]*interpolation cannot do this arbitrary placement/i);
+  });
+
+  it("keeps unknown and non-Text targets raw and non-fatal", () => {
+    expect(section![1]).toMatch(/unknown name[\s\S]*not Text[\s\S]*original `\{alias:name\}` visible/i);
+    expect(section![1]).toMatch(/non-fatal data diagnostic[\s\S]*D011/i);
+    expect(section![1]).toMatch(/still renders rather than becoming a placeholder/i);
+  });
+
+  it("documents the W002 exception for data-addressable Text globals", () => {
+    expect(section![1]).toMatch(/externally addressable/i);
+    expect(section![1]).toMatch(/do not receive[\s\S]*W002/i);
+  });
+});
+
+describe("the error reference documents non-fatal alias diagnostic D011", () => {
+  it("says the raw marker and rendered card survive", () => {
+    const text = `${pageText("errors")}\n${pageText("diagnostics")}`;
+    expect(text).toContain("D011");
+    expect(text).toMatch(/raw[\s\S]*marker stays visible/i);
+    expect(text).toMatch(/card still renders/i);
   });
 });
 

@@ -13,8 +13,8 @@ grid, and the templates that draw each face.
 Card: Monster
   sheet: Monsters              # required — which data feeds it
   size: poker                  # required — the physical card
-  x_units: 20                  # the coordinate grid
-  y_units: auto
+  x_units: 20                  # required — the coordinate grid width
+  y_units: auto                # required — auto keeps units square
   loop: Suit as current_suit   # optional — multiplies the deck
   count: [count]               # optional — copies per card (default 1)
   Front: MonsterFront          # required
@@ -22,11 +22,12 @@ Card: Monster
   Back: PlainBack              # optional — omitted means a plain white back
 ```
 
-`sheet:`, `size:`, and `Front:` are required; everything else has a default.
+`sheet:`, a physical size, `x_units:`, `y_units:`, and `Front:` are required;
+everything else has a default.
 Instead of a `size:` preset, a Card may declare an exact `width_mm:` +
-`height_mm:` pair — see [custom sizes](card-sizes.md).
+`height_mm:` pair — see [custom sizes](../reference/01-card-sizes.md).
 Indented lines below `Front:` and `Back:` pass explicit arguments to that Template;
-see [Template parameters](templates-and-shapes.md).
+see [Template parameters](03-templates-and-shapes.md).
 
 ## How many cards you get
 
@@ -39,7 +40,7 @@ for each non-empty row of the bound sheet
 ```
 
 Those copies are identical unless a face reads a per-instance generation binding such
-as [`[copy]`, `[deck_card]`, or `[project_card]`](sheets-and-data.md). Then each copy
+as [`[copy]`, `[deck_card]`, or `[project_card]`](02-sheets-and-data.md). Then each copy
 resolves on its own, since its number is genuinely different content.
 
 So the deck is **rows × loop options × count**. With the demo's two rows, three suits,
@@ -52,7 +53,7 @@ Multiple `loop:` lines nest in declaration order — rows × suits × elements �
 come out in the order you declared them in the enum.
 
 Every card generated this way can reference its row, copy, deck, deck-relative position,
-and project-wide position; see [generation identity](sheets-and-data.md).
+and project-wide position; see [generation identity](02-sheets-and-data.md).
 
 ## `count:`
 
@@ -81,7 +82,7 @@ generate normally.
 
 A project can have as many `Card:` blocks as you like, and they can share sheets and
 templates. Each becomes its own group in the preview, and in
-[PDF export](pdf-export.md) each deck starts on its own page — decks never share a
+[PDF export](../export-and-project/01-pdf-export.md) each deck starts on its own page — decks never share a
 sheet of paper.
 
 `[card]` intentionally restarts for every Card block; `[deck_card]` is its more explicit

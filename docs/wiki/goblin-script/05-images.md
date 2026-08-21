@@ -17,7 +17,7 @@ Image: "Portrait"
   color: teal
 ```
 
-`src:` is a text [expression](expressions.md), so the URL can come straight from a
+`src:` is a text [expression](07-expressions.md), so the URL can come straight from a
 sheet column (`src: [art_url]`) or be built with interpolation, and different rows get
 different art.
 
@@ -96,7 +96,7 @@ While an image downloads, its box shows a subtle gray placeholder; if the source
 to load, the box turns into an amber crossed-out placeholder instead. **Neither is a
 code or data error** — the rest of the card renders normally, and fixing the source
 fixes the box. PDF export has one extra requirement for URL art — see
-[PDF export](pdf-export.md).
+[PDF export](../export-and-project/01-pdf-export.md).
 
 ## Art with no hosting — uploaded assets
 
@@ -112,7 +112,7 @@ Image: "Portrait"
   src: "asset:dragon_art"
 ```
 
-See [Uploaded assets](assets.md) for the drawer itself, the 2 MB cap, and how
+See [Uploaded assets](../export-and-project/04-assets.md) for the drawer itself, the 2 MB cap, and how
 uploads are stored — everything about `src:` being a Text expression still
 applies, so `src: [art]` and `src: "asset:[art]"` work exactly like they do with a
 URL.

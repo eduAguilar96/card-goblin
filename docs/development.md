@@ -17,7 +17,7 @@ npm install
 | Command | What it does |
 |---|---|
 | `npm run dev` | dev server → http://localhost:3000 (editor at `/editor`) |
-| `npm test` | full vitest suite (sub-second) |
+| `npm test` | full vitest suite |
 | `npx tsc --noEmit` | strict type check |
 | `npm run lint` | ESLint (prints a `next lint` deprecation notice — needs migration before Next 16) |
 | `npm run build` | production build — must stay green with `/editor` static. **Stop `npm run dev` first:** both write to `.next/`, and a production build removes the manifests the dev server is holding open, which makes every route 500 with `ENOENT … routes-manifest.json`. Recovery is `rm -rf .next` + restart dev. |
@@ -93,20 +93,24 @@ User-facing docs live as markdown in [`docs/wiki/`](wiki) and are rendered by th
   renaming a file changes its link.
 - **Add a section:** one entry in `SECTIONS` (`src/lib/docs/nav.ts`) plus the
   directory.
-- **Link between pages** with relative `.md` paths (`../reference/colors.md`) so the
+- **Link between pages** with real relative `.md` paths
+  (`../reference/02-colors.md`) so the
   files stay browsable on GitHub; the renderer rewrites them to `/docs/<slug>`. Links
   that leave the wiki become GitHub URLs.
 - Pages are **statically generated** — the `fs` reads happen during `next build`.
 
 Two test files keep the wiki honest, both run by `npm test`:
 
-- `__tests__/content.test.ts` — frontmatter, unique slugs, and every internal link
-  pointing at a page that exists. A broken cross-link fails the suite.
+- `__tests__/content.test.ts` — frontmatter, unique slugs, real GitHub-relative file
+  paths, rendered anchors, and every internal link pointing at a page that exists. A
+  broken cross-link fails the suite.
 - `__tests__/docFacts.test.ts` — the wiki's numbers and tables checked against the
   constants they describe: card-size and PDF page-size presets, generation/repeat
   caps, per-element defaults and closed vocabularies, the Dicier code count, CSS
   color names, reserved words, and timing/size constants — see the file's import
-  block for the exact, current list. The checks are **bidirectional**: nothing the
+  block for the exact, current list. Admin-only cloud timing and collision-copy facts
+  are checked against `docs/cloud-sync.md`, outside the public wiki. The checks are
+  **bidirectional**: nothing the
   wiki states may disagree with the code, *and* nothing in the code may be missing
   from the wiki — so adding a sixth card preset fails the suite until it's
   documented. When it fires, fix the docs or fix the pattern; don't delete the check.
@@ -158,14 +162,25 @@ subsystem:
    number cells to render them.
 7. **Schema from code** — add `column attack: Number`: column appears. Rename
    `health`→`hp` (column + refs): data migrates.
-8. **Enum columns** — add `column suit: Suit`: cells become dropdowns.
-9. **Views, front/back, zoom** — the preview opens on the single card; the
+8. **Sheet rename** — select the Monsters tab and use **Rename**: the `Sheet:`
+   declaration and every bound `Card` reference change together while rows stay put.
+   Break the code first and confirm Rename is disabled.
+9. **Grid editing** — resize a column, enable **Wrap text**, and move row 10 to
+   position 2 from its row-number field. Text rows grow, values stay intact, and
+   generated `[row]` values follow the new order.
+10. **Enum columns** — add `column suit: Suit`: cells become dropdowns.
+11. **Views, front/back, zoom** — the preview opens on the single card; the
    `‹ n/X ›` arrows walk every card of every deck (and across the boundary in a
    multi-deck project). Switch to grid with the toolbar's icon pair: the zoom
    slider replaces the nav. Front/back toggles in both (teal backs).
-10. **Icons** — change `"SWORDS"` to `"D6"`: glyph swaps; a bogus code warns and
-    renders as raw text (by design).
-11. **Export preview** — open Export PDF: the page preview redraws as options
+12. **Text and assets** — upload a small image, use it as `asset:<name>` and as an
+    inline `{asset:name}` marker, then try a scoped color and `{alias:name}` fragment.
+    Reload and confirm the asset and text survive.
+13. **QR** — add a `Qr` whose `data:` comes from a Text column; confirm row changes
+    redraw it and over-capacity content makes only the affected card a placeholder.
+14. **Project and data files** — export a project, reset, import it, and verify code,
+    rows, and assets return. Export Data and confirm loops/copies each have a CSV row.
+15. **Export preview** — open Export PDF: the page preview redraws as options
     change (raise the margin → fewer cards per page; cut lines off → lines
     vanish), and paging to 2 shows the duplex back with mirrored columns. Set the
     margin to 100 → fit error, "No pages to lay out", Export disabled.
@@ -180,9 +195,10 @@ Headless browser screenshot (no driver installed; one-shot only):
 ## Deployment
 
 The app builds and runs with zero configuration — signed-out, fully local editing is
-the default and needs nothing set up. The one optional piece is **cloud sync**
-(§7.6): turning it on needs six env vars, an R2 bucket, and its CORS policy — see
-[`docs/deployment.md`](deployment.md) for the full runbook, and
+the public product and needs nothing set up. A hidden, single-admin cloud mirror
+(§7.6) is retained for the operator; it is not a public account or sync offering.
+See [`docs/cloud-sync.md`](cloud-sync.md) for its scope and
+[`docs/deployment.md`](deployment.md) for the runbook, plus
 [`src/lib/cloud/`](../src/lib/cloud) for the code (`r2.ts` the storage port,
 `session.ts` the auth crypto, `auth.ts`/`projectPayload.ts` the HTTP glue) plus
 `src/app/api/cloud/` for the routes and `src/app/editor/_store/cloudSync.ts` for the

@@ -6,7 +6,7 @@ summary: Bring your own art with no hosting — the Assets drawer, the 2 MB cap,
 
 # Uploaded assets
 
-`src:` on an [`Image`](images.md) doesn't have to be a URL. The
+`src:` on an [`Image`](../goblin-script/05-images.md) doesn't have to be a URL. The
 **Assets** drawer holds pictures uploaded straight from your machine, so your own
 art can go on a card with nothing to host and no link to keep alive.
 
@@ -56,23 +56,23 @@ warning — you might be about to upload it.
 
 ## Where uploads are stored
 
-Uploads live in this browser's storage, separately from the code-and-rows
-[autosave](autosave.md): they save **the moment you upload them**, not on
+Uploads live in this browser's IndexedDB, separately from the code-and-rows
+[autosave](02-autosave.md): they save **the moment you upload them**, not on
 autosave's one-second debounce, and they survive a reload the same way the rest of
 your project does. **Reset to demo** and a project-file **import** both clear your
 uploads together with your code and rows — two separate stores under the hood,
 cleared as one.
 
-Uploaded assets always embed in an [exported PDF](pdf-export.md) — unlike URL art,
+Uploaded assets always embed in an [exported PDF](01-pdf-export.md) — unlike URL art,
 they never depend on a host allowing cross-origin use, since the file never leaves
 your browser.
 
-[Exporting a project file](project-files.md) bundles your uploads into the file
+[Exporting a project file](03-project-files.md) bundles your uploads into the file
 itself — the art, not just a reference to it — so handing someone a
 `.cardgoblin.json` hands them the art too. A file exported before uploaded assets
 existed has no art in it, and importing one clears your asset library, since
 there's nothing in the file to replace it with.
 
-One library per browser, the same one save slot [autosave](autosave.md) uses — it
-doesn't roam to another browser or device on its own; a
-[project file](project-files.md) does.
+One library per browser profile, alongside the one save slot
+[autosave](02-autosave.md) uses. It does not roam to another browser or device;
+an exported [project file](03-project-files.md) is the supported way to move it.

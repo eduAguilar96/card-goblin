@@ -53,8 +53,10 @@ reference.
 
 Several newer forms are contextual, not reserved names: `let` is special only in
 `let name: value`, `param` only in `param name: Type` directly inside a Template,
-and capitalized `If:`/`Else:` only where a Template node can appear. `column let: Text`,
-`column param: Text`, `Template: If`, and `Front: If` are therefore still legal.
+`virtual` only in `virtual column name: Type = expression` inside a Sheet, and
+capitalized `If:`/`Else:` only where a Template node can appear. `column let: Text`,
+`column param: Text`, `column virtual: Text`, `Template: If`, and `Front: If` are
+therefore still legal.
 
 ## Labels
 
@@ -93,6 +95,6 @@ text: "Cost: [cost]"     # interpolated inside a string
 text: "Card [card:03]"   # Number zero-padded to a minimum width of 3
 ```
 
-Where those values come from is [Sheets and data](sheets-and-data.md), including the
+Where those values come from is [Sheets and data](02-sheets-and-data.md), including the
 Number-only `[name:0N]` interpolation format. To write a literal `[` inside a string,
 double it: `[[`.

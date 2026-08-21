@@ -39,11 +39,10 @@ export const metadata: Metadata = {
     "card generator",
     "custom playing cards",
     "card game prototype",
-    "print-ready PDF cards",
+    "print-at-home PDF cards",
     "tabletop game design tool",
   ],
   alternates: {
-    canonical: SITE_URL,
     types: { "application/rss+xml": `${SITE_URL}/blog/rss.xml` },
   },
   openGraph: {
@@ -51,7 +50,6 @@ export const metadata: Metadata = {
     siteName: SITE_NAME,
     title: SITE_NAME,
     description: SITE_DESCRIPTION,
-    url: SITE_URL,
     locale: "en_US",
   },
   twitter: {

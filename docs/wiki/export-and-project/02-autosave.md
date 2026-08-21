@@ -7,7 +7,7 @@ summary: Your project saves itself in this browser — what persists, when, and 
 # Autosave
 
 Your project — the code and every spreadsheet row — saves itself to this browser as
-you work, and comes back when you reopen [the editor](the-editor.md). There is no
+you work, and comes back when you reopen [the editor](../getting-started/03-the-editor.md). There is no
 save button and nothing to configure.
 
 ## What saves, and when
@@ -16,22 +16,30 @@ save button and nothing to configure.
   touched — so dimmed pristine rows come back dimmed.
 - **When:** about **1 second** after your last change, and immediately when you
   switch away from the tab or close the page.
-- **Where:** this browser on this machine (local storage). Nothing leaves your
-  computer.
+- **Where:** this browser profile on this machine, in `localStorage`. The public
+  editor does not upload it.
 
 What you had is what you get back. If you reload mid-edit with broken code, the
 editor restores the broken code, squiggles and all — not some older working version.
 
 ## Uploaded assets save differently
 
-Images you upload through the **Assets** drawer aren't part of the save above —
-they write to this browser's storage **the moment you upload them**, not on the
-1-second debounce, and they survive a reload the same way the rest of your
-project does. The distinction only matters for one thing: **Reset to demo**
-below and a project-file **import** both clear the code-and-sheets slot AND the
-asset library together, but they're two separate stores under the hood (which
-is also why an old, asset-free project file can still restore your code even
-though it clears your uploads — see [Project files](project-files.md)).
+Images you upload through the **Assets** drawer aren't part of the save above. They
+write to IndexedDB **the moment you upload them**, not on the 1-second debounce, and
+survive a reload. **Reset to demo** and project-file **import** clear the
+code-and-sheets slot and the asset library together, but they are separate stores
+under the hood. That is also why an old, asset-free project file can restore its
+code while clearing your uploads — see [Project files](03-project-files.md).
+
+## Cache is not storage
+
+The compiled preview is kept in memory and disappears when the page closes. Your
+browser may also cache CardGoblin's own JavaScript, fonts, icons, and other static
+files as it would for any website. That HTTP cache can make the app load faster, but
+it does not contain the authoritative copy of your project and does not move work
+between browsers. Browser settings often group cache, cookies, localStorage, and
+IndexedDB under **site data**; clearing all site data removes the autosave and
+uploaded assets.
 
 ## Reset to demo
 
@@ -39,26 +47,16 @@ though it clears your uploads — see [Project files](project-files.md)).
 then loads the demo deck. It asks before doing it, because there is only one project
 slot and one asset library: the demo *replaces* your work.
 
-## How this relates to cloud sync
-
-Everything above is local to this browser — the whole point of autosave. If whoever
-runs this copy of CardGoblin has turned on [cloud sync](cloud-sync.md), signing in
-mirrors the SAME project (and your uploaded assets) to a server, so another browser
-signed in with the same password can pick it up too. Cloud sync doesn't change
-anything about autosave itself: this browser keeps saving locally exactly as
-described here, whether or not you're signed in — the cloud copy is a mirror kept in
-sync roughly every 10 seconds, not a replacement for the local one.
-
 ## The limits
 
 - **One project, one browser.** A single save slot, tied to this browser profile.
   Another browser, another device, or a private window starts from the demo. To
   move a project across, or to keep several, export and import
-  [project files](project-files.md).
+  [project files](03-project-files.md).
 - **Two tabs fight.** With the editor open in two tabs, the tab that changed last
   wins; the other tab's changes are gone on its next load.
 - **It's browser storage, not a backup.** Clearing site data deletes the project.
-  For anything you'd mind losing, export a [project file](project-files.md).
+  For anything you'd mind losing, export a [project file](03-project-files.md).
 - **Private mode may turn it off.** If the browser refuses storage, the status bar
   shows a quiet **autosave off** and the editor works normally for the session — but
   nothing survives a reload.

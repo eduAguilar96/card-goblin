@@ -147,6 +147,64 @@ describe("buildCompletionSnapshot", () => {
   it("null/null yields the empty universe", () => {
     expect(buildCompletionSnapshot(null, null)).toEqual(EMPTY_SNAPSHOT);
   });
+
+  it("collects computed and transitive context-free Text aliases without a Card", () => {
+    const snapshot = buildCompletionSnapshot(
+      compileSource(src(
+        "let base: 7",
+        'let fragment: "value [base]"',
+        'let conditional: if 1 == 1 then "yes" else "no"',
+        "let count: 3",
+      )).bindings,
+      null,
+    );
+    expect(snapshot.textAliases).toEqual(["fragment", "conditional"]);
+  });
+
+  it("omits invalid and sheet-dependent Text-shaped aliases without a Card", () => {
+    const snapshot = buildCompletionSnapshot(
+      compileSource(src(
+        "Sheet: OnlyWithACard",
+        "  column value: Text",
+        'let missing_ref: "[missing]"',
+        'let sheet_ref: "[value]"',
+        'let plain: "ok"',
+      )).bindings,
+      null,
+    );
+    expect(snapshot.textAliases).toEqual(["plain"]);
+  });
+
+  it("keeps alias declaration order and deduplicates types prepared for several Cards", () => {
+    const bindings = compileSource(src(
+      "let row_label: [label]",
+      'let badge: "x"',
+      "Sheet: A",
+      "  column label: Text",
+      "Sheet: B",
+      "  column label: Text",
+      "Template: T",
+      "  Text:",
+      "    x: 1",
+      "    y: 1",
+      "    size: 1",
+      '    text: "x"',
+      "Card: ACard",
+      "  sheet: A",
+      "  size: poker",
+      "  x_units: 20",
+      "  Front: T",
+      "Card: BCard",
+      "  sheet: B",
+      "  size: poker",
+      "  x_units: 20",
+      "  Front: T",
+    )).bindings;
+    expect(buildCompletionSnapshot(bindings, null).textAliases).toEqual([
+      "row_label",
+      "badge",
+    ]);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -183,12 +241,51 @@ describe("plain strings", () => {
     expect(at(src("Template: T", "  Text:", '    text: "Hel¦')).suggestions).toEqual([]);
   });
 
-  it("offers a paired color scope after an unescaped opening brace", () => {
+  it("offers paired resolved-text helpers after an unescaped opening brace", () => {
     const r = at(src("Template: T", "  Text:", '    text: "Pay {¦"'));
-    expect(labels(r)).toEqual(["color scope"]);
+    expect(labels(r)).toEqual(["color scope", "text alias"]);
     expect(byLabel(r, "color scope").insertText).toBe("color:${1:red}}${2:text}{/color}");
     expect(byLabel(r, "color scope").snippet).toBe(true);
+    expect(byLabel(r, "text alias").insertText).toBe("alias:${1:name}}");
+    expect(byLabel(r, "text alias").snippet).toBe(true);
     expect(at(src("Template: T", "  Text:", '    text: "Pay {{¦"')).suggestions).toEqual([]);
+  });
+
+  it("offers only known top-level Text lets inside an alias marker", () => {
+    const snapshot: CompletionSnapshot = {
+      sheets: [],
+      enums: [],
+      templates: [],
+      textAliases: ["badge", "rules_line"],
+    };
+    const doc = src("Template: T", "  TextBox:", '    text: "{alias:ru¦}"');
+    const r = at(doc, snapshot);
+    expect(labels(r)).toEqual(["badge", "rules_line"]);
+    expect(byLabel(r, "rules_line").detail).toContain("top-level Text let");
+    const clean = doc.replace("¦", "");
+    expect(clean.slice(r.replaceStart, r.replaceEnd)).toBe("ru");
+  });
+
+  it("uses brace-run parity for alias and color openers", () => {
+    const snapshot: CompletionSnapshot = {
+      sheets: [],
+      enums: [],
+      templates: [],
+      textAliases: ["fragment"],
+    };
+    expect(
+      labels(at(src("Template: T", "  Text:", '    text: "{{{alias:fr¦"'), snapshot)),
+    ).toEqual(["fragment"]);
+    expect(
+      at(src("Template: T", "  Text:", '    text: "{{alias:fr¦"'), snapshot).suggestions,
+    ).toEqual([]);
+
+    expect(
+      labels(at(src("Template: T", "  Text:", '    text: "{{{color:re¦"'), snapshot)),
+    ).toContain("red");
+    expect(
+      at(src("Template: T", "  Text:", '    text: "{{color:re¦"'), snapshot).suggestions,
+    ).toEqual([]);
   });
 
   it("offers the normal Color vocabulary inside a color-scope opener", () => {

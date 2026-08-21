@@ -1,14 +1,15 @@
 # Deployment: cloud sync
 
-The operational runbook for [cloud sync](DESIGN.md §7.6, decision ◆45) — the
-optional "Sign in" that mirrors a project across devices. Everything else about
+The operational runbook for the hidden, admin-only
+[cloud mirror](DESIGN.md#76-cross-device-sync--agreed-spec-2026-08-17) (decision
+◆45). Everything else about
 CardGoblin needs no setup: with none of the env vars below set, the app builds
 and runs exactly as it always has, signed-out and entirely local (that's the
 default, and it's meant to stay boring).
 
-This is a repo-level operational doc, not a wiki page — the *what it does and how
-it behaves* half lives at [`/docs/cloud-sync`](wiki/export-and-project/07-cloud-sync.md)
-(card designers); this page is *how to turn it on* (whoever runs the deployment).
+This is a repo-level operational doc, not a wiki page. Its behavior and supported
+one-admin scope live in [`docs/cloud-sync.md`](cloud-sync.md); this page is how the
+operator turns it on, secures it, and recovers it.
 
 ## The six required environment variables
 
