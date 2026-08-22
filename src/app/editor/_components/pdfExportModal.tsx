@@ -70,7 +70,10 @@ import {
   type PageSizeId,
   type PdfExportOptions,
 } from "@/app/editor/_components/pdfLayout";
-import { assemblePdf } from "@/app/editor/_components/pdfAssemble";
+import {
+  assemblePdf,
+  type AssemblePdfProgress,
+} from "@/app/editor/_components/pdfAssemble";
 import { focusableElementsIn } from "@/app/editor/_components/dialogFocusTrap";
 import { PdfPagePreview } from "@/app/editor/_components/pdfPagePreview";
 import type { ResolvedImage } from "@/app/editor/_components/cardSvg";
@@ -190,6 +193,14 @@ export interface PdfExportModalProps {
   initialMarginText?: string;
   initialSpacingText?: string;
   initialFailure?: string | null;
+  /** Static-render test seam for the in-flight progress UI. */
+  initialProgress?: PdfExportProgress | null;
+}
+
+export interface PdfExportProgress {
+  completed: number;
+  total: number;
+  label: string;
 }
 
 export function PdfExportModal({
@@ -200,6 +211,7 @@ export function PdfExportModal({
   initialMarginText,
   initialSpacingText,
   initialFailure = null,
+  initialProgress = null,
 }: PdfExportModalProps): ReactElement {
   const [options, setOptions] = useState<PdfExportOptions>(() => ({ ...sessionOptions }));
   const [marginText, setMarginText] = useState(
@@ -208,7 +220,8 @@ export function PdfExportModal({
   const [spacingText, setSpacingText] = useState(
     () => initialSpacingText ?? String(sessionOptions.spacingMm),
   );
-  const [working, setWorking] = useState(false);
+  const [working, setWorking] = useState(initialProgress !== null);
+  const [progress, setProgress] = useState<PdfExportProgress | null>(initialProgress);
   const [failure, setFailure] = useState<string | null>(initialFailure);
   /** Previewed page. Clamped at render, never in state (module note). */
   const [pageIndex, setPageIndex] = useState(0);
@@ -332,19 +345,64 @@ export function PdfExportModal({
     layout.placedCards === 0;
 
   const handleExport = async (): Promise<void> => {
+    const faceCount = layout.faceSpecs.size;
+    const pageCount = layout.pages.length;
+    const totalWork = Math.max(1, faceCount * 2 + pageCount + 1);
+    const reportAssemblyProgress = (next: AssemblePdfProgress): void => {
+      if (next.phase === "embedding") {
+        setProgress({
+          completed: faceCount + next.completed,
+          total: totalWork,
+          label: `Embedding card faces ${next.completed} of ${next.total}…`,
+        });
+      } else if (next.phase === "pages") {
+        setProgress({
+          completed: faceCount * 2 + next.completed,
+          total: totalWork,
+          label: `Building PDF pages ${next.completed} of ${next.total}…`,
+        });
+      } else {
+        setProgress({
+          completed: faceCount * 2 + pageCount + next.completed,
+          total: totalWork,
+          label: next.completed === 0 ? "Finalizing PDF…" : "PDF ready",
+        });
+      }
+    };
+
     setWorking(true);
     setFailure(null);
+    setProgress({
+      completed: 0,
+      total: totalWork,
+      label: `Preparing ${faceCount} card face${faceCount === 1 ? "" : "s"}…`,
+    });
     try {
       const images = await rasterize(
         layout.faceSpecs,
         imagesReady && resolvedImages !== null ? resolvedImages.images : undefined,
+        (next) => {
+          setProgress({
+            completed: next.completed,
+            total: totalWork,
+            label: `Rendering card faces ${next.completed} of ${next.total}…`,
+          });
+        },
       );
-      const bytes = await assemblePdf(layout, images, options);
+      // An injected rasterizer used by tests/integrators may omit callbacks;
+      // establish the completed boundary before assembly in either case.
+      setProgress({
+        completed: faceCount,
+        total: totalWork,
+        label: `Rendered ${faceCount} card face${faceCount === 1 ? "" : "s"}.`,
+      });
+      const bytes = await assemblePdf(layout, images, options, reportAssemblyProgress);
       downloadPdf(bytes, pdfFileName(model));
       onClose();
     } catch (error) {
       setFailure(error instanceof Error ? error.message : String(error));
       setWorking(false);
+      setProgress(null);
     }
   };
 
@@ -574,7 +632,6 @@ export function PdfExportModal({
                   crossMarks={options.crossMarks}
                   pageNumbers={options.pageNumbers}
                   sheetCount={layout.sheetCount}
-                  marginMm={options.marginMm}
                 />
               )}
             </div>
@@ -582,11 +639,24 @@ export function PdfExportModal({
         </div>
 
         <div className="mt-4 flex items-center justify-end gap-2">
-          {working && (
-            <span className="mr-auto text-xs text-gray-400" role="status">
-              Rendering {layout.faceSpecs.size} card face
-              {layout.faceSpecs.size === 1 ? "" : "s"}…
-            </span>
+          {working && progress !== null && (
+            <div className="mr-auto min-w-0 max-w-sm flex-1 text-xs text-gray-400">
+              <div className="mb-1 flex items-center justify-between gap-3" aria-live="polite">
+                <span className="truncate" role="status">
+                  {progress.label}
+                </span>
+                <span className="shrink-0 tabular-nums">
+                  {Math.round((progress.completed / progress.total) * 100)}%
+                </span>
+              </div>
+              <progress
+                aria-label="PDF export progress"
+                aria-valuetext={progress.label}
+                value={progress.completed}
+                max={progress.total}
+                className="block h-2 w-full accent-sky-500"
+              />
+            </div>
           )}
           <button
             type="button"

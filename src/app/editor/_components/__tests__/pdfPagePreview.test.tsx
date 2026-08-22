@@ -43,7 +43,6 @@ function renderPage(
       crossMarks={options.crossMarks}
       pageNumbers={options.pageNumbers}
       sheetCount={layout.sheetCount}
-      marginMm={options.marginMm}
     />,
   );
 }
@@ -135,6 +134,7 @@ describe("PdfPagePreview", () => {
     expect(front).toContain("data-page-number");
     expect(front).toContain("1/2 front");
     expect(back).toContain("1/2 back");
+    expect(front).not.toContain('fill-opacity="0.94"');
 
     const off = renderPage(layout, 0, DEFAULT_PDF_OPTIONS);
     expect(off).not.toContain("data-page-number");

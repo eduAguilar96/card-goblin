@@ -9,6 +9,8 @@ import {
   layoutPdf,
   pageNumberBoxPosition,
   pageNumberLabel,
+  PAGE_NUMBER_BOX_WIDTH_MM,
+  PAGE_NUMBER_GAP_MM,
   PAGE_SIZES,
   type PdfExportOptions,
 } from "../pdfLayout";
@@ -60,12 +62,29 @@ describe("computeGrid (§6.1 formula)", () => {
 });
 
 describe("page number placement", () => {
-  it("stays inside the configured right margin and centers in the bottom margin", () => {
-    const page = { widthMm: 215.9, heightMm: 279.4 };
-    expect(pageNumberBoxPosition(page, 10)).toEqual({ xMm: 175.9, yMm: 271.4 });
-    const zeroMargin = pageNumberBoxPosition(page, 0);
-    expect(zeroMargin.xMm).toBe(182.9); // 3 mm minimum print inset
-    expect(zeroMargin.yMm).toBe(271.4); // centered in a 10 mm fallback band
+  it("sits below every card and right-aligns with the final occupied row", () => {
+    const page = layoutPdf(demoModel(), opts({ backs: "none" })).pages[0];
+    const position = pageNumberBoxPosition(page);
+    const lowerEdge = Math.max(...page.cards.map((card) => card.yMm + card.heightMm));
+    const lowerRow = page.cards.filter(
+      (card) => Math.abs(card.yMm + card.heightMm - lowerEdge) < 1e-6,
+    );
+    const rightEdge = Math.max(...lowerRow.map((card) => card.xMm + card.widthMm));
+
+    expect(position.yMm).toBeCloseTo(lowerEdge + PAGE_NUMBER_GAP_MM, 6);
+    expect(position.xMm + PAGE_NUMBER_BOX_WIDTH_MM).toBeCloseTo(rightEdge, 6);
+    for (const card of page.cards) {
+      expect(position.yMm).toBeGreaterThan(card.yMm + card.heightMm);
+    }
+  });
+
+  it("never moves back over artwork when the label falls beyond the page", () => {
+    const position = pageNumberBoxPosition({
+      cards: [
+        { xMm: 10, yMm: 10, widthMm: 50, heightMm: 269.4, imageKey: "face" },
+      ],
+    });
+    expect(position.yMm).toBe(280.4); // Letter is only 279.4 mm tall.
   });
 });
 
@@ -312,6 +331,34 @@ describe("assemblePdf (node smoke with stub images)", () => {
     const withNumbers = await pageOperators(await assembleDemo({ pageNumbers: true }), 0);
     expect(without).not.toMatch(/\bTj\b/);
     expect(withNumbers).toMatch(/\bTj\b/);
+  });
+
+  it("reports embedding, page construction, and final save progress", async () => {
+    const layout = layoutPdf(demoModel(), opts({ backs: "none" }));
+    const images = new Map<string, Uint8Array>();
+    for (const key of layout.faceSpecs.keys()) images.set(key, PNG_1PX);
+    const seen: { phase: string; completed: number; total: number }[] = [];
+
+    await assemblePdf(layout, images, opts({ backs: "none" }), (progress) => {
+      seen.push(progress);
+    });
+
+    expect(seen[0]).toEqual({
+      phase: "embedding",
+      completed: 0,
+      total: layout.faceSpecs.size,
+    });
+    expect(seen).toContainEqual({
+      phase: "embedding",
+      completed: layout.faceSpecs.size,
+      total: layout.faceSpecs.size,
+    });
+    expect(seen).toContainEqual({
+      phase: "pages",
+      completed: layout.pages.length,
+      total: layout.pages.length,
+    });
+    expect(seen.at(-1)).toEqual({ phase: "saving", completed: 1, total: 1 });
   });
 
   it("faceKey distinguishes sides of one card", () => {

@@ -220,6 +220,30 @@ describe("PdfExportModal — export failure is announced (item 6)", () => {
   });
 });
 
+describe("PdfExportModal — export progress", () => {
+  beforeEach(resetSessionPdfOptions);
+
+  it("shows a determinate, labelled progress bar and numeric percentage", () => {
+    const markup = renderToStaticMarkup(
+      <PdfExportModal
+        model={demoModel()}
+        onClose={() => {}}
+        initialProgress={{
+          completed: 17,
+          total: 100,
+          label: "Rendering card faces 17 of 100…",
+        }}
+      />,
+    );
+    expect(markup).toContain('aria-label="PDF export progress"');
+    expect(markup).toContain('aria-valuetext="Rendering card faces 17 of 100…"');
+    expect(markup).toContain('value="17"');
+    expect(markup).toContain('max="100"');
+    expect(markup).toContain("17%");
+    expect(markup).toContain('role="status"');
+  });
+});
+
 describe("PdfExportModal — invalid margin/spacing is named, not signaled by color alone (item 7)", () => {
   beforeEach(resetSessionPdfOptions);
 

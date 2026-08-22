@@ -97,10 +97,7 @@ function drawPage(
   drawSegments(page, layoutPage.heightMm, layoutPage.crossMarks, options.crossMarks);
 
   if (options.pageNumbers && pageNumberFont !== undefined) {
-    const { xMm: boxX, yMm: boxTopY } = pageNumberBoxPosition(
-      layoutPage,
-      options.marginMm,
-    );
+    const { xMm: boxX, yMm: boxTopY } = pageNumberBoxPosition(layoutPage);
     const boxBottomY = yFlipMmToPt(
       layoutPage.heightMm,
       boxTopY,
@@ -109,17 +106,6 @@ function drawPage(
     const label = pageNumberLabel(layoutPage, sheetCount);
     const fontSize = PAGE_NUMBER_FONT_SIZE_MM * MM_TO_PT;
     const textWidth = pageNumberFont.widthOfTextAtSize(label, fontSize);
-    page.drawRectangle({
-      x: boxX * MM_TO_PT,
-      y: boxBottomY,
-      width: PAGE_NUMBER_BOX_WIDTH_MM * MM_TO_PT,
-      height: PAGE_NUMBER_BOX_HEIGHT_MM * MM_TO_PT,
-      color: rgb(1, 1, 1),
-      borderColor: rgb(0.35, 0.35, 0.35),
-      borderWidth: 0.2 * MM_TO_PT,
-      opacity: 0.94,
-      borderOpacity: 0.94,
-    });
     page.drawText(label, {
       x:
         (boxX + PAGE_NUMBER_BOX_WIDTH_MM - PAGE_NUMBER_PADDING_MM) * MM_TO_PT -
@@ -129,6 +115,31 @@ function drawPage(
       font: pageNumberFont,
       color: rgb(0.08, 0.08, 0.08),
     });
+  }
+}
+
+export type AssemblePdfPhase = "embedding" | "pages" | "saving";
+
+export interface AssemblePdfProgress {
+  phase: AssemblePdfPhase;
+  completed: number;
+  total: number;
+}
+
+export type ReportAssemblePdfProgress = (progress: AssemblePdfProgress) => void;
+
+/** Give React/browser paint a turn during large pdf-lib loops. Without a
+ * macrotask yield, dozens of progress state updates can be swallowed by one
+ * long task and the bar appears frozen even though callbacks are firing. */
+async function reportProgress(
+  report: ReportAssemblePdfProgress | undefined,
+  progress: AssemblePdfProgress,
+  forcePaint = false,
+): Promise<void> {
+  if (report === undefined) return;
+  report(progress);
+  if (forcePaint || (progress.completed > 0 && progress.completed % 4 === 0)) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
   }
 }
 
@@ -142,6 +153,7 @@ export async function assemblePdf(
   layout: PdfLayoutResult,
   images: ReadonlyMap<string, Uint8Array>,
   options: PdfExportOptions,
+  onProgress?: ReportAssemblePdfProgress,
 ): Promise<Uint8Array> {
   const doc = await PDFDocument.create();
   const pageNumberFont = options.pageNumbers
@@ -149,15 +161,42 @@ export async function assemblePdf(
     : undefined;
 
   const embedded = new Map<string, PDFImage>();
+  let embeddedCount = 0;
+  await reportProgress(
+    onProgress,
+    { phase: "embedding", completed: 0, total: layout.faceSpecs.size },
+    true,
+  );
   for (const [key] of layout.faceSpecs) {
     const bytes = images.get(key);
     if (!bytes) throw new Error(`pdfAssemble: missing PNG for face ${key}`);
     embedded.set(key, await doc.embedPng(bytes));
+    embeddedCount += 1;
+    await reportProgress(onProgress, {
+      phase: "embedding",
+      completed: embeddedCount,
+      total: layout.faceSpecs.size,
+    });
   }
 
+  let pageCount = 0;
+  await reportProgress(
+    onProgress,
+    { phase: "pages", completed: 0, total: layout.pages.length },
+    true,
+  );
   for (const layoutPage of layout.pages) {
     drawPage(doc, layoutPage, embedded, options, layout.sheetCount, pageNumberFont);
+    pageCount += 1;
+    await reportProgress(onProgress, {
+      phase: "pages",
+      completed: pageCount,
+      total: layout.pages.length,
+    });
   }
 
-  return doc.save();
+  await reportProgress(onProgress, { phase: "saving", completed: 0, total: 1 }, true);
+  const bytes = await doc.save();
+  await reportProgress(onProgress, { phase: "saving", completed: 1, total: 1 });
+  return bytes;
 }

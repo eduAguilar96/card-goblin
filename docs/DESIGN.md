@@ -961,15 +961,22 @@ warning has been enough in practice — §9.)
   (210×297 mm); outer margin mm (**10**); card spacing mm (**0**); cut lines
   **dotted**/off/red/bold; cross marks **off**/dotted/red/bold; backs
   **duplex**/none/separate; print page numbers off by default.
-- **Optional print pairing label (◆51):** a native PDF corner label reads
+- **Optional print pairing label (◆51):** a native PDF page label reads
   `k/N front` or `k/N back`. `N` counts logical front sheets across the project,
   and a matching front/back pair shares `k` even when Separate mode reorders all
-  backs after all fronts. The live page preview draws the same label. It is a page
-  layer, never part of a card raster.
+  backs after all fronts. The live page preview draws the same label. It is plain
+  page text, never part of a card raster, positioned immediately below the lowest
+  occupied card row and right-aligned to that row. It is deliberately never moved
+  back over artwork to stay printable: when a card grid consumes the full page,
+  the printer/PDF page may clip the label instead.
 - **Engine:** each *distinct* card face (by contentHash) is rasterized at 300 DPI
   through the browser's own SVG renderer (canvas → PNG) so fonts/ligatures match the
   preview exactly; each distinct image is embedded once and reused. Page frame,
   margins, and guides are native PDF vectors.
+- **Progress:** export shows a determinate progress bar across distinct-face
+  rasterization, PNG embedding, page construction, and final PDF serialization.
+  Assembly yields periodically to the browser so large exports repaint the bar
+  instead of batching every update behind one long main-thread task.
 - **Layout:** decks never share pages. cols = ⌊(pageW − 2·margin + spacing) /
   (cardW + spacing)⌋, rows analog; row-major fill; a deck whose card can't fit 1×1
   inside the margins is a modal-surfaced error. **Duplex:** after each front page,

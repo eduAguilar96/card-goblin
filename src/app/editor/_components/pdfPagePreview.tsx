@@ -67,7 +67,6 @@ export interface PdfPagePreviewProps {
   crossMarks: GuideStyle;
   pageNumbers: boolean;
   sheetCount: number;
-  marginMm: number;
 }
 
 export function PdfPagePreview({
@@ -77,7 +76,6 @@ export function PdfPagePreview({
   crossMarks,
   pageNumbers,
   sheetCount,
-  marginMm,
 }: PdfPagePreviewProps): ReactElement {
   return (
     <svg
@@ -117,7 +115,7 @@ export function PdfPagePreview({
       <Guides segments={page.cutLines} style={cutLines} />
       <Guides segments={page.crossMarks} style={crossMarks} />
       {pageNumbers && (
-        <PageNumber page={page} sheetCount={sheetCount} marginMm={marginMm} />
+        <PageNumber page={page} sheetCount={sheetCount} />
       )}
     </svg>
   );
@@ -126,25 +124,13 @@ export function PdfPagePreview({
 function PageNumber({
   page,
   sheetCount,
-  marginMm,
 }: {
   page: LayoutPage;
   sheetCount: number;
-  marginMm: number;
 }): ReactElement {
-  const { xMm: x, yMm: y } = pageNumberBoxPosition(page, marginMm);
+  const { xMm: x, yMm: y } = pageNumberBoxPosition(page);
   return (
     <g data-page-number>
-      <rect
-        x={x}
-        y={y}
-        width={PAGE_NUMBER_BOX_WIDTH_MM}
-        height={PAGE_NUMBER_BOX_HEIGHT_MM}
-        fill="#ffffff"
-        fillOpacity={0.94}
-        stroke="#595959"
-        strokeWidth={0.2}
-      />
       <text
         x={x + PAGE_NUMBER_BOX_WIDTH_MM - PAGE_NUMBER_PADDING_MM}
         y={y + PAGE_NUMBER_BOX_HEIGHT_MM - PAGE_NUMBER_PADDING_MM}

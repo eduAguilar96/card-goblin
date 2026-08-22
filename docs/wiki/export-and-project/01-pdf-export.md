@@ -33,7 +33,7 @@ rasterization: on paper the cards are images, here they're live vector art.
 | **Card spacing (mm)** | 0 | Gap between cards. `0` means neighbours share a cut line — less cutting, no margin for error. |
 | **Cut lines** | Dotted | Lines running edge to edge across the page at every card boundary. Also: off, red, bold. |
 | **Cross marks** | Off | Small crop crosses at card corners only. Also: dotted, red, bold. |
-| **Print page numbers** | Off | Adds a corner label such as `1/10 front` or `1/10 back`. A matching front/back pair shares its number, even in Separate mode. |
+| **Print page numbers** | Off | Adds plain text such as `1/10 front` or `1/10 back` immediately below the lowest card row. It never covers a card. A matching front/back pair shares its number, even in Separate mode. |
 
 Guide styles are: **dotted** (0.2 mm dotted black), **red** (0.2 mm solid, easy to see
 against dark art), **bold** (0.5 mm solid black).
@@ -51,7 +51,10 @@ Cut guides are drawn on back pages too, aligned to the mirrored grid.
 When **Print page numbers** is on, numbering counts physical card sheets rather than
 PDF pages. That is why matching sides say `1/10 front` and `1/10 back`: the label is
 meant to keep those two pages paired after printing. The live page preview shows the
-same label before export.
+same label before export. The label is placed below the final occupied card row and
+is never pulled back over artwork. If the card grid reaches the bottom of the page,
+the label can fall outside your printer's printable area or be clipped by the PDF
+page; increase the outer margin if you need the label to print.
 
 ## How it lays out
 
@@ -66,6 +69,9 @@ the export — reduce the margin or spacing, or choose a larger page.
 - Each **distinct** card face is rendered once at **300 DPI** through the browser's own
   renderer, so fonts and icon ligatures come out exactly as they look in the preview,
   then reused everywhere it appears. A `count: 10` card doesn't cost ten renders.
+- While exporting, a progress bar advances through card-face rendering, image
+  embedding, page construction, and final PDF saving. Large decks can still take a
+  while, but the current stage and percentage remain visible.
 - **Error placeholder cards are skipped.** If any exist, the modal warns you how many
   before you export. If *every* card is a placeholder there's nothing to print and
   export is blocked.

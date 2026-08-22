@@ -81,13 +81,14 @@ export const DEFAULT_PDF_OPTIONS: PdfExportOptions = {
   pageNumbers: false,
 };
 
-/** Shared native-PDF / modal-preview geometry for the optional label. */
+/** Shared native-PDF / modal-preview geometry for the optional label. The
+ * width/height describe its text area; the label has no painted background. */
 export const PAGE_NUMBER_BOX_WIDTH_MM = 30;
 export const PAGE_NUMBER_BOX_HEIGHT_MM = 6;
-export const PAGE_NUMBER_MIN_EDGE_MM = 3;
 export const PAGE_NUMBER_PADDING_MM = 1;
 export const PAGE_NUMBER_FONT_SIZE_MM = 2.8;
-const PAGE_NUMBER_MIN_VERTICAL_EDGE_MM = 2;
+/** Blank separation between the lowest card edge and the page label. */
+export const PAGE_NUMBER_GAP_MM = 1;
 
 /** Stroke spec of a non-"off" guide style (§6.1): dotted = 0.2 mm dotted
  * black; red = 0.2 mm solid #cc0000; bold = 0.5 mm solid black. Colors are
@@ -235,21 +236,28 @@ export function pageNumberLabel(page: LayoutPage, sheetCount: number): string {
   return `${page.sheetIndex + 1}/${sheetCount} ${page.side}`;
 }
 
-/** Top-left position for the label box. It stays inside the configured right
- * margin (important for non-borderless printers) and is vertically centered
- * in the bottom margin. Very small margins get a modest minimum inset. */
+/** Top-left position for the label's unpainted text area. It is right-aligned
+ * with the final occupied card row and starts BELOW that row's lower edge.
+ *
+ * Deliberately do not clamp it back onto the page: a full-height grid may put
+ * the label in a printer's unprintable area (or outside the PDF page, where it
+ * is clipped), but a print aid must never cover card artwork to save itself. */
 export function pageNumberBoxPosition(
-  page: Pick<LayoutPage, "widthMm" | "heightMm">,
-  marginMm: number,
+  page: Pick<LayoutPage, "cards">,
 ): { xMm: number; yMm: number } {
-  const rightInsetMm = Math.max(marginMm, PAGE_NUMBER_MIN_EDGE_MM);
-  const bottomBandMm = Math.max(
-    marginMm,
-    PAGE_NUMBER_BOX_HEIGHT_MM + 2 * PAGE_NUMBER_MIN_VERTICAL_EDGE_MM,
+  if (page.cards.length === 0) return { xMm: 0, yMm: PAGE_NUMBER_GAP_MM };
+  const lowerEdgeMm = Math.max(...page.cards.map((card) => card.yMm + card.heightMm));
+  const rightEdgeMm = Math.max(
+    ...page.cards
+      .filter(
+        (card) =>
+          Math.abs(card.yMm + card.heightMm - lowerEdgeMm) <= COINCIDE_EPSILON,
+      )
+      .map((card) => card.xMm + card.widthMm),
   );
   return {
-    xMm: page.widthMm - rightInsetMm - PAGE_NUMBER_BOX_WIDTH_MM,
-    yMm: page.heightMm - (bottomBandMm + PAGE_NUMBER_BOX_HEIGHT_MM) / 2,
+    xMm: rightEdgeMm - PAGE_NUMBER_BOX_WIDTH_MM,
+    yMm: lowerEdgeMm + PAGE_NUMBER_GAP_MM,
   };
 }
 

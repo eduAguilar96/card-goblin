@@ -69,13 +69,22 @@ import { assetStore, type AssetChangeEvent } from "@/app/editor/_store/assetStor
 /** §6.1: rasterize at 300 DPI — px = mm × 300 / 25.4. */
 export const RASTER_DPI = 300;
 
+export interface RasterizeFacesProgress {
+  completed: number;
+  total: number;
+}
+
+export type ReportRasterizeFacesProgress = (progress: RasterizeFacesProgress) => void;
+
 /** The injection seam: the export flow (pdfExportModal) takes one of these;
  * the app passes `rasterizeFaces`, tests pass a stub. `images` carries the
  * modal's pre-flight resolutions (§3.3 M2 — URL → data URI, null = failed);
- * omitted, the rasterizer resolves the specs' URLs itself. */
+ * omitted, the rasterizer resolves the specs' URLs itself. Progress reports
+ * one completed unit per distinct 300 DPI face. */
 export type RasterizeFaces = (
   specs: ReadonlyMap<string, FaceRasterSpec>,
   images?: ResolvedImages,
+  onProgress?: ReportRasterizeFacesProgress,
 ) => Promise<Map<string, Uint8Array>>;
 
 // ---------------------------------------------------------------------------
@@ -691,7 +700,7 @@ async function rasterizeOne(
  * ~750×1050 px, and one canvas at a time keeps memory flat on 500-card decks
  * (copies share faces, so distinct faces stay small).
  */
-export const rasterizeFaces: RasterizeFaces = async (specs, images) => {
+export const rasterizeFaces: RasterizeFaces = async (specs, images, onProgress) => {
   await document.fonts.ready;
   const fontCss = await getFontEmbedCss(specs);
   // Image sources must arrive as data URIs (the img document fetches
@@ -700,8 +709,12 @@ export const rasterizeFaces: RasterizeFaces = async (specs, images) => {
   // export — or resolve here (cache-backed, so this is cheap either way).
   const resolved = images ?? (await resolveImageSources(imageUrlsUsed(specs)));
   const out = new Map<string, Uint8Array>();
+  let completed = 0;
+  onProgress?.({ completed, total: specs.size });
   for (const [key, spec] of specs) {
     out.set(key, await rasterizeOne(spec, fontCss, resolved));
+    completed += 1;
+    onProgress?.({ completed, total: specs.size });
   }
   return out;
 };
